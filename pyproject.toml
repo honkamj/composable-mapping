@@ -1,0 +1,36 @@
+[project]
+name = "composable-mapping"
+version = "0.0.1"
+authors = [
+  { name="Joel Honkamaa" },
+]
+description = "Composable mapping is a PyTorch utility library for handling geometric deformations"
+readme = "description.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "torch>=1.10",
+    "deformation_inversion_layer>=1.1.2"
+]
+keywords=[
+    "deep learning",
+    "neural networks",
+    "image registration",
+    "deformation",
+    "coordinate mapping",
+    "pytorch"
+]
+license = {file = "LICENSE"}
+
+[project.urls]
+"Homepage" = "https://github.com/honkamj/composable-mapping"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"deformation_inversion_layer" = ["py.typed"]

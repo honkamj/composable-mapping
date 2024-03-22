@@ -1,0 +1,18 @@
+channels:
+  - defaults
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.8
+  - pytorch::pytorch-cuda=11.7
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pytorch::pytorch=1.10
+  - ipykernel
+  - matplotlib
+  - mypy
+  - pylint
+  - isort
+  - twine
+  - pip:
+    - deformation-inversion-layer >= 1.1.2
