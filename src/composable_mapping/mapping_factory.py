@@ -128,7 +128,8 @@ class SamplableComposableFactory(_BaseComposableFactory):
     ) -> SamplableComposable:
         """Create samplable identity mapping
 
-        Data type and device need to be provided only if coordinate system is not provided
+        Data type and device have effect only if coordinate system factory, not
+        coordinate system, is available.
         """
         return SamplableComposable(
             ComposableIdentity(),
@@ -144,7 +145,8 @@ class SamplableComposableFactory(_BaseComposableFactory):
     ) -> SamplableComposable:
         """Create samplable identity mapping
 
-        Data type and device needed are inferred from the reference.
+        Data type and device for creating the coordinate system are inferred
+        from the reference if coordinate system factory is available.
         """
         return SamplableComposable(
             ComposableIdentity(),
