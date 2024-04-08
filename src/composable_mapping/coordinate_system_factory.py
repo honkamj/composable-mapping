@@ -1,5 +1,6 @@
 """Factory functions for creating coordinate systems"""
 
+from abc import ABC, abstractmethod
 from typing import Optional, Sequence, Tuple
 
 from torch import Tensor
@@ -12,6 +13,156 @@ from composable_mapping.voxel_coordinate_system import VoxelCoordinateSystem
 
 from .affine import ComposableAffine, CPUAffineTransformation
 from .masked_tensor import VoxelCoordinateGrid
+
+
+class ICoordinateSystemFactory(ABC):
+    """Factory for creating coordinate systems given dtype and device"""
+
+    @abstractmethod
+    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+        """Create coordinate system"""
+
+
+class CenteredNormalizedFactory(ICoordinateSystemFactory):
+    """Factory for creating centered normalized coordinate systems"""
+
+    def __init__(
+        self,
+        original_grid_shape: Sequence[int],
+        original_voxel_size: Optional[Sequence[float]] = None,
+        grid_shape: Optional[Sequence[int]] = None,
+        voxel_size: Optional[Sequence[float]] = None,
+        downsampling_factor: Optional[Sequence[float]] = None,
+        center_coordinate: Optional[Sequence[float]] = None,
+    ):
+        self.original_grid_shape = original_grid_shape
+        self.original_voxel_size = original_voxel_size
+        self.grid_shape = grid_shape
+        self.voxel_size = voxel_size
+        self.downsampling_factor = downsampling_factor
+        self.center_coordinate = center_coordinate
+
+    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+        return create_centered_normalized(
+            original_grid_shape=self.original_grid_shape,
+            original_voxel_size=self.original_voxel_size,
+            grid_shape=self.grid_shape,
+            voxel_size=self.voxel_size,
+            downsampling_factor=self.downsampling_factor,
+            center_coordinate=self.center_coordinate,
+            dtype=dtype,
+            device=device,
+        )
+
+
+class TopLeftAlignedNormalizedFactory(ICoordinateSystemFactory):
+    """Factory for creating top left aligned normalized coordinate systems"""
+
+    def __init__(
+        self,
+        original_grid_shape: Sequence[int],
+        original_voxel_size: Optional[Sequence[float]] = None,
+        grid_shape: Optional[Sequence[int]] = None,
+        voxel_size: Optional[Sequence[float]] = None,
+        downsampling_factor: Optional[Sequence[float]] = None,
+    ):
+        self.original_grid_shape = original_grid_shape
+        self.original_voxel_size = original_voxel_size
+        self.grid_shape = grid_shape
+        self.voxel_size = voxel_size
+        self.downsampling_factor = downsampling_factor
+
+    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+        return create_top_left_aligned_normalized(
+            original_grid_shape=self.original_grid_shape,
+            original_voxel_size=self.original_voxel_size,
+            grid_shape=self.grid_shape,
+            voxel_size=self.voxel_size,
+            downsampling_factor=self.downsampling_factor,
+            dtype=dtype,
+            device=device,
+        )
+
+
+class CenteredFactory(ICoordinateSystemFactory):
+    """Factory for creating centered coordinate systems"""
+
+    def __init__(
+        self,
+        original_grid_shape: Sequence[int],
+        original_voxel_size: Optional[Sequence[float]] = None,
+        grid_shape: Optional[Sequence[int]] = None,
+        voxel_size: Optional[Sequence[float]] = None,
+        downsampling_factor: Optional[Sequence[float]] = None,
+        center_coordinate: Optional[Sequence[float]] = None,
+    ):
+        self.original_grid_shape = original_grid_shape
+        self.original_voxel_size = original_voxel_size
+        self.grid_shape = grid_shape
+        self.voxel_size = voxel_size
+        self.downsampling_factor = downsampling_factor
+        self.center_coordinate = center_coordinate
+
+    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+        return create_centered(
+            original_grid_shape=self.original_grid_shape,
+            original_voxel_size=self.original_voxel_size,
+            grid_shape=self.grid_shape,
+            voxel_size=self.voxel_size,
+            downsampling_factor=self.downsampling_factor,
+            center_coordinate=self.center_coordinate,
+            dtype=dtype,
+            device=device,
+        )
+
+
+class TopLeftAlignedFactory(ICoordinateSystemFactory):
+    """Factory for creating top left aligned coordinate systems"""
+
+    def __init__(
+        self,
+        original_grid_shape: Sequence[int],
+        original_voxel_size: Optional[Sequence[float]] = None,
+        grid_shape: Optional[Sequence[int]] = None,
+        voxel_size: Optional[Sequence[float]] = None,
+        downsampling_factor: Optional[Sequence[float]] = None,
+    ):
+        self.original_grid_shape = original_grid_shape
+        self.original_voxel_size = original_voxel_size
+        self.grid_shape = grid_shape
+        self.voxel_size = voxel_size
+        self.downsampling_factor = downsampling_factor
+
+    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+        return create_top_left_aligned(
+            original_grid_shape=self.original_grid_shape,
+            original_voxel_size=self.original_voxel_size,
+            grid_shape=self.grid_shape,
+            voxel_size=self.voxel_size,
+            downsampling_factor=self.downsampling_factor,
+            dtype=dtype,
+            device=device,
+        )
+
+
+class VoxelFactory(ICoordinateSystemFactory):
+    """Factory for creating voxel coordinate systems"""
+
+    def __init__(
+        self,
+        grid_shape: Sequence[int],
+        voxel_size: Optional[Sequence[float]] = None,
+    ):
+        self.grid_shape = grid_shape
+        self.voxel_size = voxel_size
+
+    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+        return create_voxel(
+            grid_shape=self.grid_shape,
+            voxel_size=self.voxel_size,
+            dtype=dtype,
+            device=device,
+        )
 
 
 def create_centered_normalized(
@@ -29,19 +180,23 @@ def create_centered_normalized(
     Origin is in the middle of the voxel space and voxels are assumed to be
     squares with the sampled value in the middle.
 
-    Coordinates are scaled such that the whole FOV fits inside values from
-    -1 to 1 for the hypothetical original grid assuming downsampling factor
-    1.0. The actual grid then has voxel size of the original grid multiplied by
-    the downsampling factor and is located in the middle with respect to the
-    the original grid.
+    Coordinates are scaled such that the whole FOV fits inside values from -1 to
+    1 for the hypothetical original grid. The actual grid then has voxel size of
+    the original grid multiplied by the downsampling factor and is located in
+    the middle with respect to the the original grid.
 
-    Arguments:
-        original_grid_shape: Shape of the hypothetical grid
+    Args:
+        original_grid_shape: Shape of the hypothetical original grid
+        original_voxel_size: Voxel size of the hypothetical original grid
         grid_shape: Shape of the actual grid, defaults to original_grid_shape
-        voxel_size: Voxel size of the coordinate grid, only relative
-            differences have meaning
+        voxel_size: Voxel size of the actual grid, assumed to equal the
+            original_voxel size if not given.
         downsampling_factor: Downsampling factor of the actual grid compared
             to the original grid, defaults to no scaling.
+        center_coordinate: Center coordinate of the actual grid with respect to
+            the hypothetical original grid
+        dtype: Data type of the coordinate system
+        device: Device of th coordinate system
     """
     original_voxel_size, voxel_size, grid_shape = _handle_optional_inputs(
         original_grid_shape=original_grid_shape,
@@ -86,19 +241,21 @@ def create_top_left_aligned_normalized(
 
     Voxels are assumed to be squares with the sampled value in the middle.
 
-    Coordinates are scaled such that the whole FOV fits inside values from
-    -1 to 1 for the hypothetical original grid assuming downsampling factor
-    1.0. Original grid is centered. The actual grid then has voxel size of
+    Coordinates are scaled such that the whole FOV fits inside values from -1 to
+    1 for the hypothetical original grid. The actual grid then has voxel size of
     the original grid multiplied by the downsampling factor and top-left corner
     is aligned with the original grid.
 
-    Arguments:
-        original_grid_shape: Shape of the hypothetical grid
+    Args:
+        original_grid_shape: Shape of the hypothetical original grid
+        original_voxel_size: Voxel size of the hypothetical original grid
         grid_shape: Shape of the actual grid, defaults to original_grid_shape
-        voxel_size: Voxel size of the coordinate grid, only relative
-            differences have meaning
+        voxel_size: Voxel size of the actual grid, assumed to equal the
+            original_voxel size if not given.
         downsampling_factor: Downsampling factor of the actual grid compared
             to the original grid, defaults to no scaling.
+        dtype: Data type of the coordinate system
+        device: Device of th coordinate system
     """
     original_voxel_size, voxel_size, grid_shape = _handle_optional_inputs(
         original_grid_shape=original_grid_shape,
@@ -142,16 +299,20 @@ def create_centered(
     Origin is in the middle of the voxel space.
 
     The actual grid then has voxel size of the original grid multiplied by
-    the downsampling factor and top-left corner is aligned with the original
-    grid.
+    the downsampling factor.
 
-    Arguments:
-        original_grid_shape: Shape of the hypothetical grid
+    Args:
+        original_grid_shape: Shape of the hypothetical original grid
+        original_voxel_size: Voxel size of the hypothetical original grid
         grid_shape: Shape of the actual grid, defaults to original_grid_shape
-        voxel_size: Voxel size of the coordinate grid, only relative
-            differences have meaning
+        voxel_size: Voxel size of the actual grid, assumed to equal the
+            original_voxel size if not given.
         downsampling_factor: Downsampling factor of the actual grid compared
             to the original grid, defaults to no scaling.
+        center_coordinate: Center coordinate of the actual grid with respect to
+            the hypothetical original grid
+        dtype: Data type of the coordinate system
+        device: Device of th coordinate system
     """
     original_voxel_size, voxel_size, grid_shape = _handle_optional_inputs(
         original_grid_shape=original_grid_shape,
@@ -196,12 +357,16 @@ def create_top_left_aligned(
     the downsampling factor and top-left corner is aligned with the original
     grid.
 
-    Arguments:
-        original_grid_shape: Shape of the hypothetical grid
+    Args:
+        original_grid_shape: Shape of the hypothetical original grid
+        original_voxel_size: Voxel size of the hypothetical original grid
         grid_shape: Shape of the actual grid, defaults to original_grid_shape
-        voxel_size: Voxel size of the coordinate grid
+        voxel_size: Voxel size of the actual grid, assumed to equal the
+            original_voxel size if not given.
         downsampling_factor: Downsampling factor of the actual grid compared
             to the original grid, defaults to no scaling.
+        dtype: Data type of the coordinate system
+        device: Device of th coordinate system
     """
     original_voxel_size, voxel_size, grid_shape = _handle_optional_inputs(
         original_grid_shape=original_grid_shape,
@@ -228,7 +393,14 @@ def create_voxel(
     dtype: Optional[torch_dtype] = None,
     device: Optional[torch_device] = None,
 ) -> VoxelCoordinateSystem:
-    """Create voxel coordinate system"""
+    """Create voxel coordinate system
+
+    Args
+        grid_shape: Shape of the grid
+        voxel_size: Voxel size of the grid
+        dtype: Data type of the coordinate system
+        device: Device of th coordinate system
+    """
     if voxel_size is None:
         voxel_size = [1.0] * len(grid_shape)
     return _generate_coordinate_system(
