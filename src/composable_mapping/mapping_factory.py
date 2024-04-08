@@ -1,6 +1,6 @@
 """Factory methods for generating useful composable mappings"""
 
-from typing import Optional
+from typing import Optional, Union
 
 from torch import Tensor
 from torch import device as torch_device
@@ -140,7 +140,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
 
     def create_identity_from(
         self,
-        reference: ITensorLike,
+        reference: Union[ITensorLike, Tensor],
         is_deformation: bool = True,
     ) -> SamplableComposable:
         """Create samplable identity mapping
