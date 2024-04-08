@@ -1,6 +1,5 @@
 """Factory functions for creating coordinate systems"""
 
-from abc import ABC, abstractmethod
 from typing import Optional, Sequence, Tuple
 
 from torch import Tensor
@@ -9,21 +8,13 @@ from torch import diag
 from torch import dtype as torch_dtype
 from torch import tensor
 
-from composable_mapping.voxel_coordinate_system import VoxelCoordinateSystem
-
 from .affine import ComposableAffine, CPUAffineTransformation
+from .interface import IVoxelCoordinateSystemFactory
 from .masked_tensor import VoxelCoordinateGrid
+from .voxel_coordinate_system import VoxelCoordinateSystem
 
 
-class ICoordinateSystemFactory(ABC):
-    """Factory for creating coordinate systems given dtype and device"""
-
-    @abstractmethod
-    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
-        """Create coordinate system"""
-
-
-class CenteredNormalizedFactory(ICoordinateSystemFactory):
+class CenteredNormalizedFactory(IVoxelCoordinateSystemFactory):
     """Factory for creating centered normalized coordinate systems"""
 
     def __init__(
@@ -55,7 +46,7 @@ class CenteredNormalizedFactory(ICoordinateSystemFactory):
         )
 
 
-class TopLeftAlignedNormalizedFactory(ICoordinateSystemFactory):
+class TopLeftAlignedNormalizedFactory(IVoxelCoordinateSystemFactory):
     """Factory for creating top left aligned normalized coordinate systems"""
 
     def __init__(
@@ -84,7 +75,7 @@ class TopLeftAlignedNormalizedFactory(ICoordinateSystemFactory):
         )
 
 
-class CenteredFactory(ICoordinateSystemFactory):
+class CenteredFactory(IVoxelCoordinateSystemFactory):
     """Factory for creating centered coordinate systems"""
 
     def __init__(
@@ -116,7 +107,7 @@ class CenteredFactory(ICoordinateSystemFactory):
         )
 
 
-class TopLeftAlignedFactory(ICoordinateSystemFactory):
+class TopLeftAlignedFactory(IVoxelCoordinateSystemFactory):
     """Factory for creating top left aligned coordinate systems"""
 
     def __init__(
@@ -145,7 +136,7 @@ class TopLeftAlignedFactory(ICoordinateSystemFactory):
         )
 
 
-class VoxelFactory(ICoordinateSystemFactory):
+class VoxelFactory(IVoxelCoordinateSystemFactory):
     """Factory for creating voxel coordinate systems"""
 
     def __init__(

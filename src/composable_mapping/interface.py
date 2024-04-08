@@ -229,3 +229,13 @@ class IVoxelCoordinateSystem(ITensorLike):
     @abstractmethod
     def grid_spacing(self) -> Sequence[float]:
         """Spacing of the grid"""
+
+
+class IVoxelCoordinateSystemFactory(ABC):
+    """Factory for creating coordinate systems given dtype and device"""
+
+    @abstractmethod
+    def create(
+        self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
+    ) -> IVoxelCoordinateSystem:
+        """Create coordinate system"""
