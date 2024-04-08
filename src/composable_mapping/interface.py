@@ -232,10 +232,10 @@ class IVoxelCoordinateSystem(ITensorLike):
 
 
 class IVoxelCoordinateSystemFactory(ABC):
-    """Factory for creating coordinate systems given dtype and device"""
+    """Factory for creating voxel coordinate systems"""
 
     @abstractmethod
     def create(
         self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
     ) -> IVoxelCoordinateSystem:
-        """Create coordinate system"""
+        """Create voxel coordinate system with given dtype on given device"""

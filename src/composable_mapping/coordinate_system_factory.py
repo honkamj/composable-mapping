@@ -1,21 +1,59 @@
 """Factory functions for creating coordinate systems"""
 
-from typing import Optional, Sequence, Tuple
+from abc import abstractmethod
+from typing import Dict, Optional, Sequence, Tuple
 
 from torch import Tensor
 from torch import device as torch_device
 from torch import diag
 from torch import dtype as torch_dtype
-from torch import tensor
+from torch import get_default_dtype, tensor
 
 from .affine import ComposableAffine, CPUAffineTransformation
-from .interface import IVoxelCoordinateSystemFactory
+from .interface import IVoxelCoordinateSystem, IVoxelCoordinateSystemFactory
 from .masked_tensor import VoxelCoordinateGrid
 from .voxel_coordinate_system import VoxelCoordinateSystem
 
 
-class CenteredNormalizedFactory(IVoxelCoordinateSystemFactory):
-    """Factory for creating centered normalized coordinate systems"""
+class BaseVoxelCoordinateSystemFactory(IVoxelCoordinateSystemFactory):
+    """Base factory for creating voxel coordinate systems
+
+    Implements caching of coordinate systems if cache is enabled
+    """
+
+    def __init__(self, cache: bool = False):
+        self._cache = cache
+        if cache:
+            self._coordinate_system_cache: Dict[
+                Tuple[torch_dtype, torch_device], IVoxelCoordinateSystem
+            ] = {}
+
+    def create(
+        self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
+    ) -> IVoxelCoordinateSystem:
+        if dtype is None:
+            dtype = get_default_dtype()
+        if device is None:
+            device = torch_device("cpu")
+        if self._cache:
+            if (dtype, device) not in self._coordinate_system_cache:
+                self._coordinate_system_cache[(dtype, device)] = self._create(
+                    dtype=dtype, device=device
+                )
+            return self._coordinate_system_cache[(dtype, device)]
+        return self._create(dtype=dtype, device=device)
+
+    @abstractmethod
+    def _create(self, dtype: torch_dtype, device: torch_device) -> IVoxelCoordinateSystem:
+        """Create voxel coordinate system with given dtype on given device"""
+
+
+class CenteredNormalizedFactory(BaseVoxelCoordinateSystemFactory):
+    """Factory for creating centered normalized coordinate systems
+
+    Arguments:
+        See create_centered_normalized
+    """
 
     def __init__(
         self,
@@ -25,7 +63,9 @@ class CenteredNormalizedFactory(IVoxelCoordinateSystemFactory):
         voxel_size: Optional[Sequence[float]] = None,
         downsampling_factor: Optional[Sequence[float]] = None,
         center_coordinate: Optional[Sequence[float]] = None,
+        cache: bool = False,
     ):
+        super().__init__(cache=cache)
         self.original_grid_shape = original_grid_shape
         self.original_voxel_size = original_voxel_size
         self.grid_shape = grid_shape
@@ -33,7 +73,7 @@ class CenteredNormalizedFactory(IVoxelCoordinateSystemFactory):
         self.downsampling_factor = downsampling_factor
         self.center_coordinate = center_coordinate
 
-    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
         return create_centered_normalized(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -46,8 +86,12 @@ class CenteredNormalizedFactory(IVoxelCoordinateSystemFactory):
         )
 
 
-class TopLeftAlignedNormalizedFactory(IVoxelCoordinateSystemFactory):
-    """Factory for creating top left aligned normalized coordinate systems"""
+class TopLeftAlignedNormalizedFactory(BaseVoxelCoordinateSystemFactory):
+    """Factory for creating top left aligned normalized coordinate systems
+
+    Arguments:
+        See create_top_left_aligned_normalized
+    """
 
     def __init__(
         self,
@@ -56,14 +100,16 @@ class TopLeftAlignedNormalizedFactory(IVoxelCoordinateSystemFactory):
         grid_shape: Optional[Sequence[int]] = None,
         voxel_size: Optional[Sequence[float]] = None,
         downsampling_factor: Optional[Sequence[float]] = None,
+        cache: bool = False,
     ):
+        super().__init__(cache=cache)
         self.original_grid_shape = original_grid_shape
         self.original_voxel_size = original_voxel_size
         self.grid_shape = grid_shape
         self.voxel_size = voxel_size
         self.downsampling_factor = downsampling_factor
 
-    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
         return create_top_left_aligned_normalized(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -75,8 +121,12 @@ class TopLeftAlignedNormalizedFactory(IVoxelCoordinateSystemFactory):
         )
 
 
-class CenteredFactory(IVoxelCoordinateSystemFactory):
-    """Factory for creating centered coordinate systems"""
+class CenteredFactory(BaseVoxelCoordinateSystemFactory):
+    """Factory for creating centered coordinate systems
+
+    Arguments:
+        See create_centered
+    """
 
     def __init__(
         self,
@@ -86,7 +136,9 @@ class CenteredFactory(IVoxelCoordinateSystemFactory):
         voxel_size: Optional[Sequence[float]] = None,
         downsampling_factor: Optional[Sequence[float]] = None,
         center_coordinate: Optional[Sequence[float]] = None,
+        cache: bool = False,
     ):
+        super().__init__(cache=cache)
         self.original_grid_shape = original_grid_shape
         self.original_voxel_size = original_voxel_size
         self.grid_shape = grid_shape
@@ -94,7 +146,7 @@ class CenteredFactory(IVoxelCoordinateSystemFactory):
         self.downsampling_factor = downsampling_factor
         self.center_coordinate = center_coordinate
 
-    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
         return create_centered(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -107,8 +159,12 @@ class CenteredFactory(IVoxelCoordinateSystemFactory):
         )
 
 
-class TopLeftAlignedFactory(IVoxelCoordinateSystemFactory):
-    """Factory for creating top left aligned coordinate systems"""
+class TopLeftAlignedFactory(BaseVoxelCoordinateSystemFactory):
+    """Factory for creating top left aligned coordinate systems
+
+    Arguments:
+        See create_top_left_aligned
+    """
 
     def __init__(
         self,
@@ -117,14 +173,16 @@ class TopLeftAlignedFactory(IVoxelCoordinateSystemFactory):
         grid_shape: Optional[Sequence[int]] = None,
         voxel_size: Optional[Sequence[float]] = None,
         downsampling_factor: Optional[Sequence[float]] = None,
+        cache: bool = False,
     ):
+        super().__init__(cache=cache)
         self.original_grid_shape = original_grid_shape
         self.original_voxel_size = original_voxel_size
         self.grid_shape = grid_shape
         self.voxel_size = voxel_size
         self.downsampling_factor = downsampling_factor
 
-    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
         return create_top_left_aligned(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -136,18 +194,24 @@ class TopLeftAlignedFactory(IVoxelCoordinateSystemFactory):
         )
 
 
-class VoxelFactory(IVoxelCoordinateSystemFactory):
-    """Factory for creating voxel coordinate systems"""
+class VoxelFactory(BaseVoxelCoordinateSystemFactory):
+    """Factory for creating voxel coordinate systems
+
+    Arguments:
+        See create_voxel
+    """
 
     def __init__(
         self,
         grid_shape: Sequence[int],
         voxel_size: Optional[Sequence[float]] = None,
+        cache: bool = False,
     ):
+        super().__init__(cache=cache)
         self.grid_shape = grid_shape
         self.voxel_size = voxel_size
 
-    def create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
         return create_voxel(
             grid_shape=self.grid_shape,
             voxel_size=self.voxel_size,

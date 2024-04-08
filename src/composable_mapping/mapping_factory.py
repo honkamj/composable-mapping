@@ -1,6 +1,6 @@
 """Factory methods for generating useful composable mappings"""
 
-from typing import Optional, Union
+from typing import Optional
 
 from torch import Tensor
 from torch import device as torch_device
@@ -132,7 +132,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
         coordinate system, is available.
         """
         return SamplableComposable(
-            ComposableIdentity(),
+            create_composable_identity(),
             coordinate_system=self._obtain_coordinate_system(dtype=dtype, device=device),
             grid_mapping_args=self.grid_mapping_args,
             is_deformation=is_deformation,
@@ -140,7 +140,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
 
     def create_identity_from(
         self,
-        reference: Union[ITensorLike, Tensor],
+        reference: ITensorLike,
         is_deformation: bool = True,
     ) -> SamplableComposable:
         """Create samplable identity mapping
@@ -149,13 +149,30 @@ class SamplableComposableFactory(_BaseComposableFactory):
         from the reference if coordinate system factory is available.
         """
         return SamplableComposable(
-            ComposableIdentity(),
+            create_composable_identity(),
             coordinate_system=self._obtain_coordinate_system(
                 dtype=reference.dtype, device=reference.device
             ),
             grid_mapping_args=self.grid_mapping_args,
             is_deformation=is_deformation,
         )
+
+
+def create_samplable_identity_from(
+    reference: SamplableComposable,
+    is_deformation: bool = True,
+) -> SamplableComposable:
+    """Create samplable identity mapping
+
+    Data type and device for creating the coordinate system are inferred
+    from the reference if coordinate system factory is available.
+    """
+    return SamplableComposable(
+        create_composable_identity(),
+        coordinate_system=reference.coordinate_system,
+        grid_mapping_args=reference.grid_mapping_args,
+        is_deformation=is_deformation,
+    )
 
 
 class GridComposableFactory(_BaseComposableFactory):
