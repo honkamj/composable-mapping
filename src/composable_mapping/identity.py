@@ -30,3 +30,6 @@ class ComposableIdentity(BaseComposableMapping):
 
     def detach(self) -> "ComposableIdentity":
         return self
+
+    def __repr__(self) -> str:
+        return "ComposableIdentity()"

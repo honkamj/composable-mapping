@@ -50,6 +50,9 @@ class RectangleMask(BaseComposableMapping):
     def detach(self) -> "RectangleMask":
         return self
 
+    def __repr__(self) -> str:
+        return f"RectangleMask(min_values={self._min_values}, max_values={self._max_values})"
+
 
 class ClearMask(BaseComposableMapping):
     """Clear mask"""
@@ -73,3 +76,6 @@ class ClearMask(BaseComposableMapping):
 
     def detach(self) -> "ClearMask":
         return self
+
+    def __repr__(self) -> str:
+        return "ClearMask()"

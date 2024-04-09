@@ -14,7 +14,8 @@ classifiers = [
 ]
 dependencies = [
     "torch>=1.10",
-    "deformation_inversion_layer>=1.1.2"
+    "deformation_inversion_layer>=1.1.2",
+    "matplotlib"
 ]
 keywords=[
     "deep learning",

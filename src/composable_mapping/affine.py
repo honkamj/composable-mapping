@@ -90,6 +90,9 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
             - 1
         )
 
+    def __repr__(self) -> str:
+        return f"AffineTransformation(transformation_matrix={self._transformation_matrix})"
+
 
 class IdentityAffineTransformation(BaseAffineTransformation):
     """Identity transformation"""
@@ -150,6 +153,14 @@ class IdentityAffineTransformation(BaseAffineTransformation):
     @property
     def n_dims(self) -> int:
         return self._n_dims
+
+    def __repr__(self) -> str:
+        return (
+            f"IdentityAffineTransformation("
+            f"n_dims={self._n_dims}, "
+            f"dtype={self._dtype}, "
+            f"device={self._device})"
+        )
 
 
 class CPUAffineTransformation(BaseAffineTransformation):
@@ -281,6 +292,14 @@ class CPUAffineTransformation(BaseAffineTransformation):
             device=self._device if device is None else device,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"CPUAffineTransformation("
+            f"transformation_matrix_cpu={self._transformation_matrix_cpu}, "
+            f"device={self._device}, "
+            f"pin_memory={self._transformation_matrix_cpu.is_pinned()})"
+        )
+
 
 class _CPUAffineTransformationInverse(CPUAffineTransformation):
     def __init__(
@@ -311,6 +330,13 @@ class _CPUAffineTransformationInverse(CPUAffineTransformation):
         self,
     ) -> Tensor:
         return channels_last(2, 2)(inverse)(self._transformation_to_invert.as_matrix())
+
+    def __repr__(self) -> str:
+        return (
+            f"_CPUAffineTransformationInverse("
+            f"inverted_transformation_matrix_cpu={self._transformation_matrix_cpu}, "
+            f"transformation_to_invert={self._transformation_to_invert})"
+        )
 
 
 class _CPUAffineTransformationComposition(CPUAffineTransformation):
@@ -348,6 +374,14 @@ class _CPUAffineTransformationComposition(CPUAffineTransformation):
             self._left_transformation.as_matrix(), self._right_transformation.as_matrix()
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"_CPUAffineTransformationComposition("
+            f"compsed_transformation_matrix_cpu={self._transformation_matrix_cpu}, "
+            f"left_transformation={self._left_transformation}, "
+            f"right_transformation={self._right_transformation})"
+        )
+
 
 class ComposableAffine(BaseComposableMapping):
     """Composable wrapper for affine transformations"""
@@ -373,6 +407,9 @@ class ComposableAffine(BaseComposableMapping):
 
     def invert(self, **inversion_parameters) -> IComposableMapping:
         return ComposableAffine(self._affine_transformation.invert())
+
+    def __repr__(self) -> str:
+        return f"ComposableAffine(affine_transformation={self._affine_transformation})"
 
 
 def as_affine_transformation(
@@ -458,6 +495,13 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
             "the traced mapping is not affine."
         )
 
+    @property
+    def spatial_shape(self) -> Sequence[int]:
+        raise RuntimeError(
+            "Affine tracer has no spatial shape! Usually this error means that "
+            "the traced mapping is not affine."
+        )
+
     def clear_mask(self) -> "_AffineTracer":
         return self
 
@@ -469,6 +513,9 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
 
     def reduce(self) -> IMaskedTensor:
         return _AffineTracer(IdentityAffineTransformation(self.affine_transformation.n_dims))
+
+    def __repr__(self) -> str:
+        return f"_AffineTracer(affine_transformation={self.affine_transformation})"
 
 
 def compose_affine_transformation_matrices(

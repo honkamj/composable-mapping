@@ -518,5 +518,4 @@ class ComposableFactoryTests(TestCase):
         ]
         for coordinate_system, grid in zip(coordinate_systems, correct_grids):
             generated_grid = coordinate_system.grid.generate_values()
-            print(generated_grid)
             assert_close(generated_grid, grid[None])

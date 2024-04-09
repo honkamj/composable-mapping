@@ -46,6 +46,14 @@ class GridMappingArgs:
         self.mask_outside_fov = mask_outside_fov
         self.mask_threshold = mask_threshold
 
+    def __repr__(self) -> str:
+        return (
+            f"GridMappingArgs(interpolator={self.interpolator}, "
+            f"mask_interpolator={self.mask_interpolator}, "
+            f"mask_outside_fov={self.mask_outside_fov}, "
+            f"mask_threshold={self.mask_threshold})"
+        )
+
 
 class GridVolume(BaseComposableMapping):
     """Continuously defined volume on voxel coordinates based on
@@ -147,6 +155,12 @@ class GridVolume(BaseComposableMapping):
     def invert(self, **kwargs) -> IComposableMapping:
         raise NotImplementedError("No inversion implemented for grid volumes")
 
+    def __repr__(self) -> str:
+        return (
+            f"GridVolume(data={self._data}, grid_mapping_args={self._grid_mapping_args}, "
+            f"mask={self._mask}, n_channel_dims={self._n_channel_dims})"
+        )
+
 
 class GridCoordinateMapping(GridVolume):
     """Continuously defined mapping based on regular grid samples
@@ -230,6 +244,12 @@ class GridCoordinateMapping(GridVolume):
             mask=self._mask,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"GridCoordinateMapping(displacement_field={self._data}, "
+            f"grid_mapping_args={self._grid_mapping_args}, mask={self._mask})"
+        )
+
 
 class _GridCoordinateMappingInverse(GridCoordinateMapping):
     """Inverse of a continuously defined mapping based on regular grid samples
@@ -283,6 +303,12 @@ class _GridCoordinateMappingInverse(GridCoordinateMapping):
             displacement_field=self._data,
             grid_mapping_args=self._grid_mapping_args,
             mask=self._mask,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"_GridCoordinateMappingInverse(displacement_field={self._data}, "
+            f"grid_mapping_args={self._grid_mapping_args}, mask={self._mask})"
         )
 
 

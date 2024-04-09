@@ -409,6 +409,10 @@ def index_by_channel_dims(n_total_dims: int, channel_dim_index: int, n_channel_d
     """
     if n_total_dims < n_channel_dims:
         raise RuntimeError("Number of channel dimensions do not match")
+    if channel_dim_index < 0:
+        channel_dim_index += n_channel_dims
+    if channel_dim_index < 0 or channel_dim_index >= n_channel_dims:
+        raise RuntimeError("Invalid channel dimension index")
     if n_total_dims == n_channel_dims:
         return channel_dim_index
     return channel_dim_index + 1

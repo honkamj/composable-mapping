@@ -85,6 +85,14 @@ class CenteredNormalizedFactory(BaseVoxelCoordinateSystemFactory):
             device=device,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(original_grid_shape={self.original_grid_shape}, "
+            f"original_voxel_size={self.original_voxel_size}, grid_shape={self.grid_shape}, "
+            f"voxel_size={self.voxel_size}, downsampling_factor={self.downsampling_factor}, "
+            f"center_coordinate={self.center_coordinate}, cache={self._cache})"
+        )
+
 
 class TopLeftAlignedNormalizedFactory(BaseVoxelCoordinateSystemFactory):
     """Factory for creating top left aligned normalized coordinate systems
@@ -118,6 +126,14 @@ class TopLeftAlignedNormalizedFactory(BaseVoxelCoordinateSystemFactory):
             downsampling_factor=self.downsampling_factor,
             dtype=dtype,
             device=device,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(original_grid_shape={self.original_grid_shape}, "
+            f"original_voxel_size={self.original_voxel_size}, grid_shape={self.grid_shape}, "
+            f"voxel_size={self.voxel_size}, downsampling_factor={self.downsampling_factor}, "
+            f"cache={self._cache})"
         )
 
 
@@ -158,6 +174,14 @@ class CenteredFactory(BaseVoxelCoordinateSystemFactory):
             device=device,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(original_grid_shape={self.original_grid_shape}, "
+            f"original_voxel_size={self.original_voxel_size}, grid_shape={self.grid_shape}, "
+            f"voxel_size={self.voxel_size}, downsampling_factor={self.downsampling_factor}, "
+            f"center_coordinate={self.center_coordinate}, cache={self._cache})"
+        )
+
 
 class TopLeftAlignedFactory(BaseVoxelCoordinateSystemFactory):
     """Factory for creating top left aligned coordinate systems
@@ -193,6 +217,14 @@ class TopLeftAlignedFactory(BaseVoxelCoordinateSystemFactory):
             device=device,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(original_grid_shape={self.original_grid_shape}, "
+            f"original_voxel_size={self.original_voxel_size}, grid_shape={self.grid_shape}, "
+            f"voxel_size={self.voxel_size}, downsampling_factor={self.downsampling_factor}, "
+            f"cache={self._cache})"
+        )
+
 
 class VoxelFactory(BaseVoxelCoordinateSystemFactory):
     """Factory for creating voxel coordinate systems
@@ -217,6 +249,12 @@ class VoxelFactory(BaseVoxelCoordinateSystemFactory):
             voxel_size=self.voxel_size,
             dtype=dtype,
             device=device,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"VoxelFactory(grid_shape={self.grid_shape}, "
+            f"voxel_size={self.voxel_size}, cache={self._cache})"
         )
 
 

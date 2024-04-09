@@ -154,7 +154,12 @@ class IMaskedTensor(ITensorLike):
     @property
     @abstractmethod
     def channels_shape(self) -> Sequence[int]:
-        """Return shape of the channels dimension"""
+        """Return shape of the channel dimensions"""
+
+    @property
+    @abstractmethod
+    def spatial_shape(self) -> Sequence[int]:
+        """Return shape of the spatial dimensions"""
 
     @property
     @abstractmethod

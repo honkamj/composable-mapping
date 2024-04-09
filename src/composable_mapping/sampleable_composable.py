@@ -1,7 +1,10 @@
 """"Composable mapping bundled together with a coordinate system"""
 
-from typing import Mapping, Optional, Union
+from itertools import combinations
+from typing import Any, Mapping, Optional, Tuple, Union
 
+from matplotlib.figure import Figure  # type: ignore
+from matplotlib.pyplot import subplots  # type: ignore
 from torch import Tensor
 
 from composable_mapping.finite_difference import (
@@ -192,3 +195,77 @@ class SamplableComposable(BaseTensorLikeWrapper):
             central=central,
             out=out,
         )
+
+    def __repr__(self) -> str:
+        return (
+            f"SamplableComposable(mapping={self.mapping}, "
+            f"coordinate_system={self.coordinate_system}, "
+            f"grid_mapping_args={self.grid_mapping_args}, "
+            f"is_deformation={self.is_deformation})"
+        )
+
+    def visualize_as_deformation(
+        self,
+        batch_index: int = 0,
+        figure_height: int = 5,
+        emphasize_every_nth_line: Optional[Tuple[int, int]] = None,
+    ) -> Figure:
+        """Visualize the mapping as a deformation
+
+        If there are more than two dimension, central slices are shown for each pair of dimensions.
+
+        Args
+        """
+        transformed_grid = self.mapping(self.coordinate_system.grid).generate_values()[batch_index]
+        n_dims = len(self.coordinate_system.grid.spatial_shape)
+        if n_dims > 1:
+            grids = []
+            dimension_pairs = list(combinations(range(n_dims), 2))
+            for dimension_pair in dimension_pairs:
+                other_dims = [dim for dim in range(n_dims) if dim not in dimension_pair]
+                transformed_grid_2d = transformed_grid[list(dimension_pair)]
+                for other_dim in reversed(other_dims):
+                    transformed_grid_2d = transformed_grid_2d.movedim(-n_dims + other_dim, 0)
+                    transformed_grid_2d = transformed_grid_2d[transformed_grid_2d.size(0) // 2]
+                assert transformed_grid_2d.ndim == 3
+                assert transformed_grid_2d.size(0) == 2
+                grids.append(transformed_grid_2d)
+        else:
+            raise NotImplementedError("Visualization of 1D deformation is not supported")
+
+        def dimension_to_letter(dim: int) -> str:
+            if n_dims <= 3:
+                return "xyz"[dim]
+            return f"dim_{dim}"
+
+        def get_kwargs(index: int) -> Mapping[str, Any]:
+            if emphasize_every_nth_line is None:
+                return {}
+            if index + emphasize_every_nth_line[1] % emphasize_every_nth_line[0] == 0:
+                return {"alpha": 0.6, "linewidth": 2.0}
+            return {"alpha": 0.2, "linewidth": 1.0}
+
+        figure, axes = subplots(
+            1, len(grids), figsize=(figure_height * len(grids), figure_height), squeeze=False
+        )
+
+        for axis, grid, (dim_1, dim_2) in zip(axes.flatten(), grids, dimension_pairs):
+            axis.axis("equal")
+            axis.set_xlabel(dimension_to_letter(dim_1))
+            axis.set_ylabel(dimension_to_letter(dim_2))
+            for row_index in range(grid.size(1)):
+                axis.plot(
+                    grid[0, row_index, :],
+                    grid[1, row_index, :],
+                    color="gray",
+                    **get_kwargs(row_index),
+                )
+            for col_index in range(grid.size(2)):
+                axis.plot(
+                    grid[0, :, col_index],
+                    grid[1, :, col_index],
+                    color="gray",
+                    **get_kwargs(col_index),
+                )
+
+        return figure

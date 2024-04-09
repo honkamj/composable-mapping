@@ -117,6 +117,5 @@ class _Composition(BaseComposableMapping):
 
     def __repr__(self) -> str:
         return (
-            f"<composable_mapping.base._Composition, "
-            f"left: {self._left_mapping}, right: {self._right_mapping}>"
+            f"_Composition(left_mapping={self._left_mapping}, right_mapping={self._right_mapping})"
         )
