@@ -11,15 +11,11 @@ from composable_mapping.finite_difference import (
     estimate_spatial_derivatives_for_mapping,
     estimate_spatial_jacobian_matrices_for_mapping,
 )
+from composable_mapping.masked_tensor import MaskedTensor
 
 from .affine import ComposableAffine
 from .base import BaseTensorLikeWrapper
-from .grid_mapping import (
-    GridCoordinateMapping,
-    GridMappingArgs,
-    GridVolume,
-    as_displacement_field,
-)
+from .grid_mapping import GridCoordinateMapping, GridMappingArgs, GridVolume
 from .interface import (
     IAffineTransformation,
     IComposableMapping,
@@ -67,13 +63,11 @@ class SamplableComposable(BaseTensorLikeWrapper):
     def resample(self) -> "SamplableComposable":
         """Resample the mapping"""
         if self.is_deformation:
-            displacement_field, mask = as_displacement_field(
-                self.mapping, coordinate_system=self.coordinate_system, generate_missing_mask=False
-            )
+            displacement_field = self.sample(as_displacement_field=True)
             resampled_composable_mapping: IComposableMapping = GridCoordinateMapping(
-                displacement_field=displacement_field,
+                displacement_field=displacement_field.generate_values(),
                 grid_mapping_args=self.grid_mapping_args,
-                mask=mask,
+                mask=displacement_field.generate_mask(generate_missing_mask=False),
             )
         else:
             masked_data = self.mapping(self.coordinate_system.grid)
@@ -91,8 +85,14 @@ class SamplableComposable(BaseTensorLikeWrapper):
             is_deformation=True,
         )
 
-    def sample(self) -> IMaskedTensor:
+    def sample(self, as_displacement_field: bool = False) -> IMaskedTensor:
         """Sample the mapping"""
+        if as_displacement_field:
+            values, mask = self.coordinate_system.to_voxel_coordinates(
+                self.mapping(self.coordinate_system.grid)
+            ).generate()
+            displacement_field = values - self.coordinate_system.voxel_grid.generate_values()
+            return MaskedTensor(displacement_field, mask)
         return self.mapping(self.coordinate_system.grid)
 
     def __matmul__(

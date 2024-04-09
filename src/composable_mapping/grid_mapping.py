@@ -1,6 +1,6 @@
 """Grid based mappings"""
 
-from typing import Callable, Literal, Mapping, Optional, Tuple, Union, overload
+from typing import Callable, Mapping, Optional, Tuple, Union, overload
 
 from deformation_inversion_layer import (
     DeformationInversionArguments,
@@ -11,12 +11,7 @@ from torch import Tensor
 
 from .base import BaseComposableMapping
 from .dense_deformation import compute_fov_mask_at_voxel_coordinates
-from .interface import (
-    IComposableMapping,
-    IMaskedTensor,
-    ITensorLike,
-    IVoxelCoordinateSystem,
-)
+from .interface import IComposableMapping, IMaskedTensor, ITensorLike
 from .masked_tensor import MaskedTensor
 from .util import combine_optional_masks
 
@@ -310,45 +305,3 @@ class _GridCoordinateMappingInverse(GridCoordinateMapping):
             f"_GridCoordinateMappingInverse(displacement_field={self._data}, "
             f"grid_mapping_args={self._grid_mapping_args}, mask={self._mask})"
         )
-
-
-@overload
-def as_displacement_field(
-    mapping: IComposableMapping,
-    coordinate_system: IVoxelCoordinateSystem,
-    generate_missing_mask: Literal[True] = ...,
-) -> Tuple[Tensor, Tensor]: ...
-
-
-@overload
-def as_displacement_field(
-    mapping: IComposableMapping,
-    coordinate_system: IVoxelCoordinateSystem,
-    generate_missing_mask: Literal[False],
-) -> Tuple[Tensor, Optional[Tensor]]: ...
-
-
-@overload
-def as_displacement_field(
-    mapping: IComposableMapping,
-    coordinate_system: IVoxelCoordinateSystem,
-    generate_missing_mask: bool,
-) -> Tuple[Tensor, Optional[Tensor]]: ...
-
-
-def as_displacement_field(
-    mapping: IComposableMapping,
-    coordinate_system: IVoxelCoordinateSystem,
-    generate_missing_mask: bool = True,
-) -> Tuple[Tensor, Optional[Tensor]]:
-    """Extract displacement field from a mapping"""
-    voxel_coordinate_mapping = coordinate_system.to_voxel_coordinates(
-        mapping(coordinate_system.grid)
-    )
-    voxel_coordinate_mapping_values, voxel_coordinate_mapping_mask = (
-        voxel_coordinate_mapping.generate(generate_missing_mask=generate_missing_mask)
-    )
-    displacement_field = (
-        voxel_coordinate_mapping_values - coordinate_system.voxel_grid.generate_values()
-    )
-    return displacement_field, voxel_coordinate_mapping_mask
