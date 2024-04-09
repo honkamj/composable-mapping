@@ -23,7 +23,7 @@ from .util import index_by_channel_dims, reduce_channel_shape_to_ones
 
 
 def concatenate_channels(
-    *masked_tensors: IMaskedTensor, combine_mask: bool = True, channel_index: int = 0
+    *masked_tensors: IMaskedTensor, combine_masks: bool = True, channel_index: int = 0
 ) -> IMaskedTensor:
     """Concatenate masked tensors along the channel dimension
 
@@ -51,7 +51,7 @@ def concatenate_channels(
         [masked_tensor.generate_values() for masked_tensor in masked_tensors],
         dim=concatenation_index,
     )
-    if combine_mask:
+    if combine_masks:
         mask = masked_tensors[0].generate_mask(generate_missing_mask=False)
         for masked_tensor in masked_tensors[1:]:
             update_mask = masked_tensor.generate_mask(generate_missing_mask=False)
