@@ -1,5 +1,6 @@
 """"Composable mapping bundled together with a coordinate system"""
 
+from abc import abstractmethod
 from itertools import combinations
 from typing import Any, Mapping, Optional, Tuple, TypeVar, Union
 
@@ -69,12 +70,13 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
             coordinate_system=self.coordinate_system,
         )
 
+    @abstractmethod
     def _simplified_modified_copy(
         self: BaseSamplableMappingT,
         mapping: IComposableMapping,
         coordinate_system: IVoxelCoordinateSystem,
     ) -> BaseSamplableMappingT:
-        raise NotImplementedError
+        """Modified copy with processed arguments"""
 
     def _modified_copy(
         self: BaseSamplableMappingT,
@@ -338,8 +340,8 @@ class SamplableVolumeMapping(BaseSamplableMapping):
             grid_mapping_args=self.grid_mapping_args,
         )
 
-    def _simple_modified_copy(
-        self, mapping: GridVolume, coordinate_system: IVoxelCoordinateSystem
+    def _simplified_modified_copy(
+        self, mapping: IComposableMapping, coordinate_system: IVoxelCoordinateSystem
     ) -> "SamplableVolumeMapping":
         return SamplableVolumeMapping(
             mapping=mapping,
