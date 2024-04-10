@@ -11,7 +11,12 @@ from torch import Tensor
 
 from .base import BaseComposableMapping
 from .dense_deformation import compute_fov_mask_at_voxel_coordinates
-from .interface import IComposableMapping, IMaskedTensor, ITensorLike
+from .interface import (
+    IComposableMapping,
+    IMaskedTensor,
+    ITensorLike,
+    IVoxelCoordinateSystem,
+)
 from .masked_tensor import MaskedTensor
 from .util import combine_optional_masks
 
@@ -51,12 +56,13 @@ class GridMappingArgs:
 
 
 class GridVolume(BaseComposableMapping):
-    """Continuously defined volume on voxel coordinates based on
-    and interpolation/extrapolation method
+    """Continuously defined mapping based on regular grid samples
 
     Arguments:
-        data: Tensor with shape (batch_size, *channel_dims, dim_1, ..., dim_{n_dims})
-        grid_mapping_args: Additional grid based mapping args
+        data: Regular grid of values defining the deformation, with shape
+            (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The grid should be
+            in voxel coordinates.
+        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
         mask: Mask defining invalid regions,
             Tensor with shape (batch_size, *(1,) * len(channel_dims), dim_1, ..., dim_{n_dims})
         n_channel_dims: Number of channel dimensions in data
@@ -64,39 +70,33 @@ class GridVolume(BaseComposableMapping):
 
     def __init__(
         self,
-        data: Tensor,
+        data: IMaskedTensor,
         grid_mapping_args: GridMappingArgs,
         n_channel_dims: int = 1,
-        mask: Optional[Tensor] = None,
     ) -> None:
         self._data = data
-        self._mask = mask
         self._grid_mapping_args = grid_mapping_args
         self._n_channel_dims = n_channel_dims
         self._volume_shape = data.shape[n_channel_dims + 1 :]
         self._n_dims = len(self._volume_shape)
-        if mask is not None and mask.device != data.device:
-            raise RuntimeError("Devices do not match")
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
-        tensors = {
-            "data": self._data,
-        }
-        if self._mask is not None:
-            tensors["mask"] = self._mask
-        return tensors
+        return {}
 
     def _get_children(self) -> Mapping[str, ITensorLike]:
-        return {}
+        return {
+            "data": self._data,
+        }
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "GridVolume":
+        if not isinstance(children["data"], IMaskedTensor):
+            raise ValueError("Invalid children for samplable composable")
         return GridVolume(
-            data=tensors["data"],
+            data=children["data"],
             grid_mapping_args=self._grid_mapping_args,
             n_channel_dims=self._n_channel_dims,
-            mask=tensors.get("mask"),
         )
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
@@ -112,22 +112,25 @@ class GridVolume(BaseComposableMapping):
         coordinate_mask: Optional[Tensor],
         coordinates_as_slice: Optional[Tuple[Union["ellipsis", slice], ...]],
     ) -> MaskedTensor:
+        data, data_mask = self._data.generate(generate_missing_mask=False)
         if coordinates_as_slice is None:
             voxel_coordinates = voxel_coordinates_generator()
-            values = self._grid_mapping_args.interpolator(self._data, voxel_coordinates)
-            mask = self._evaluate_mask(voxel_coordinates)
+            values = self._grid_mapping_args.interpolator(data, voxel_coordinates)
+            mask = self._evaluate_mask(voxel_coordinates, data_mask)
         else:
-            values = self._data[coordinates_as_slice]
-            mask = self._mask[coordinates_as_slice] if self._mask is not None else None
+            values = data[coordinates_as_slice]
+            mask = data_mask[coordinates_as_slice] if data_mask is not None else None
         mask = combine_optional_masks([mask, coordinate_mask])
         return MaskedTensor(values, mask, self._n_channel_dims)
 
-    def _evaluate_mask(self, voxel_coordinates: Tensor) -> Optional[Tensor]:
-        if self._mask is None:
+    def _evaluate_mask(
+        self, voxel_coordinates: Tensor, data_mask: Optional[Tensor]
+    ) -> Optional[Tensor]:
+        if data_mask is None:
             interpolated_mask: Optional[Tensor] = None
         else:
             interpolated_mask = self._grid_mapping_args.mask_interpolator(
-                self._mask, voxel_coordinates
+                data_mask, voxel_coordinates
             )
             interpolated_mask = self._threshold_mask(interpolated_mask)
         fov_mask = (
@@ -153,67 +156,80 @@ class GridVolume(BaseComposableMapping):
     def __repr__(self) -> str:
         return (
             f"GridVolume(data={self._data}, grid_mapping_args={self._grid_mapping_args}, "
-            f"mask={self._mask}, n_channel_dims={self._n_channel_dims})"
+            f"n_channel_dims={self._n_channel_dims})"
         )
 
 
-class GridCoordinateMapping(GridVolume):
-    """Continuously defined mapping based on regular grid samples
+class GridDeformation(GridVolume):
+    """Continuously defined mapping based on regular grid samples whose values
+    have the same dimensionality as the spatial dimensions
 
     Arguments:
-        displacement_field: Displacement field in voxel coordinates, Tensor with shape
-            (batch_size, n_dims, dim_1, ..., dim_{n_dims})
-        grid_mapping_args: Additional grid based mapping args
-        mask: Mask defining invalid regions,
-            Tensor with shape (batch_size, *(1,) * len(channel_dims), dim_1, ..., dim_{n_dims})
+        data: (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The values are
+            either directly the coordinates or a displacement field. The values
+            should be given in voxel coordinates, and the grid is also assumed
+            to be in voxel coordinates.
+        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
     """
 
     def __init__(
         self,
-        displacement_field: Tensor,
+        data: IMaskedTensor,
         grid_mapping_args: GridMappingArgs,
-        mask: Optional[Tensor] = None,
+        data_format: str = "displacement_field",
     ) -> None:
+        if data.shape[1] != len(data.shape) - 2:
+            raise ValueError("Data should have the same dimensionality as the spatial dimensions")
         super().__init__(
-            data=displacement_field,
+            data=data,
             grid_mapping_args=grid_mapping_args,
-            mask=mask,
             n_channel_dims=1,
         )
+        self._data_format = data_format
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
-    ) -> "GridCoordinateMapping":
-        return GridCoordinateMapping(
-            displacement_field=tensors["data"],
+    ) -> "GridDeformation":
+        if not isinstance(children["data"], IMaskedTensor):
+            raise ValueError("Invalid children for samplable composable")
+        return GridDeformation(
+            data=children["data"],
             grid_mapping_args=self._grid_mapping_args,
-            mask=tensors.get("mask"),
+            data_format=self._data_format,
         )
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
-        voxel_coordinates, coordinate_mask = masked_coordinates.generate(
-            generate_missing_mask=False
-        )
-        displacement_field_values = super()._evaluate(
-            voxel_coordinates_generator=lambda: voxel_coordinates,
+        if self._data_format == "displacement_field":
+            voxel_coordinates, coordinate_mask = masked_coordinates.generate(
+                generate_missing_mask=False
+            )
+
+            def voxel_coordinates_generator():
+                return voxel_coordinates
+
+        elif self._data_format == "coordinate_field":
+            voxel_coordinates_generator = masked_coordinates.generate_values
+            coordinate_mask = masked_coordinates.generate_mask(generate_missing_mask=False)
+        else:
+            raise ValueError(f"Invalid data format: {self._data_format}")
+        values = super()._evaluate(
+            voxel_coordinates_generator=voxel_coordinates_generator,
             coordinate_mask=coordinate_mask,
             coordinates_as_slice=masked_coordinates.as_slice(self._volume_shape),
         )
-        return MaskedTensor(
-            values=voxel_coordinates + displacement_field_values.generate_values(),
-            mask=displacement_field_values.generate_mask(generate_missing_mask=False),
-        )
+        if self._data_format == "displacement_field":
+            values = values.modify_values(values=values.generate_values() + voxel_coordinates)
+        return values
 
     @overload
-    def invert(
-        self: "GridCoordinateMapping", **inversion_parameters
-    ) -> "_GridCoordinateMappingInverse": ...
+    def invert(self: "GridDeformation", **inversion_parameters) -> "_GridDeformationInverse": ...
 
     # overload is required for the subclass
     @overload
     def invert(  # type: ignore
-        self: "_GridCoordinateMappingInverse", **inversion_parameters
-    ) -> "GridCoordinateMapping": ...
+        self: "_GridDeformationInverse", **inversion_parameters
+    ) -> "GridDeformation": ...
 
     def invert(self, **inversion_parameters):
         """Fixed point invert displacement field
@@ -232,47 +248,40 @@ class GridCoordinateMapping(GridVolume):
             forward_dtype=fixed_point_inversion_arguments.get("forward_dtype"),
             backward_dtype=fixed_point_inversion_arguments.get("backward_dtype"),
         )
-        return _GridCoordinateMappingInverse(
-            displacement_field=self._data,
+        return _GridDeformationInverse(
+            inverted_data=self._data,
             grid_mapping_args=self._grid_mapping_args,
             inversion_arguments=deformation_inversion_arguments,
-            mask=self._mask,
+            data_format=self._data_format,
         )
 
     def __repr__(self) -> str:
         return (
             f"GridCoordinateMapping(displacement_field={self._data}, "
-            f"grid_mapping_args={self._grid_mapping_args}, mask={self._mask})"
+            f"grid_mapping_args={self._grid_mapping_args})"
         )
 
 
-class _GridCoordinateMappingInverse(GridCoordinateMapping):
-    """Inverse of a continuously defined mapping based on regular grid samples
+class _GridDeformationInverse(GridDeformation):
+    """Inverse of a GridDeformation
 
     The inverse is computed using a fixed point iteration
-
-    Arguments:
-        displacement_field: Displacement field in voxel coordinates, Tensor with shape
-            (batch_size, n_dims, dim_1, ..., dim_{n_dims})
-        grid_mapping_args: Additional grid based mapping args
-        inversion_arguments: Arguments for fixed point inversion
-        mask: Mask defining invalid regions,
-            Tensor with shape (batch_size, *(1,) * len(channel_dims), dim_1, ..., dim_{n_dims})
     """
 
     def __init__(
         self,
-        displacement_field: Tensor,
+        inverted_data: IMaskedTensor,
         grid_mapping_args: GridMappingArgs,
         inversion_arguments: DeformationInversionArguments,
-        mask: Optional[Tensor] = None,
+        data_format: str,
     ) -> None:
         super().__init__(
-            displacement_field=displacement_field,
+            data=inverted_data,
             grid_mapping_args=grid_mapping_args,
-            mask=mask,
+            data_format="displacement_field",
         )
         self._inversion_arguments = inversion_arguments
+        self._inverted_data_format = data_format
 
     def _evaluate(
         self,
@@ -280,28 +289,124 @@ class _GridCoordinateMappingInverse(GridCoordinateMapping):
         coordinate_mask: Optional[Tensor],
         coordinates_as_slice: Optional[Tuple[Union["ellipsis", slice], ...]],
     ) -> MaskedTensor:
+        data, data_mask = self._data.generate(generate_missing_mask=False)
         voxel_coordinates = voxel_coordinates_generator()
         inverted_values = fixed_point_invert_deformation(
-            displacement_field=self._data,
-            arguments=self._inversion_arguments,
-            initial_guess=(
-                None if coordinates_as_slice is None else -self._data[coordinates_as_slice]
+            displacement_field=(
+                data
+                if self._inverted_data_format == "displacement_field"
+                else data - voxel_coordinates
             ),
+            arguments=self._inversion_arguments,
+            initial_guess=(None if coordinates_as_slice is None else -data[coordinates_as_slice]),
             coordinates=voxel_coordinates,
         )
-        mask = self._evaluate_mask(voxel_coordinates + inverted_values)
+        mask = self._evaluate_mask(voxel_coordinates + inverted_values, data_mask)
         mask = combine_optional_masks([mask, coordinate_mask])
         return MaskedTensor(inverted_values, mask, self._n_channel_dims)
 
     def invert(self, **_inversion_parameters):
-        return GridCoordinateMapping(
-            displacement_field=self._data,
+        return GridDeformation(
+            data=self._data,
             grid_mapping_args=self._grid_mapping_args,
-            mask=self._mask,
+            data_format=self._inverted_data_format,
         )
 
     def __repr__(self) -> str:
         return (
             f"_GridCoordinateMappingInverse(displacement_field={self._data}, "
-            f"grid_mapping_args={self._grid_mapping_args}, mask={self._mask})"
+            f"grid_mapping_args={self._grid_mapping_args})"
         )
+
+
+def create_volume(
+    data: IMaskedTensor,
+    grid_mapping_args: GridMappingArgs,
+    coordinate_system: IVoxelCoordinateSystem,
+    n_channel_dims: int = 1,
+) -> IComposableMapping:
+    """Create volume based on grid samples"""
+    grid_volume = GridVolume(
+        data=data,
+        grid_mapping_args=grid_mapping_args,
+        n_channel_dims=n_channel_dims,
+    )
+    return grid_volume.compose(coordinate_system.to_voxel_coordinates)
+
+
+def create_deformation_from_voxel_data(
+    data: IMaskedTensor,
+    grid_mapping_args: GridMappingArgs,
+    coordinate_system: IVoxelCoordinateSystem,
+    data_format: str = "displacement_field",
+) -> IComposableMapping:
+    """Create deformation mapping based on grid samples in given coordinate system
+    with data given in voxel coordinates
+
+    Args:
+        data_in_voxel_coordinates: Regular grid of values defining the deformation,
+            Tensor with shape
+            (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The values are
+            either directly the coordinates or a displacement field. The values
+            should be given in voxel coordinates, and the grid is also assumed
+            to be in voxel coordinates.
+        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        coordinate_system: Coordinate system defining transformations between voxel and
+            world coordinates
+        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
+    """
+    grid_volume = GridDeformation(
+        data=data,
+        grid_mapping_args=grid_mapping_args,
+        data_format=data_format,
+    )
+    return coordinate_system.from_voxel_coordinates.compose(grid_volume).compose(
+        coordinate_system.to_voxel_coordinates
+    )
+
+
+def create_deformation_from_world_data(
+    data: IMaskedTensor,
+    grid_mapping_args: GridMappingArgs,
+    coordinate_system: IVoxelCoordinateSystem,
+    data_format: str = "displacement_field",
+) -> IComposableMapping:
+    """Create deformation mapping based on grid samples in given coordinate system
+    with data given in world coordinates
+
+    Works by first transforming the data to voxel coordinates and then creating the
+    deformation mapping.
+
+    Args:
+        data_in_world_coordinates: Regular grid of values defining the deformation,
+            Tensor with shape
+            (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The values are
+            either directly the coordinates or a displacement field. The values
+            should be given in world coordinates, and the grid is also assumed
+            to be in world coordinates.
+        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        coordinate_system: Coordinate system defining transformations between voxel and
+            world coordinates
+        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
+    """
+    if data_format == "displacement_field":
+        ddf, ddf_mask = data.generate(generate_missing_mask=False)
+        coordinates_in_voxel_coordinates, mask_in_voxel_coordinates = (
+            coordinate_system.to_voxel_coordinates(
+                MaskedTensor(ddf + coordinate_system.grid.generate_values(), mask=ddf_mask)
+            ).generate()
+        )
+        data_in_voxel_coordinates: IMaskedTensor = MaskedTensor(
+            coordinates_in_voxel_coordinates - coordinate_system.voxel_grid.generate_values(),
+            mask=mask_in_voxel_coordinates,
+        )
+    elif data_format == "coordinate_field":
+        data_in_voxel_coordinates = coordinate_system.to_voxel_coordinates(data).reduce()
+    else:
+        raise ValueError(f"Invalid data format: {data_format}")
+    return create_deformation_from_voxel_data(
+        data=data_in_voxel_coordinates,
+        grid_mapping_args=grid_mapping_args,
+        coordinate_system=coordinate_system,
+        data_format=data_format,
+    )

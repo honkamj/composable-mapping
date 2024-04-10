@@ -98,12 +98,13 @@ class MaskedTensor(IMaskedTensor, BaseTensorLikeWrapper):
 
     @property
     def spatial_shape(self) -> Sequence[int]:
-        return self._values.shape[1 + self._n_channel_dims :]
+        first_spatial_dim = index_by_channel_dims(self._values.ndim, -1, self._n_channel_dims) + 1
+        return self._values.shape[first_spatial_dim:]
 
     @property
     def channels_shape(self) -> Sequence[int]:
-        first_spatial_dim = index_by_channel_dims(self._values.ndim, -1, self._n_channel_dims) + 1
-        return self._values.shape[first_spatial_dim:]
+        first_channel_dim = index_by_channel_dims(self._values.ndim, 0, self._n_channel_dims)
+        return self._values.shape[first_channel_dim : first_channel_dim + self._n_channel_dims]
 
     def generate(
         self,
@@ -168,12 +169,7 @@ class MaskedTensor(IMaskedTensor, BaseTensorLikeWrapper):
         return self._mask is not None
 
     def clear_mask(self) -> "IMaskedTensor":
-        return MaskedTensor(
-            values=self._values,
-            mask=None,
-            n_channel_dims=self._n_channel_dims,
-            affine_transformation=self._affine_transformation,
-        )
+        return self.modify_mask(None)
 
     def as_slice(self, target_shape: Sequence[int]) -> None:
         return None
@@ -186,6 +182,22 @@ class MaskedTensor(IMaskedTensor, BaseTensorLikeWrapper):
             affine_transformation=IdentityAffineTransformation(
                 n_dims=self.channels_shape[0], dtype=self._values.dtype, device=self._values.device
             ),
+        )
+
+    def modify_values(self, values: Tensor) -> "MaskedTensor":
+        return MaskedTensor(
+            values=values,
+            mask=self._mask,
+            n_channel_dims=self._n_channel_dims,
+            affine_transformation=None,
+        )
+
+    def modify_mask(self, mask: Optional[Tensor]) -> "MaskedTensor":
+        return MaskedTensor(
+            values=self._values,
+            mask=mask,
+            n_channel_dims=self._n_channel_dims,
+            affine_transformation=self._affine_transformation,
         )
 
     def __repr__(self) -> str:
@@ -214,7 +226,7 @@ class VoxelCoordinateGrid(IMaskedTensor, BaseTensorLikeWrapper):
         self._device = torch_device("cpu") if device is None else device
         self._affine_transformation: IAffineTransformation = (
             IdentityAffineTransformation(
-                n_dims=len(self._shape), dtype=self._dtype, device=self._device
+                n_dims=len(self._spatial_shape), dtype=self._dtype, device=self._device
             )
             if affine_transformation is None
             else affine_transformation
@@ -294,6 +306,24 @@ class VoxelCoordinateGrid(IMaskedTensor, BaseTensorLikeWrapper):
     def detach(self) -> "VoxelCoordinateGrid":
         return self
 
+    def modify_values(self, values: Tensor) -> IMaskedTensor:
+        return MaskedTensor(
+            values=values,
+            mask=None,
+            n_channel_dims=1,
+            affine_transformation=None,
+        )
+
+    def modify_mask(self, mask: Optional[Tensor]) -> IMaskedTensor:
+        if mask is None:
+            return self
+        return MaskedTensor(
+            values=self.generate_values(),
+            mask=mask,
+            n_channel_dims=1,
+            affine_transformation=None,
+        )
+
     def as_slice(
         self, target_shape: Sequence[int]
     ) -> Optional[Tuple[Union["ellipsis", slice], ...]]:
@@ -319,7 +349,7 @@ class VoxelCoordinateGrid(IMaskedTensor, BaseTensorLikeWrapper):
         scale = torch_round(scale).type(torch_int32)
         translation = torch_round(translation).type(torch_int32)
         target_shape_tensor = tensor(target_shape, dtype=torch_int32)
-        shape_tensor = tensor(self.shape, dtype=torch_int32)
+        shape_tensor = tensor(self.spatial_shape, dtype=torch_int32)
         slice_ends = (shape_tensor - 1) * scale + translation + 1
         if torch_any(slice_ends > target_shape_tensor):
             return None

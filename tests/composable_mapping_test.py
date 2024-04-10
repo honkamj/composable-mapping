@@ -17,11 +17,7 @@ from composable_mapping.coordinate_system_factory import (
     create_top_left_aligned_normalized,
 )
 from composable_mapping.dense_deformation import generate_voxel_coordinate_grid
-from composable_mapping.grid_mapping import (
-    GridCoordinateMapping,
-    GridMappingArgs,
-    GridVolume,
-)
+from composable_mapping.grid_mapping import GridDeformation, GridMappingArgs, GridVolume
 from composable_mapping.mapping_factory import GridComposableFactory
 from composable_mapping.masked_tensor import MaskedTensor, VoxelCoordinateGrid
 
@@ -111,8 +107,7 @@ class ComposableMappingTests(TestCase):
         mask = tensor([[[1.0, 1.0, 1.0], [1.0, 0.0, 0.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]])[None]
         interpolator = _CountingInterpolator(padding_mode="border")
         volume = GridVolume(
-            data=data,
-            mask=mask,
+            data=MaskedTensor(data, mask),
             n_channel_dims=1,
             grid_mapping_args=GridMappingArgs(interpolator=interpolator, mask_outside_fov=True),
         )
@@ -151,9 +146,8 @@ class ComposableMappingTests(TestCase):
         )[None]
         mask = tensor([[[1.0, 1.0, 1.0], [1.0, 0.0, 0.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]])[None]
         interpolator = _CountingInterpolator(padding_mode="border")
-        mapping = GridCoordinateMapping(
-            displacement_field=data,
-            mask=mask,
+        mapping = GridDeformation(
+            data=MaskedTensor(data, mask),
             grid_mapping_args=GridMappingArgs(
                 interpolator=interpolator,
                 mask_outside_fov=True,
@@ -269,7 +263,7 @@ class ComposableFactoryTests(TestCase):
                 interpolator=interpolator, mask_outside_fov=True, mask_threshold=1.0
             ),
         ).create_deformation(
-            displacement_field=data,
+            data=data,
             mask=mask,
         )
         input_points = (

@@ -1,16 +1,26 @@
 """Factory methods for generating useful composable mappings"""
 
-from typing import Literal, Optional, Tuple, Union, overload
+from typing import Literal, Optional, Union, overload
 
 from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 
 from composable_mapping.identity import ComposableIdentity
-from composable_mapping.sampleable_composable import SamplableComposable
+from composable_mapping.masked_tensor import MaskedTensor
+from composable_mapping.samplable_mapping import (
+    BaseSamplableMapping,
+    SamplableDeformationMapping,
+    SamplableVolumeMapping,
+)
 
 from .affine import AffineTransformation, ComposableAffine
-from .grid_mapping import GridCoordinateMapping, GridMappingArgs, GridVolume
+from .grid_mapping import (
+    GridMappingArgs,
+    create_deformation_from_voxel_data,
+    create_deformation_from_world_data,
+    create_volume,
+)
 from .interface import (
     IComposableMapping,
     IMaskedTensor,
@@ -68,13 +78,12 @@ class _BaseComposableFactory:
 
     def _handle_tensor_inputs(
         self, data: Union[Tensor, IMaskedTensor], mask: Optional[Tensor]
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    ) -> IMaskedTensor:
         if isinstance(data, IMaskedTensor):
             if mask is not None:
                 raise ValueError("Mask should not be provided when data is IMaskedTensor")
-            mask = data.generate_mask(generate_missing_mask=False)
-            data = data.generate_values()
-        return data, mask
+            return data
+        return MaskedTensor(data, mask)
 
 
 class SamplableComposableFactory(_BaseComposableFactory):
@@ -84,148 +93,167 @@ class SamplableComposableFactory(_BaseComposableFactory):
     def create_volume(
         self,
         data: IMaskedTensor,
+        *,
         n_channel_dims: int = ...,
-        mask: Literal[None] = ...,
-        is_deformation: bool = ...,
-    ) -> SamplableComposable: ...
+    ) -> SamplableVolumeMapping: ...
 
     @overload
     def create_volume(
         self,
         data: Tensor,
-        n_channel_dims: int = ...,
         mask: Optional[Tensor] = ...,
-        is_deformation: bool = ...,
-    ) -> SamplableComposable: ...
+        *,
+        n_channel_dims: int = ...,
+    ) -> SamplableVolumeMapping: ...
 
     def create_volume(
         self,
         data: Union[Tensor, IMaskedTensor],
-        n_channel_dims: int = 1,
         mask: Optional[Tensor] = None,
-        is_deformation: bool = False,
-    ) -> SamplableComposable:
+        *,
+        n_channel_dims: int = 1,
+    ) -> SamplableVolumeMapping:
         """Create samplable volume mapping"""
-        data, mask = self._handle_tensor_inputs(data, mask)
+        data = self._handle_tensor_inputs(data, mask)
         coordinate_system = self._obtain_coordinate_system(
             dtype=data.dtype,
             device=data.device,
         )
-        return SamplableComposable(
+        return SamplableVolumeMapping(
             mapping=create_volume(
                 data=data,
                 grid_mapping_args=self.grid_mapping_args,
                 coordinate_system=coordinate_system,
                 n_channel_dims=n_channel_dims,
-                mask=mask,
             ),
             coordinate_system=coordinate_system,
             grid_mapping_args=self.grid_mapping_args,
-            is_deformation=is_deformation,
         )
 
     @overload
     def create_deformation(
         self,
-        displacement_field: IMaskedTensor,
-        mask: Literal[None] = ...,
-        is_deformation: bool = ...,
-    ) -> SamplableComposable: ...
+        data: IMaskedTensor,
+        *,
+        data_format: str = ...,
+        data_coordinates: str = ...,
+        resample_as: Optional[str] = ...,
+    ) -> SamplableDeformationMapping: ...
 
     @overload
     def create_deformation(
-        self, displacement_field: Tensor, mask: Optional[Tensor] = ..., is_deformation: bool = ...
-    ) -> SamplableComposable: ...
+        self,
+        data: Tensor,
+        mask: Optional[Tensor] = ...,
+        *,
+        data_format: str = ...,
+        data_coordinates: str = ...,
+        resample_as: Optional[str] = ...,
+    ) -> SamplableDeformationMapping: ...
 
     def create_deformation(
         self,
-        displacement_field: Union[Tensor, IMaskedTensor],
+        data: Union[Tensor, IMaskedTensor],
         mask: Optional[Tensor] = None,
-        is_deformation: bool = True,
-    ) -> SamplableComposable:
+        *,
+        data_format: str = "displacement_field",
+        data_coordinates: str = "voxel",
+        resample_as: Optional[str] = None,
+    ) -> SamplableDeformationMapping:
         """Create samplable deformation mapping"""
-        displacement_field, mask = self._handle_tensor_inputs(displacement_field, mask)
+        if resample_as is None:
+            resample_as = data_format
+        data = self._handle_tensor_inputs(data, mask)
         coordinate_system = self._obtain_coordinate_system(
-            dtype=displacement_field.dtype,
-            device=displacement_field.device,
+            dtype=data.dtype,
+            device=data.device,
         )
-        return SamplableComposable(
-            mapping=create_deformation(
-                displacement_field=displacement_field,
+        if data_coordinates == "voxel":
+            factory = create_deformation_from_voxel_data
+        elif data_coordinates == "world":
+            factory = create_deformation_from_world_data
+        else:
+            raise ValueError(f"Unsupported data coordinates: {data_coordinates}")
+        return SamplableDeformationMapping(
+            mapping=factory(
+                data=data,
                 grid_mapping_args=self.grid_mapping_args,
                 coordinate_system=coordinate_system,
-                mask=mask,
+                data_format=data_format,
             ),
             coordinate_system=coordinate_system,
             grid_mapping_args=self.grid_mapping_args,
-            is_deformation=is_deformation,
+            resample_as=data_format,
         )
 
     def create_affine(
-        self, transformation_matrix: Tensor, is_deformation: bool = True
-    ) -> SamplableComposable:
+        self, transformation_matrix: Tensor, *, resample_as: str = "displacement_field"
+    ) -> SamplableDeformationMapping:
         """Create samplable affine mapping"""
-        return SamplableComposable(
+        return SamplableDeformationMapping(
             create_composable_affine(transformation_matrix),
             coordinate_system=self._obtain_coordinate_system(
                 dtype=transformation_matrix.dtype, device=transformation_matrix.device
             ),
             grid_mapping_args=self.grid_mapping_args,
-            is_deformation=is_deformation,
+            resample_as=resample_as,
         )
 
     def create_identity(
         self,
-        is_deformation: bool = True,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
-    ) -> SamplableComposable:
+        *,
+        resample_as: str = "displacement_field",
+    ) -> SamplableDeformationMapping:
         """Create samplable identity mapping
 
         Data type and device have effect only if coordinate system factory, not
         coordinate system, is available.
         """
-        return SamplableComposable(
+        return SamplableDeformationMapping(
             create_composable_identity(),
             coordinate_system=self._obtain_coordinate_system(dtype=dtype, device=device),
             grid_mapping_args=self.grid_mapping_args,
-            is_deformation=is_deformation,
+            resample_as=resample_as,
         )
 
     def create_identity_from(
         self,
         reference: Union[ITensorLike, Tensor],
-        is_deformation: bool = True,
-    ) -> SamplableComposable:
+        *,
+        resample_as: str = "displacement_field",
+    ) -> SamplableDeformationMapping:
         """Create samplable identity mapping
 
         Data type and device for creating the coordinate system are inferred
         from the reference if coordinate system factory is available.
         """
-        return SamplableComposable(
+        return SamplableDeformationMapping(
             create_composable_identity(),
             coordinate_system=self._obtain_coordinate_system(
                 dtype=reference.dtype, device=reference.device
             ),
             grid_mapping_args=self.grid_mapping_args,
-            is_deformation=is_deformation,
+            resample_as=resample_as,
         )
 
 
 def create_samplable_identity_from(
-    reference: SamplableComposable,
-    is_deformation: bool = True,
-) -> SamplableComposable:
+    reference: BaseSamplableMapping,
+    *,
+    resample_as: str = "displacement_field",
+) -> SamplableDeformationMapping:
     """Create samplable identity mapping
 
     Data type and device for creating the coordinate system are inferred
     from the reference if coordinate system factory is available.
     """
-    return SamplableComposable(
+    return SamplableDeformationMapping(
         create_composable_identity(),
         coordinate_system=reference.coordinate_system,
         grid_mapping_args=reference.grid_mapping_args,
-        is_deformation=is_deformation,
+        resample_as=resample_as,
     )
 
 
@@ -236,26 +264,29 @@ class GridComposableFactory(_BaseComposableFactory):
     def create_volume(
         self,
         data: IMaskedTensor,
-        n_channel_dims: int = ...,
         mask: Literal[None] = ...,
+        *,
+        n_channel_dims: int = ...,
     ) -> IComposableMapping: ...
 
     @overload
     def create_volume(
         self,
         data: Tensor,
-        n_channel_dims: int = ...,
         mask: Optional[Tensor] = ...,
+        *,
+        n_channel_dims: int = ...,
     ) -> IComposableMapping: ...
 
     def create_volume(
         self,
         data: Union[Tensor, IMaskedTensor],
-        n_channel_dims: int = 1,
         mask: Optional[Tensor] = None,
+        *,
+        n_channel_dims: int = 1,
     ) -> IComposableMapping:
         """Create volume based on grid samples"""
-        data, mask = self._handle_tensor_inputs(data, mask)
+        data = self._handle_tensor_inputs(data, mask)
         return create_volume(
             data=data,
             grid_mapping_args=self.grid_mapping_args,
@@ -264,70 +295,49 @@ class GridComposableFactory(_BaseComposableFactory):
                 device=data.device,
             ),
             n_channel_dims=n_channel_dims,
-            mask=mask,
         )
 
     @overload
     def create_deformation(
         self,
-        displacement_field: IMaskedTensor,
-        mask: Literal[None] = ...,
+        data: IMaskedTensor,
+        *,
+        data_format: str = ...,
+        data_coordinates: str = ...,
     ) -> IComposableMapping: ...
 
     @overload
     def create_deformation(
         self,
-        displacement_field: Tensor,
+        data: Tensor,
         mask: Optional[Tensor] = ...,
+        *,
+        data_format: str = ...,
+        data_coordinates: str = ...,
     ) -> IComposableMapping: ...
 
     def create_deformation(
         self,
-        displacement_field: Union[Tensor, IMaskedTensor],
+        data: Union[Tensor, IMaskedTensor],
         mask: Optional[Tensor] = None,
+        *,
+        data_format: str = "displacement_field",
+        data_coordinates: str = "voxel",
     ) -> IComposableMapping:
-        """Create mapping based on dense displacement field"""
-        displacement_field, mask = self._handle_tensor_inputs(displacement_field, mask)
-        return create_deformation(
-            displacement_field=displacement_field,
+        """Create deformation based on regular grid of samples"""
+        if data_coordinates == "voxel":
+            factory = create_deformation_from_voxel_data
+        elif data_coordinates == "world":
+            factory = create_deformation_from_world_data
+        else:
+            raise ValueError(f"Unsupported data format: {data_format}")
+        data = self._handle_tensor_inputs(data, mask)
+        return factory(
+            data=data,
             grid_mapping_args=self.grid_mapping_args,
             coordinate_system=self._obtain_coordinate_system(
-                dtype=displacement_field.dtype,
-                device=displacement_field.device,
+                dtype=data.dtype,
+                device=data.device,
             ),
-            mask=mask,
+            data_format=data_format,
         )
-
-
-def create_volume(
-    data: Tensor,
-    grid_mapping_args: GridMappingArgs,
-    coordinate_system: IVoxelCoordinateSystem,
-    n_channel_dims: int = 1,
-    mask: Optional[Tensor] = None,
-) -> IComposableMapping:
-    """Create volume based on grid samples"""
-    grid_volume = GridVolume(
-        data=data,
-        grid_mapping_args=grid_mapping_args,
-        n_channel_dims=n_channel_dims,
-        mask=mask,
-    )
-    return grid_volume.compose(coordinate_system.to_voxel_coordinates)
-
-
-def create_deformation(
-    displacement_field: Tensor,
-    grid_mapping_args: GridMappingArgs,
-    coordinate_system: IVoxelCoordinateSystem,
-    mask: Optional[Tensor] = None,
-) -> IComposableMapping:
-    """Create mapping based on dense displacement field"""
-    grid_volume = GridCoordinateMapping(
-        displacement_field=displacement_field,
-        grid_mapping_args=grid_mapping_args,
-        mask=mask,
-    )
-    return coordinate_system.from_voxel_coordinates.compose(grid_volume).compose(
-        coordinate_system.to_voxel_coordinates
-    )

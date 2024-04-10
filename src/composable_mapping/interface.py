@@ -185,6 +185,17 @@ class IMaskedTensor(ITensorLike):
     def reduce(self) -> "IMaskedTensor":
         """Return the masked tensor with the values explicitly stored"""
 
+    @abstractmethod
+    def modify_values(self, values: Tensor) -> "IMaskedTensor":
+        """Return a masked tensor with the values modified"""
+
+    @abstractmethod
+    def modify_mask(self, mask: Optional[Tensor]) -> "IMaskedTensor":
+        """Return a masked tensor with the mask modified
+
+        Setting mask to None is equivalent to clearing the mask
+        """
+
 
 class IComposableMapping(ITensorLike):
     """Composable mapping"""

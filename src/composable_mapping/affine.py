@@ -517,6 +517,18 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
     def __repr__(self) -> str:
         return f"_AffineTracer(affine_transformation={self.affine_transformation})"
 
+    def modify_values(self, values: Tensor) -> IMaskedTensor:
+        raise RuntimeError(
+            "Affine tracer has no values! Usually this error means that "
+            "the traced mapping is not affine."
+        )
+
+    def modify_mask(self, mask: Optional[Tensor]) -> IMaskedTensor:
+        raise RuntimeError(
+            "Affine tracer has no mask! Usually this error means that "
+            "the traced mapping is not affine."
+        )
+
 
 def compose_affine_transformation_matrices(
     transformation_1: Tensor, transformation_2: Tensor
