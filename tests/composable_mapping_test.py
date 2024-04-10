@@ -231,7 +231,7 @@ class ComposableFactoryTests(TestCase):
         for input_point, expected_output, expected_mask in zip(
             input_points, output_points, output_masks
         ):
-            output = volume(MaskedTensor(input_point))
+            output = volume(MaskedTensor(input_point))  # pylint bug - pylint: disable=not-callable
             assert_close(output.generate_values(), expected_output)
             assert_close(output.generate_mask(), expected_mask)
         middle_coordinate_system = create_centered_normalized(
@@ -240,7 +240,9 @@ class ComposableFactoryTests(TestCase):
         count_before = interpolator.counter
         assert_close(
             data[:, :, 1:-1],
-            volume(middle_coordinate_system.grid).generate_values(),
+            volume(  # pylint bug - pylint: disable=not-callable
+                middle_coordinate_system.grid
+            ).generate_values(),
         )
         self.assertEqual(interpolator.counter, count_before)
 
@@ -284,14 +286,16 @@ class ComposableFactoryTests(TestCase):
         for input_point, expected_output, expected_mask in zip(
             input_points, output_points, output_masks
         ):
-            output = mapping(MaskedTensor(input_point))
+            output = mapping(MaskedTensor(input_point))  # pylint bug - pylint: disable=not-callable
             assert_close(output.generate_values(), expected_output)
             assert_close(output.generate_mask(), expected_mask)
         middle_coordinate_system = create_centered_normalized(
             original_grid_shape=(4, 3), original_voxel_size=(1.0, 2.0), grid_shape=(2, 3)
         )
         count_before = interpolator.counter
-        grid_values = mapping(middle_coordinate_system.grid)
+        grid_values = mapping(  # pylint bug - pylint: disable=not-callable
+            middle_coordinate_system.grid
+        )
         assert_close(
             (data + generate_voxel_coordinate_grid((4, 3), data.device))[..., 1:-1, :],
             coordinate_system.to_voxel_coordinates(grid_values).generate_values(),
