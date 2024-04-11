@@ -412,6 +412,10 @@ class ComposableAffine(BaseComposableMapping):
         return f"ComposableAffine(affine_transformation={self._affine_transformation})"
 
 
+class NotAffineTransformationError(Exception):
+    """Error raised when a composable mapping is not affine"""
+
+
 def as_affine_transformation(
     composable_mapping: IComposableMapping, n_dims: int
 ) -> IAffineTransformation:
@@ -427,7 +431,7 @@ def as_affine_transformation(
     traced = composable_mapping(tracer)
     if isinstance(traced, _AffineTracer):
         return traced.affine_transformation
-    raise RuntimeError("Could not infer affine transformation")
+    raise NotAffineTransformationError("Could not infer affine transformation")
 
 
 class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
@@ -453,7 +457,7 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
         self,
         generate_missing_mask: bool = True,
     ):
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no values or mask! Usually this error means that "
             "the traced mapping is not affine."
         )
@@ -462,7 +466,7 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
         self,
         generate_missing_mask: bool = True,
     ):
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no mask! Usually this error means that "
             "the traced mapping is not affine."
         )
@@ -470,7 +474,7 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
     def generate_values(
         self,
     ) -> Tensor:
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no values! Usually this error means that "
             "the traced mapping is not affine."
         )
@@ -483,21 +487,21 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
 
     @property
     def channels_shape(self) -> Sequence[int]:
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no channels! Usually this error means that "
             "the traced mapping is not affine."
         )
 
     @property
     def shape(self) -> Sequence[int]:
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no shape! Usually this error means that "
             "the traced mapping is not affine."
         )
 
     @property
     def spatial_shape(self) -> Sequence[int]:
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no spatial shape! Usually this error means that "
             "the traced mapping is not affine."
         )
@@ -518,13 +522,13 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
         return f"_AffineTracer(affine_transformation={self.affine_transformation})"
 
     def modify_values(self, values: Tensor) -> IMaskedTensor:
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no values! Usually this error means that "
             "the traced mapping is not affine."
         )
 
     def modify_mask(self, mask: Optional[Tensor]) -> IMaskedTensor:
-        raise RuntimeError(
+        raise NotAffineTransformationError(
             "Affine tracer has no mask! Usually this error means that "
             "the traced mapping is not affine."
         )

@@ -2,7 +2,7 @@
 
 from abc import abstractmethod
 from itertools import combinations
-from typing import Any, Mapping, Optional, Tuple, TypeVar, Union
+from typing import Any, Literal, Mapping, Optional, Tuple, TypeVar, Union, overload
 
 from matplotlib.figure import Figure  # type: ignore
 from matplotlib.pyplot import subplots  # type: ignore
@@ -13,7 +13,11 @@ from composable_mapping.finite_difference import (
     estimate_spatial_jacobian_matrices_for_mapping,
 )
 
-from .affine import ComposableAffine
+from .affine import (
+    ComposableAffine,
+    NotAffineTransformationError,
+    as_affine_transformation,
+)
 from .base import BaseTensorLikeWrapper
 from .grid_mapping import (
     GridMappingArgs,
@@ -132,6 +136,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
     def estimate_spatial_derivatives(
         self,
         spatial_dim: int,
+        *,
         other_dims: Optional[str] = None,
         central: bool = False,
         out: Optional[Tensor] = None,
@@ -156,6 +161,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
 
     def estimate_spatial_jacobian_matrices(
         self,
+        *,
         other_dims: str = "average",
         central: bool = False,
         out: Optional[Tensor] = None,
@@ -202,7 +208,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         )
         self.resample_as = resample_as
 
-    def as_displacement_field(self, in_voxel_coordinates: bool = True) -> IMaskedTensor:
+    def as_displacement_field(self, *, in_voxel_coordinates: bool = True) -> IMaskedTensor:
         """Return the mapping as displacement field"""
         coordinates = self.sample()
         if not in_voxel_coordinates:
@@ -235,6 +241,27 @@ class SamplableDeformationMapping(BaseSamplableMapping):
             resample_as=self.resample_as,
         )
 
+    @overload
+    def as_affine(
+        self, *, return_none_if_not_affine: Literal[False] = ...
+    ) -> IAffineTransformation: ...
+
+    @overload
+    def as_affine(self, *, return_none_if_not_affine: bool) -> Optional[IAffineTransformation]: ...
+
+    def as_affine(
+        self, *, return_none_if_not_affine: bool = False
+    ) -> Optional[IAffineTransformation]:
+        """Return the mapping as affine transformation, if possible"""
+        try:
+            return as_affine_transformation(
+                self.mapping, n_dims=len(self.coordinate_system.grid.spatial_shape)
+            )
+        except NotAffineTransformationError:
+            if return_none_if_not_affine:
+                return None
+            raise
+
     def _simplified_modified_copy(
         self, mapping: IComposableMapping, coordinate_system: IVoxelCoordinateSystem
     ) -> "SamplableDeformationMapping":
@@ -258,6 +285,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 
     def visualize(
         self,
+        *,
         batch_index: int = 0,
         figure_height: int = 5,
         emphasize_every_nth_line: Optional[Tuple[int, int]] = None,
