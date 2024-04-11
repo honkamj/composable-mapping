@@ -311,14 +311,14 @@ class SamplableDeformationMapping(BaseSamplableMapping):
             axis.axis("equal")
             axis.set_xlabel(dimension_to_letter(dim_1))
             axis.set_ylabel(dimension_to_letter(dim_2))
-            for row_index in range(grid.size(1)):
+            for row_index in range(grid.shape[1]):
                 axis.plot(
                     grid[0, row_index, :],
                     grid[1, row_index, :],
                     color="gray",
                     **get_kwargs(row_index),
                 )
-            for col_index in range(grid.size(2)):
+            for col_index in range(grid.shape[2]):
                 axis.plot(
                     grid[0, :, col_index],
                     grid[1, :, col_index],
