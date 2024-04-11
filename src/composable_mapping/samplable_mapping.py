@@ -252,6 +252,10 @@ class SamplableDeformationMapping(BaseSamplableMapping):
             f"grid_mapping_args={self.grid_mapping_args})"
         )
 
+    @staticmethod
+    def _to_numpy(tensor: Tensor) -> Tensor:
+        return tensor.detach().cpu().resolve_conj().resolve_neg().numpy()
+
     def visualize(
         self,
         batch_index: int = 0,
@@ -281,9 +285,11 @@ class SamplableDeformationMapping(BaseSamplableMapping):
                     transformed_grid_2d = transformed_grid_2d[transformed_grid_2d.size(0) // 2]
                 assert transformed_grid_2d.ndim == 3
                 assert transformed_grid_2d.size(0) == 2
-                grids.append(transformed_grid_2d)
+                grids.append(self._to_numpy(transformed_grid_2d))
         else:
             raise NotImplementedError("Visualization of 1D deformation is not supported")
+
+        del transformed_grid
 
         def dimension_to_letter(dim: int) -> str:
             if n_dims <= 3:
