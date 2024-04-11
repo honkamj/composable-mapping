@@ -561,7 +561,9 @@ def _generate_coordinate_system(
     from_voxel_coordinates_affine = to_voxel_coordinates_affine.invert().reduce(pin_memory=True)
     to_voxel_coordinates = ComposableAffine(to_voxel_coordinates_affine)
     from_voxel_coordinates = ComposableAffine(from_voxel_coordinates_affine)
-    voxel_grid = VoxelCoordinateGrid(grid_shape)
+    voxel_grid = VoxelCoordinateGrid(
+        grid_shape, dtype=transformation_matrix.dtype, device=to_voxel_coordinates_affine.device
+    )
     return VoxelCoordinateSystem(
         from_voxel_coordinates=from_voxel_coordinates,
         to_voxel_coordinates=to_voxel_coordinates,
