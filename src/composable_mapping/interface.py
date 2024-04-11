@@ -82,14 +82,8 @@ class IMaskedTensor(ITensorLike):
     @overload
     def generate(
         self,
-        generate_missing_mask: Literal[True] = ...,
+        generate_missing_mask: Literal[True] = True,
     ) -> Tuple[Tensor, Tensor]: ...
-
-    @overload
-    def generate(
-        self,
-        generate_missing_mask: Literal[False],
-    ) -> Tuple[Tensor, Optional[Tensor]]: ...
 
     @overload
     def generate(
@@ -119,12 +113,6 @@ class IMaskedTensor(ITensorLike):
         self,
         generate_missing_mask: Literal[True] = ...,
     ) -> Tensor: ...
-
-    @overload
-    def generate_mask(
-        self,
-        generate_missing_mask: Literal[False],
-    ) -> Optional[Tensor]: ...
 
     @overload
     def generate_mask(

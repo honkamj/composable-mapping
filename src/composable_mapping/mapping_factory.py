@@ -1,6 +1,6 @@
 """Factory methods for generating useful composable mappings"""
 
-from typing import Literal, Optional, Union, overload
+from typing import Optional, Union, overload
 
 from torch import Tensor
 from torch import device as torch_device
@@ -264,7 +264,6 @@ class GridComposableFactory(_BaseComposableFactory):
     def create_volume(
         self,
         data: IMaskedTensor,
-        mask: Literal[None] = ...,
         *,
         n_channel_dims: int = ...,
     ) -> IComposableMapping: ...

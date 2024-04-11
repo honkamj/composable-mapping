@@ -14,9 +14,8 @@ from torch import ones
 from torch import round as torch_round
 from torch import tensor
 
-from composable_mapping.base import BaseTensorLikeWrapper
-
 from .affine import IdentityAffineTransformation
+from .base import BaseTensorLikeWrapper
 from .dense_deformation import generate_voxel_coordinate_grid
 from .interface import IAffineTransformation, IMaskedTensor, ITensorLike
 from .util import index_by_channel_dims, reduce_channel_shape_to_ones
