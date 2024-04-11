@@ -234,7 +234,7 @@ class GridDeformation(_BaseGridDeformation):
         )
 
     def invert(self, **inversion_parameters) -> "_GridDeformationInverse":
-        """Fixed point invert displacement field
+        """Invert the deformation
 
         inversion_parameters:
             fixed_point_inversion_arguments (Mapping[str, Any]): Arguments for
