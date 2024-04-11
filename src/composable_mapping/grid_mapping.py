@@ -1,6 +1,6 @@
 """Grid based mappings"""
 
-from typing import Callable, Mapping, Optional, Tuple, Union, overload
+from typing import Callable, Mapping, Optional, Tuple, Union
 
 from deformation_inversion_layer import (
     DeformationInversionArguments,
@@ -150,7 +150,7 @@ class GridVolume(BaseComposableMapping):
             return (mask < self._grid_mapping_args.mask_threshold).logical_not().type(mask.dtype)
         return mask
 
-    def invert(self, **kwargs) -> IComposableMapping:
+    def invert(self, **inversion_parameters) -> IComposableMapping:
         raise NotImplementedError("No inversion implemented for grid volumes")
 
     def __repr__(self) -> str:
@@ -160,18 +160,9 @@ class GridVolume(BaseComposableMapping):
         )
 
 
-class GridDeformation(GridVolume):
-    """Continuously defined mapping based on regular grid samples whose values
-    have the same dimensionality as the spatial dimensions
-
-    Arguments:
-        data: (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The values are
-            either directly the coordinates or a displacement field. The values
-            should be given in voxel coordinates, and the grid is also assumed
-            to be in voxel coordinates.
-        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
-        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
-    """
+class _BaseGridDeformation(GridVolume):
+    """Base class for continuously defined mapping based on regular grid samples
+    whose values have the same dimensionality as the spatial dimensions"""
 
     def __init__(
         self,
@@ -187,17 +178,6 @@ class GridDeformation(GridVolume):
             n_channel_dims=1,
         )
         self._data_format = data_format
-
-    def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
-    ) -> "GridDeformation":
-        if not isinstance(children["data"], IMaskedTensor):
-            raise ValueError("Invalid children for samplable composable")
-        return GridDeformation(
-            data=children["data"],
-            grid_mapping_args=self._grid_mapping_args,
-            data_format=self._data_format,
-        )
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
         if self._data_format == "displacement_field":
@@ -222,16 +202,38 @@ class GridDeformation(GridVolume):
             values = values.modify_values(values=values.generate_values() + voxel_coordinates)
         return values
 
-    @overload
-    def invert(self: "GridDeformation", **inversion_parameters) -> "_GridDeformationInverse": ...
+    def __repr__(self) -> str:
+        return (
+            f"GridCoordinateMapping(displacement_field={self._data}, "
+            f"grid_mapping_args={self._grid_mapping_args})"
+        )
 
-    # overload is required for the subclass
-    @overload
-    def invert(  # type: ignore
-        self: "_GridDeformationInverse", **inversion_parameters
-    ) -> "GridDeformation": ...
 
-    def invert(self, **inversion_parameters):
+class GridDeformation(_BaseGridDeformation):
+    """Continuously defined mapping based on regular grid samples whose values
+    have the same dimensionality as the spatial dimensions
+
+    Arguments:
+        data: (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The values are
+            either directly the coordinates or a displacement field. The values
+            should be given in voxel coordinates, and the grid is also assumed
+            to be in voxel coordinates.
+        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
+    """
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "GridDeformation":
+        if not isinstance(children["data"], IMaskedTensor):
+            raise ValueError("Invalid children for samplable composable")
+        return GridDeformation(
+            data=children["data"],
+            grid_mapping_args=self._grid_mapping_args,
+            data_format=self._data_format,
+        )
+
+    def invert(self, **inversion_parameters) -> "_GridDeformationInverse":
         """Fixed point invert displacement field
 
         inversion_parameters:
@@ -255,14 +257,8 @@ class GridDeformation(GridVolume):
             data_format=self._data_format,
         )
 
-    def __repr__(self) -> str:
-        return (
-            f"GridCoordinateMapping(displacement_field={self._data}, "
-            f"grid_mapping_args={self._grid_mapping_args})"
-        )
 
-
-class _GridDeformationInverse(GridDeformation):
+class _GridDeformationInverse(_BaseGridDeformation):
     """Inverse of a GridDeformation
 
     The inverse is computed using a fixed point iteration
@@ -282,6 +278,18 @@ class _GridDeformationInverse(GridDeformation):
         )
         self._inversion_arguments = inversion_arguments
         self._inverted_data_format = data_format
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "_GridDeformationInverse":
+        if not isinstance(children["data"], IMaskedTensor):
+            raise ValueError("Invalid children for samplable composable")
+        return _GridDeformationInverse(
+            inverted_data=children["data"],
+            grid_mapping_args=self._grid_mapping_args,
+            inversion_arguments=self._inversion_arguments,
+            data_format=self._inverted_data_format,
+        )
 
     def _evaluate(
         self,
@@ -305,7 +313,7 @@ class _GridDeformationInverse(GridDeformation):
         mask = combine_optional_masks([mask, coordinate_mask])
         return MaskedTensor(inverted_values, mask, self._n_channel_dims)
 
-    def invert(self, **_inversion_parameters):
+    def invert(self, **inversion_parameters) -> GridDeformation:
         return GridDeformation(
             data=self._data,
             grid_mapping_args=self._grid_mapping_args,

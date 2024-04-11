@@ -117,7 +117,7 @@ class IMaskedTensor(ITensorLike):
     @overload
     def generate_mask(
         self,
-        generate_missing_mask: bool,
+        generate_missing_mask: Union[bool, Literal[False]],
     ) -> Optional[Tensor]: ...
 
     @abstractmethod

@@ -1,6 +1,6 @@
 """Masked tensors"""
 
-from typing import Mapping, Optional, Sequence, Tuple, Union
+from typing import Literal, Mapping, Optional, Sequence, Tuple, Union, overload
 
 from torch import Tensor, allclose
 from torch import any as torch_any
@@ -105,19 +105,43 @@ class MaskedTensor(IMaskedTensor, BaseTensorLikeWrapper):
         first_channel_dim = index_by_channel_dims(self._values.ndim, 0, self._n_channel_dims)
         return self._values.shape[first_channel_dim : first_channel_dim + self._n_channel_dims]
 
+    @overload
+    def generate(
+        self,
+        generate_missing_mask: Literal[True] = True,
+    ) -> Tuple[Tensor, Tensor]: ...
+
+    @overload
+    def generate(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
+        self,
+        generate_missing_mask: bool,
+    ) -> Tuple[Tensor, Optional[Tensor]]: ...
+
     def generate(
         self,
         generate_missing_mask: bool = True,
-    ):
+    ) -> Tuple[Tensor, Optional[Tensor]]:
         return (
             self.generate_values(),
             self.generate_mask(generate_missing_mask=generate_missing_mask),
         )
 
+    @overload
+    def generate_mask(
+        self,
+        generate_missing_mask: Literal[True] = ...,
+    ) -> Tensor: ...
+
+    @overload
+    def generate_mask(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
+        self,
+        generate_missing_mask: Union[bool, Literal[False]],
+    ) -> Optional[Tensor]: ...
+
     def generate_mask(
         self,
         generate_missing_mask: bool = True,
-    ):
+    ) -> Optional[Tensor]:
         if self._mask is not None:
             return self._mask
         return (
@@ -262,13 +286,43 @@ class VoxelCoordinateGrid(IMaskedTensor, BaseTensorLikeWrapper):
             device=children["affine_transformation"].device,
         )
 
-    def generate(self, generate_missing_mask: bool = True):
+    @overload
+    def generate(
+        self,
+        generate_missing_mask: Literal[True] = True,
+    ) -> Tuple[Tensor, Tensor]: ...
+
+    @overload
+    def generate(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
+        self,
+        generate_missing_mask: bool,
+    ) -> Tuple[Tensor, Optional[Tensor]]: ...
+
+    def generate(
+        self,
+        generate_missing_mask: bool = True,
+    ) -> Tuple[Tensor, Optional[Tensor]]:
         return (
             self.generate_values(),
             self.generate_mask(generate_missing_mask=generate_missing_mask),
         )
 
-    def generate_mask(self, generate_missing_mask: bool = True):
+    @overload
+    def generate_mask(
+        self,
+        generate_missing_mask: Literal[True] = ...,
+    ) -> Tensor: ...
+
+    @overload
+    def generate_mask(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
+        self,
+        generate_missing_mask: Union[bool, Literal[False]],
+    ) -> Optional[Tensor]: ...
+
+    def generate_mask(
+        self,
+        generate_missing_mask: bool = True,
+    ) -> Optional[Tensor]:
         return (
             ones(
                 (1, 1) + tuple(self._spatial_shape),
