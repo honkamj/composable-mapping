@@ -1,5 +1,7 @@
 """Grid based mappings"""
 
+from contextlib import ContextDecorator
+from threading import local
 from typing import Callable, Mapping, Optional, Tuple, Union
 
 from deformation_inversion_layer import (
@@ -21,7 +23,7 @@ from .masked_tensor import MaskedTensor
 from .util import combine_optional_masks
 
 
-class GridMappingArgs:
+class InterpolationArgs:
     """Represents arguments for creating grid volume
 
     Arguments:
@@ -48,7 +50,7 @@ class GridMappingArgs:
 
     def __repr__(self) -> str:
         return (
-            f"GridMappingArgs(interpolator={self.interpolator}, "
+            f"InterpolationArgs(interpolator={self.interpolator}, "
             f"mask_interpolator={self.mask_interpolator}, "
             f"mask_outside_fov={self.mask_outside_fov}, "
             f"mask_threshold={self.mask_threshold})"
@@ -62,7 +64,7 @@ class GridVolume(BaseComposableMapping):
         data: Regular grid of values defining the deformation, with shape
             (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The grid should be
             in voxel coordinates.
-        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        interpolation_args: Arguments defining interpolation and extrapolation behavior
         mask: Mask defining invalid regions,
             Tensor with shape (batch_size, *(1,) * len(channel_dims), dim_1, ..., dim_{n_dims})
         n_channel_dims: Number of channel dimensions in data
@@ -71,11 +73,11 @@ class GridVolume(BaseComposableMapping):
     def __init__(
         self,
         data: IMaskedTensor,
-        grid_mapping_args: GridMappingArgs,
+        interpolation_args: InterpolationArgs,
         n_channel_dims: int = 1,
     ) -> None:
         self._data = data
-        self._grid_mapping_args = grid_mapping_args
+        self._interpolation_args = interpolation_args
         self._n_channel_dims = n_channel_dims
         self._volume_shape = data.shape[n_channel_dims + 1 :]
         self._n_dims = len(self._volume_shape)
@@ -95,7 +97,7 @@ class GridVolume(BaseComposableMapping):
             raise ValueError("Invalid children for samplable composable")
         return GridVolume(
             data=children["data"],
-            grid_mapping_args=self._grid_mapping_args,
+            interpolation_args=self._interpolation_args,
             n_channel_dims=self._n_channel_dims,
         )
 
@@ -115,7 +117,7 @@ class GridVolume(BaseComposableMapping):
         data, data_mask = self._data.generate(generate_missing_mask=False)
         if coordinates_as_slice is None:
             voxel_coordinates = voxel_coordinates_generator()
-            values = self._grid_mapping_args.interpolator(data, voxel_coordinates)
+            values = self._interpolation_args.interpolator(data, voxel_coordinates)
             mask = self._evaluate_mask(voxel_coordinates, data_mask)
         else:
             values = data[coordinates_as_slice]
@@ -129,7 +131,7 @@ class GridVolume(BaseComposableMapping):
         if data_mask is None:
             interpolated_mask: Optional[Tensor] = None
         else:
-            interpolated_mask = self._grid_mapping_args.mask_interpolator(
+            interpolated_mask = self._interpolation_args.mask_interpolator(
                 data_mask, voxel_coordinates
             )
             interpolated_mask = self._threshold_mask(interpolated_mask)
@@ -139,15 +141,15 @@ class GridVolume(BaseComposableMapping):
                 volume_shape=self._volume_shape,
                 dtype=voxel_coordinates.dtype,
             )
-            if self._grid_mapping_args.mask_outside_fov
+            if self._interpolation_args.mask_outside_fov
             else None
         )
         mask = combine_optional_masks([interpolated_mask, fov_mask])
         return mask
 
     def _threshold_mask(self, mask: Tensor) -> Tensor:
-        if self._grid_mapping_args.mask_threshold is not None:
-            return (mask >= self._grid_mapping_args.mask_threshold).type(mask.dtype)
+        if self._interpolation_args.mask_threshold is not None:
+            return (mask >= self._interpolation_args.mask_threshold).type(mask.dtype)
         return mask
 
     def invert(self, **inversion_parameters) -> IComposableMapping:
@@ -155,7 +157,7 @@ class GridVolume(BaseComposableMapping):
 
     def __repr__(self) -> str:
         return (
-            f"GridVolume(data={self._data}, grid_mapping_args={self._grid_mapping_args}, "
+            f"GridVolume(data={self._data}, interpolation_args={self._interpolation_args}, "
             f"n_channel_dims={self._n_channel_dims})"
         )
 
@@ -167,14 +169,14 @@ class _BaseGridDeformation(GridVolume):
     def __init__(
         self,
         data: IMaskedTensor,
-        grid_mapping_args: GridMappingArgs,
+        interpolation_args: InterpolationArgs,
         data_format: str = "displacement_field",
     ) -> None:
         if data.shape[1] != len(data.shape) - 2:
             raise ValueError("Data should have the same dimensionality as the spatial dimensions")
         super().__init__(
             data=data,
-            grid_mapping_args=grid_mapping_args,
+            interpolation_args=interpolation_args,
             n_channel_dims=1,
         )
         self._data_format = data_format
@@ -205,7 +207,7 @@ class _BaseGridDeformation(GridVolume):
     def __repr__(self) -> str:
         return (
             f"GridCoordinateMapping(displacement_field={self._data}, "
-            f"grid_mapping_args={self._grid_mapping_args})"
+            f"interpolation_args={self._interpolation_args})"
         )
 
 
@@ -218,7 +220,7 @@ class GridDeformation(_BaseGridDeformation):
             either directly the coordinates or a displacement field. The values
             should be given in voxel coordinates, and the grid is also assumed
             to be in voxel coordinates.
-        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        interpolation_args: Arguments defining interpolation and extrapolation behavior
         data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
     """
 
@@ -229,7 +231,7 @@ class GridDeformation(_BaseGridDeformation):
             raise ValueError("Invalid children for samplable composable")
         return GridDeformation(
             data=children["data"],
-            grid_mapping_args=self._grid_mapping_args,
+            interpolation_args=self._interpolation_args,
             data_format=self._data_format,
         )
 
@@ -244,7 +246,7 @@ class GridDeformation(_BaseGridDeformation):
             "fixed_point_inversion_arguments", {}
         )
         deformation_inversion_arguments = DeformationInversionArguments(
-            interpolator=self._grid_mapping_args.interpolator,
+            interpolator=self._interpolation_args.interpolator,
             forward_solver=fixed_point_inversion_arguments.get("forward_solver"),
             backward_solver=fixed_point_inversion_arguments.get("backward_solver"),
             forward_dtype=fixed_point_inversion_arguments.get("forward_dtype"),
@@ -252,7 +254,7 @@ class GridDeformation(_BaseGridDeformation):
         )
         return _GridDeformationInverse(
             inverted_data=self._data,
-            grid_mapping_args=self._grid_mapping_args,
+            interpolation_args=self._interpolation_args,
             inversion_arguments=deformation_inversion_arguments,
             data_format=self._data_format,
         )
@@ -267,13 +269,13 @@ class _GridDeformationInverse(_BaseGridDeformation):
     def __init__(
         self,
         inverted_data: IMaskedTensor,
-        grid_mapping_args: GridMappingArgs,
+        interpolation_args: InterpolationArgs,
         inversion_arguments: DeformationInversionArguments,
         data_format: str,
     ) -> None:
         super().__init__(
             data=inverted_data,
-            grid_mapping_args=grid_mapping_args,
+            interpolation_args=interpolation_args,
             data_format="displacement_field",
         )
         self._inversion_arguments = inversion_arguments
@@ -286,7 +288,7 @@ class _GridDeformationInverse(_BaseGridDeformation):
             raise ValueError("Invalid children for samplable composable")
         return _GridDeformationInverse(
             inverted_data=children["data"],
-            grid_mapping_args=self._grid_mapping_args,
+            interpolation_args=self._interpolation_args,
             inversion_arguments=self._inversion_arguments,
             data_format=self._inverted_data_format,
         )
@@ -316,27 +318,27 @@ class _GridDeformationInverse(_BaseGridDeformation):
     def invert(self, **inversion_parameters) -> GridDeformation:
         return GridDeformation(
             data=self._data,
-            grid_mapping_args=self._grid_mapping_args,
+            interpolation_args=self._interpolation_args,
             data_format=self._inverted_data_format,
         )
 
     def __repr__(self) -> str:
         return (
             f"_GridCoordinateMappingInverse(displacement_field={self._data}, "
-            f"grid_mapping_args={self._grid_mapping_args})"
+            f"interpolation_args={self._interpolation_args})"
         )
 
 
 def create_volume(
     data: IMaskedTensor,
-    grid_mapping_args: GridMappingArgs,
+    interpolation_args: InterpolationArgs,
     coordinate_system: IVoxelCoordinateSystem,
     n_channel_dims: int = 1,
 ) -> IComposableMapping:
     """Create volume based on grid samples"""
     grid_volume = GridVolume(
         data=data,
-        grid_mapping_args=grid_mapping_args,
+        interpolation_args=interpolation_args,
         n_channel_dims=n_channel_dims,
     )
     return grid_volume.compose(coordinate_system.to_voxel_coordinates)
@@ -344,7 +346,7 @@ def create_volume(
 
 def create_deformation_from_voxel_data(
     data: IMaskedTensor,
-    grid_mapping_args: GridMappingArgs,
+    interpolation_args: InterpolationArgs,
     coordinate_system: IVoxelCoordinateSystem,
     data_format: str = "displacement_field",
 ) -> IComposableMapping:
@@ -358,14 +360,14 @@ def create_deformation_from_voxel_data(
             either directly the coordinates or a displacement field. The values
             should be given in voxel coordinates, and the grid is also assumed
             to be in voxel coordinates.
-        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        interpolation_args: Arguments defining interpolation and extrapolation behavior
         coordinate_system: Coordinate system defining transformations between voxel and
             world coordinates
         data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
     """
     grid_volume = GridDeformation(
         data=data,
-        grid_mapping_args=grid_mapping_args,
+        interpolation_args=interpolation_args,
         data_format=data_format,
     )
     return coordinate_system.from_voxel_coordinates.compose(grid_volume).compose(
@@ -375,7 +377,7 @@ def create_deformation_from_voxel_data(
 
 def create_deformation_from_world_data(
     data: IMaskedTensor,
-    grid_mapping_args: GridMappingArgs,
+    interpolation_args: InterpolationArgs,
     coordinate_system: IVoxelCoordinateSystem,
     data_format: str = "displacement_field",
 ) -> IComposableMapping:
@@ -392,7 +394,7 @@ def create_deformation_from_world_data(
             either directly the coordinates or a displacement field. The values
             should be given in world coordinates, and the grid is also assumed
             to be in world coordinates.
-        grid_mapping_args: Arguments defining interpolation and extrapolation behavior
+        interpolation_args: Arguments defining interpolation and extrapolation behavior
         coordinate_system: Coordinate system defining transformations between voxel and
             world coordinates
         data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
@@ -414,7 +416,56 @@ def create_deformation_from_world_data(
         raise ValueError(f"Invalid data format: {data_format}")
     return create_deformation_from_voxel_data(
         data=data_in_voxel_coordinates,
-        grid_mapping_args=grid_mapping_args,
+        interpolation_args=interpolation_args,
         coordinate_system=coordinate_system,
         data_format=data_format,
     )
+
+
+_DEFAULT_INTERPOLATION_ARGS: Optional[InterpolationArgs] = None
+_DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK = local()
+_DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack = []
+
+
+def get_default_interpolation_args() -> Optional[InterpolationArgs]:
+    """Get current default interpolation args"""
+    if _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack:
+        return _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack[-1]
+    return _DEFAULT_INTERPOLATION_ARGS
+
+
+def set_default_interpolation_args(interpolation_args: Optional[InterpolationArgs]) -> None:
+    """Set default interpolation args"""
+    global _DEFAULT_INTERPOLATION_ARGS  # pylint: disable=global-statement
+    _DEFAULT_INTERPOLATION_ARGS = interpolation_args
+
+
+def clear_default_interpolation_args() -> None:
+    """Clear default interpolation args"""
+    global _DEFAULT_INTERPOLATION_ARGS  # pylint: disable=global-statement
+    _DEFAULT_INTERPOLATION_ARGS = None
+
+
+def get_interpolation_args(interpolation_args: Optional[InterpolationArgs]) -> InterpolationArgs:
+    """Get interpolation args, either from argument or default"""
+    interpolation_args = (
+        interpolation_args if interpolation_args is not None else get_default_interpolation_args()
+    )
+    if interpolation_args is None:
+        raise ValueError("No interpolation args provided, and no default set")
+    return interpolation_args
+
+
+class default_interpolation_args(  # this is supposed to appear as function - pylint: disable=invalid-name
+    ContextDecorator
+):
+    """Context manager for setting default interpolation args"""
+
+    def __init__(self, interpolation_args: Optional[InterpolationArgs]):
+        self.interpolation_args = interpolation_args
+
+    def __enter__(self) -> None:
+        _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack.append(self.interpolation_args)
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack.pop()

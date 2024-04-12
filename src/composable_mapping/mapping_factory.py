@@ -8,10 +8,11 @@ from torch import dtype as torch_dtype
 
 from .affine import AffineTransformation, ComposableAffine
 from .grid_mapping import (
-    GridMappingArgs,
+    InterpolationArgs,
     create_deformation_from_voxel_data,
     create_deformation_from_world_data,
     create_volume,
+    get_interpolation_args,
 )
 from .identity import ComposableIdentity
 from .interface import (
@@ -44,7 +45,7 @@ class BaseMappingFactory(IVoxelCoordinateSystemFactory):
 
     def __init__(
         self,
-        grid_mapping_args: GridMappingArgs,
+        interpolation_args: Optional[InterpolationArgs] = None,
         coordinate_system: Optional[IVoxelCoordinateSystem] = None,
         coordinate_system_factory: Optional[IVoxelCoordinateSystemFactory] = None,
     ) -> None:
@@ -58,7 +59,7 @@ class BaseMappingFactory(IVoxelCoordinateSystemFactory):
             )
         self.coordinate_system = coordinate_system
         self.coordinate_system_factory = coordinate_system_factory
-        self.grid_mapping_args = grid_mapping_args
+        self.interpolation_args = get_interpolation_args(interpolation_args)
 
     def create(
         self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
@@ -75,7 +76,7 @@ class BaseMappingFactory(IVoxelCoordinateSystemFactory):
         return (
             f"{self.__class__.__name__}(coordinate_system={self.coordinate_system}, "
             f"coordinate_system_factory={self.coordinate_system_factory}, "
-            f"grid_mapping_args={self.grid_mapping_args})"
+            f"interpolation_args={self.interpolation_args})"
         )
 
     def _handle_tensor_inputs(
@@ -124,12 +125,11 @@ class SamplableMappingFactory(BaseMappingFactory):
         return SamplableVolumeMapping(
             mapping=create_volume(
                 data=data,
-                grid_mapping_args=self.grid_mapping_args,
+                interpolation_args=self.interpolation_args,
                 coordinate_system=coordinate_system,
                 n_channel_dims=n_channel_dims,
             ),
             coordinate_system=coordinate_system,
-            grid_mapping_args=self.grid_mapping_args,
         )
 
     @overload
@@ -179,17 +179,16 @@ class SamplableMappingFactory(BaseMappingFactory):
         return SamplableDeformationMapping(
             mapping=factory(
                 data=data,
-                grid_mapping_args=self.grid_mapping_args,
+                interpolation_args=self.interpolation_args,
                 coordinate_system=coordinate_system,
                 data_format=data_format,
             ),
             coordinate_system=coordinate_system,
-            grid_mapping_args=self.grid_mapping_args,
-            resample_as=data_format,
         )
 
     def create_affine(
-        self, transformation_matrix: Tensor, *, resample_as: str = "displacement_field"
+        self,
+        transformation_matrix: Tensor,
     ) -> SamplableDeformationMapping:
         """Create samplable affine mapping"""
         return SamplableDeformationMapping(
@@ -197,16 +196,12 @@ class SamplableMappingFactory(BaseMappingFactory):
             coordinate_system=self.create(
                 dtype=transformation_matrix.dtype, device=transformation_matrix.device
             ),
-            grid_mapping_args=self.grid_mapping_args,
-            resample_as=resample_as,
         )
 
     def create_identity(
         self,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
-        *,
-        resample_as: str = "displacement_field",
     ) -> SamplableDeformationMapping:
         """Create samplable identity mapping
 
@@ -216,15 +211,11 @@ class SamplableMappingFactory(BaseMappingFactory):
         return SamplableDeformationMapping(
             create_composable_identity(),
             coordinate_system=self.create(dtype=dtype, device=device),
-            grid_mapping_args=self.grid_mapping_args,
-            resample_as=resample_as,
         )
 
     def create_identity_from(
         self,
         reference: Union[ITensorLike, Tensor],
-        *,
-        resample_as: str = "displacement_field",
     ) -> SamplableDeformationMapping:
         """Create samplable identity mapping
 
@@ -234,15 +225,11 @@ class SamplableMappingFactory(BaseMappingFactory):
         return SamplableDeformationMapping(
             create_composable_identity(),
             coordinate_system=self.create(dtype=reference.dtype, device=reference.device),
-            grid_mapping_args=self.grid_mapping_args,
-            resample_as=resample_as,
         )
 
 
 def create_samplable_identity_from(
     reference: BaseSamplableMapping,
-    *,
-    resample_as: str = "displacement_field",
 ) -> SamplableDeformationMapping:
     """Create samplable identity mapping
 
@@ -252,8 +239,6 @@ def create_samplable_identity_from(
     return SamplableDeformationMapping(
         create_composable_identity(),
         coordinate_system=reference.coordinate_system,
-        grid_mapping_args=reference.grid_mapping_args,
-        resample_as=resample_as,
     )
 
 
@@ -288,7 +273,7 @@ class GridComposableFactory(BaseMappingFactory):
         data = self._handle_tensor_inputs(data, mask)
         return create_volume(
             data=data,
-            grid_mapping_args=self.grid_mapping_args,
+            interpolation_args=self.interpolation_args,
             coordinate_system=self.create(
                 dtype=data.dtype,
                 device=data.device,
@@ -333,7 +318,7 @@ class GridComposableFactory(BaseMappingFactory):
         data = self._handle_tensor_inputs(data, mask)
         return factory(
             data=data,
-            grid_mapping_args=self.grid_mapping_args,
+            interpolation_args=self.interpolation_args,
             coordinate_system=self.create(
                 dtype=data.dtype,
                 device=data.device,

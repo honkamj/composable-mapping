@@ -19,9 +19,10 @@ from .finite_difference import (
     estimate_spatial_jacobian_matrices_for_mapping,
 )
 from .grid_mapping import (
-    GridMappingArgs,
     GridVolume,
+    InterpolationArgs,
     create_deformation_from_voxel_data,
+    get_interpolation_args,
 )
 from .interface import (
     IAffineTransformation,
@@ -41,18 +42,15 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
     Arguments:
         mapping: Composable mapping to be wrapped
         coordinate_system: Coordinate system to use for sampling and resampling
-        grid_mapping_args: Grid mapping arguments to use for resampling
     """
 
     def __init__(
         self,
         mapping: IComposableMapping,
         coordinate_system: IVoxelCoordinateSystem,
-        grid_mapping_args: GridMappingArgs,
     ):
         self.mapping = mapping
         self.coordinate_system = coordinate_system
-        self.grid_mapping_args = grid_mapping_args
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
         return self.mapping(masked_coordinates)
@@ -79,16 +77,47 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
             target = target.create(dtype=self.mapping.dtype, device=self.mapping.device).grid
         return self.mapping(target)
 
-    @abstractmethod
     def resample_to(
         self: BaseSamplableMappingT,
-        target: "BaseSamplableMapping",
+        target: Union[
+            IVoxelCoordinateSystem,
+            "BaseSamplableMapping",
+            IVoxelCoordinateSystemFactory,
+        ],
+        interpolation_args: Optional[InterpolationArgs] = None,
+    ) -> BaseSamplableMappingT:
+        """Resample the mapping with respect to the target coordinates
+
+        Args:
+            target: Target coordinates with respect to which to resample
+            interpolation_args: Interpolation arguments to use for the resampled
+                volume volume, does not affect the sampling of the mapping
+                (default: None, will use the default interpolation arguments)
+        """
+
+        if isinstance(target, BaseSamplableMapping):
+            coordinate_system = target.coordinate_system
+        elif isinstance(target, IVoxelCoordinateSystem):
+            coordinate_system = target
+        elif isinstance(target, IVoxelCoordinateSystemFactory):
+            coordinate_system = target.create(dtype=self.mapping.dtype, device=self.mapping.device)
+        return self._resample_to(
+            coordinate_system, interpolation_args=get_interpolation_args(interpolation_args)
+        )
+
+    @abstractmethod
+    def _resample_to(
+        self: BaseSamplableMappingT,
+        coordinate_system: "IVoxelCoordinateSystem",
+        interpolation_args: InterpolationArgs,
     ) -> BaseSamplableMappingT:
         """Resample the mapping with respect to the target coordinates"""
 
-    def resample(self: BaseSamplableMappingT) -> BaseSamplableMappingT:
+    def resample(
+        self: BaseSamplableMappingT, interpolation_args: Optional[InterpolationArgs] = None
+    ) -> BaseSamplableMappingT:
         """Resample the mapping"""
-        return self.resample_to(self)
+        return self.resample_to(self, interpolation_args=interpolation_args)
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -98,18 +127,17 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
 
     def invert(self: BaseSamplableMappingT, **inversion_parameters) -> BaseSamplableMappingT:
         """Invert the mapping"""
-        return self._simplified_modified_copy(
+        return self.__class__(
             mapping=self.mapping.invert(**inversion_parameters),
             coordinate_system=self.coordinate_system,
         )
 
-    @abstractmethod
     def _simplified_modified_copy(
         self: BaseSamplableMappingT,
         mapping: IComposableMapping,
         coordinate_system: IVoxelCoordinateSystem,
     ) -> BaseSamplableMappingT:
-        """Modified copy with processed arguments"""
+        return self.__class__(mapping=mapping, coordinate_system=coordinate_system)
 
     def _modified_copy(
         self: BaseSamplableMappingT,
@@ -120,47 +148,125 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
             children["coordinate_system"], IVoxelCoordinateSystem
         ):
             raise ValueError("Invalid children for samplable mapping")
-        return self._simplified_modified_copy(
-            mapping=children["mapping"],
-            coordinate_system=children["coordinate_system"],
+        return self.__class__(
+            mapping=children["mapping"], coordinate_system=children["coordinate_system"]
         )
 
-    def __matmul__(
+    def compose(
         self: BaseSamplableMappingT,
         right_mapping: Union[
-            "SamplableVolumeMapping",
-            "SamplableDeformationMapping",
+            "BaseSamplableMapping",
             IComposableMapping,
             IAffineTransformation,
         ],
+        *,
+        target_coordinate_system: str = "right",
     ) -> BaseSamplableMappingT:
+        """Compose the mapping with another mapping with self on the left
+
+        Args:
+            right_mapping: Mapping to compose with
+            target_coordinate_system: Which coordinate system to use for the resulting mapping,
+                either "left" or "right" defining the side of the composition
+        """
+        if target_coordinate_system not in ["left", "right"]:
+            raise ValueError(
+                f"Invalid option for target coordinate system: {target_coordinate_system}"
+            )
         if isinstance(right_mapping, IAffineTransformation):
             right_composable_mapping: IComposableMapping = ComposableAffine(right_mapping)
             coordinate_system = self.coordinate_system
         elif isinstance(right_mapping, IComposableMapping):
             right_composable_mapping = right_mapping
             coordinate_system = self.coordinate_system
-        elif isinstance(right_mapping, SamplableVolumeMapping) or isinstance(
-            right_mapping, SamplableDeformationMapping
-        ):
+        elif isinstance(right_mapping, BaseSamplableMapping):
             right_composable_mapping = right_mapping.mapping
-            coordinate_system = right_mapping.coordinate_system
+            coordinate_system = (
+                right_mapping.coordinate_system
+                if target_coordinate_system == "right"
+                else self.coordinate_system
+            )
         else:
             return NotImplemented
-        return self._simplified_modified_copy(
+        return self.__class__(
             mapping=self.mapping.compose(right_composable_mapping),
             coordinate_system=coordinate_system,
         )
 
-    def __rmatmul__(
-        self: BaseSamplableMappingT, left_mapping: IAffineTransformation
-    ) -> BaseSamplableMappingT:
-        if not isinstance(left_mapping, IAffineTransformation):
+    @overload
+    def right_compose(
+        self: BaseSamplableMappingT,
+        left_mapping: IAffineTransformation,
+        *,
+        target_coordinate_system: str = "right",
+    ) -> BaseSamplableMappingT: ...
+
+    @overload
+    def right_compose(
+        self: BaseSamplableMappingT,
+        left_mapping: IComposableMapping,
+        *,
+        target_coordinate_system: str = "right",
+    ) -> BaseSamplableMappingT: ...
+
+    @overload
+    def right_compose(
+        self,
+        left_mapping: BaseSamplableMappingT,
+        *,
+        target_coordinate_system: str = "right",
+    ) -> BaseSamplableMappingT: ...
+
+    def right_compose(
+        self,
+        left_mapping: Union[
+            "BaseSamplableMapping",
+            IComposableMapping,
+            IAffineTransformation,
+        ],
+        *,
+        target_coordinate_system: str = "right",
+    ) -> "BaseSamplableMapping":
+        """Compose the mapping with another mapping with self on the right
+
+        Args:
+            left_mapping: Mapping to compose with
+            target_coordinate_system: Which coordinate system to use for the resulting mapping,
+                either "left" or "right" defining the side of the composition
+        """
+        if target_coordinate_system not in ["left", "right"]:
+            raise ValueError(
+                f"Invalid option for target coordinate system: {target_coordinate_system}"
+            )
+        if isinstance(left_mapping, IAffineTransformation):
+            left_composable_mapping: IComposableMapping = ComposableAffine(left_mapping)
+        elif isinstance(left_mapping, IComposableMapping):
+            left_composable_mapping = left_mapping
+        elif isinstance(left_mapping, SamplableVolumeMapping) or isinstance(
+            left_mapping, SamplableDeformationMapping
+        ):
+            return left_mapping.compose(self, target_coordinate_system=target_coordinate_system)
+        else:
             return NotImplemented
-        return self._simplified_modified_copy(
-            mapping=ComposableAffine(left_mapping).compose(self.mapping),
+        return self.__class__(
+            mapping=left_composable_mapping.compose(self.mapping),
             coordinate_system=self.coordinate_system,
         )
+
+    def __matmul__(
+        self: BaseSamplableMappingT,
+        right_mapping: Union[
+            "BaseSamplableMapping",
+            IComposableMapping,
+            IAffineTransformation,
+        ],
+    ) -> BaseSamplableMappingT:
+        return self.compose(right_mapping)
+
+    def __rmatmul__(
+        self: BaseSamplableMappingT, left_mapping: Union[IAffineTransformation, IComposableMapping]
+    ) -> BaseSamplableMappingT:
+        return self.right_compose(left_mapping)
 
     def estimate_spatial_derivatives(
         self,
@@ -218,69 +324,67 @@ class SamplableDeformationMapping(BaseSamplableMapping):
     Arguments:
         mapping: Composable mapping to be wrapped
         coordinate_system: Coordinate system to use for sampling and resampling
-        grid_mapping_args: Grid mapping arguments to use for resampling
+        interpolation_args: Grid mapping arguments to use for resampling
         resample_as: How to perform potential resampling, either
             "displacement_field" or "coordinate_field"
     """
 
-    def __init__(
+    def sample_to_as_displacement_field(
         self,
-        mapping: IComposableMapping,
-        coordinate_system: IVoxelCoordinateSystem,
-        grid_mapping_args: GridMappingArgs,
-        resample_as: str = "displacement_field",
-    ):
-        super().__init__(
-            mapping=mapping,
-            coordinate_system=coordinate_system,
-            grid_mapping_args=grid_mapping_args,
-        )
-        self.resample_as = resample_as
-
-    def as_displacement_field_to(
-        self, target: BaseSamplableMapping, *, in_voxel_coordinates: bool = True
+        target: Union[
+            IVoxelCoordinateSystem,
+            "BaseSamplableMapping",
+            IVoxelCoordinateSystemFactory,
+        ],
+        *,
+        in_voxel_coordinates: bool = True,
     ) -> IMaskedTensor:
         """Return the mapping as displacement field with respect to the
         coordinates of the target mapping"""
+        if isinstance(target, IVoxelCoordinateSystem):
+            coordinate_system = target
+        elif isinstance(target, BaseSamplableMapping):
+            coordinate_system = target.coordinate_system
+        elif isinstance(target, IVoxelCoordinateSystemFactory):
+            coordinate_system = target.create(dtype=self.mapping.dtype, device=self.mapping.device)
         coordinates = self.sample_to(target)
         if not in_voxel_coordinates:
             return coordinates.modify_values(
-                coordinates.generate_values() - target.coordinate_system.grid.generate_values()
+                coordinates.generate_values() - coordinate_system.grid.generate_values()
             )
-        voxel_coordinates = target.coordinate_system.to_voxel_coordinates(coordinates)
+        voxel_coordinates = coordinate_system.to_voxel_coordinates(coordinates)
         return voxel_coordinates.modify_values(
-            voxel_coordinates.generate_values()
-            - target.coordinate_system.voxel_grid.generate_values()
+            voxel_coordinates.generate_values() - coordinate_system.voxel_grid.generate_values()
         )
 
-    def as_displacement_field(self, *, in_voxel_coordinates: bool = True) -> IMaskedTensor:
+    def sample_as_displacement_field(self, *, in_voxel_coordinates: bool = True) -> IMaskedTensor:
         """Return the mapping as displacement field"""
-        return self.as_displacement_field_to(self, in_voxel_coordinates=in_voxel_coordinates)
+        return self.sample_to_as_displacement_field(self, in_voxel_coordinates=in_voxel_coordinates)
 
-    def resample_to(self, target: BaseSamplableMapping) -> "SamplableDeformationMapping":
+    def _resample_to(
+        self,
+        coordinate_system: IVoxelCoordinateSystem,
+        interpolation_args: InterpolationArgs,
+        *,
+        resample_as: str = "displacement_field",
+    ) -> "SamplableDeformationMapping":
         """Resample the mapping"""
-        if isinstance(target, SamplableVolumeMapping):
-            resample_as = self.resample_as
-        elif isinstance(target, SamplableDeformationMapping):
-            resample_as = target.resample_as
-        else:
-            raise ValueError("Invalid target for resampling")
         if resample_as == "displacement_field":
-            data = self.as_displacement_field_to(target, in_voxel_coordinates=True)
+            data = self.sample_to_as_displacement_field(
+                coordinate_system, in_voxel_coordinates=True
+            )
         elif resample_as == "coordinate_field":
-            data = target.coordinate_system.to_voxel_coordinates(self.sample_to(target))
+            data = coordinate_system.to_voxel_coordinates(self.sample_to(coordinate_system))
         else:
-            raise ValueError(f"Invalid resample_as value: {self.resample_as}")
+            raise ValueError(f"Invalid resampling option: {resample_as}")
         return SamplableDeformationMapping(
             mapping=create_deformation_from_voxel_data(
                 data=data,
-                grid_mapping_args=target.grid_mapping_args,
-                coordinate_system=target.coordinate_system,
+                interpolation_args=interpolation_args,
+                coordinate_system=coordinate_system,
                 data_format=resample_as,
             ),
-            coordinate_system=target.coordinate_system,
-            grid_mapping_args=target.grid_mapping_args,
-            resample_as=resample_as,
+            coordinate_system=coordinate_system,
         )
 
     @overload
@@ -304,21 +408,10 @@ class SamplableDeformationMapping(BaseSamplableMapping):
                 return None
             raise
 
-    def _simplified_modified_copy(
-        self, mapping: IComposableMapping, coordinate_system: IVoxelCoordinateSystem
-    ) -> "SamplableDeformationMapping":
-        return SamplableDeformationMapping(
-            mapping=mapping,
-            coordinate_system=coordinate_system,
-            grid_mapping_args=self.grid_mapping_args,
-            resample_as=self.resample_as,
-        )
-
     def __repr__(self) -> str:
         return (
             f"SamplableVolumeMapping(mapping={self.mapping}, "
-            f"coordinate_system={self.coordinate_system}, "
-            f"grid_mapping_args={self.grid_mapping_args})"
+            f"coordinate_system={self.coordinate_system})"
         )
 
     @staticmethod
@@ -369,7 +462,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         def get_kwargs(index: int) -> Mapping[str, Any]:
             if emphasize_every_nth_line is None:
                 return {}
-            if index + emphasize_every_nth_line[1] % emphasize_every_nth_line[0] == 0:
+            if (index + emphasize_every_nth_line[1]) % emphasize_every_nth_line[0] == 0:
                 return {"alpha": 0.6, "linewidth": 2.0}
             return {"alpha": 0.2, "linewidth": 1.0}
 
@@ -402,32 +495,19 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 class SamplableVolumeMapping(BaseSamplableMapping):
     """Wrapper for composable mapping volume bundled together with a coordinate system"""
 
-    def resample_to(self, target: BaseSamplableMapping) -> "SamplableVolumeMapping":
-        """Resample the mapping with respect to the target coordinates"""
-        sampled = self.sample_to(target)
+    def _resample_to(
+        self, coordinate_system: IVoxelCoordinateSystem, interpolation_args: InterpolationArgs
+    ) -> "SamplableVolumeMapping":
+        sampled = self.sample_to(coordinate_system)
         resampled_volume = GridVolume(
             data=sampled,
-            grid_mapping_args=target.grid_mapping_args,
+            interpolation_args=interpolation_args,
             n_channel_dims=len(sampled.channels_shape),
         )
-        return SamplableVolumeMapping(
-            mapping=resampled_volume,
-            coordinate_system=target.coordinate_system,
-            grid_mapping_args=target.grid_mapping_args,
-        )
-
-    def _simplified_modified_copy(
-        self, mapping: IComposableMapping, coordinate_system: IVoxelCoordinateSystem
-    ) -> "SamplableVolumeMapping":
-        return SamplableVolumeMapping(
-            mapping=mapping,
-            coordinate_system=coordinate_system,
-            grid_mapping_args=self.grid_mapping_args,
-        )
+        return SamplableVolumeMapping(mapping=resampled_volume, coordinate_system=coordinate_system)
 
     def __repr__(self) -> str:
         return (
             f"SamplableVolumeMapping(mapping={self.mapping}, "
-            f"coordinate_system={self.coordinate_system}, "
-            f"grid_mapping_args={self.grid_mapping_args})"
+            f"coordinate_system={self.coordinate_system})"
         )

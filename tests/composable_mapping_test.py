@@ -17,7 +17,11 @@ from composable_mapping.coordinate_system_factory import (
     create_top_left_aligned_normalized,
 )
 from composable_mapping.dense_deformation import generate_voxel_coordinate_grid
-from composable_mapping.grid_mapping import GridDeformation, GridMappingArgs, GridVolume
+from composable_mapping.grid_mapping import (
+    GridDeformation,
+    GridVolume,
+    InterpolationArgs,
+)
 from composable_mapping.mapping_factory import GridComposableFactory
 from composable_mapping.masked_tensor import MaskedTensor, VoxelCoordinateGrid
 
@@ -109,7 +113,7 @@ class ComposableMappingTests(TestCase):
         volume = GridVolume(
             data=MaskedTensor(data, mask),
             n_channel_dims=1,
-            grid_mapping_args=GridMappingArgs(interpolator=interpolator, mask_outside_fov=True),
+            interpolation_args=InterpolationArgs(interpolator=interpolator, mask_outside_fov=True),
         )
         input_points = (
             tensor([1.0, 1.0]),
@@ -148,7 +152,7 @@ class ComposableMappingTests(TestCase):
         interpolator = _CountingInterpolator(padding_mode="border")
         mapping = GridDeformation(
             data=MaskedTensor(data, mask),
-            grid_mapping_args=GridMappingArgs(
+            interpolation_args=InterpolationArgs(
                 interpolator=interpolator,
                 mask_outside_fov=True,
             ),
@@ -217,7 +221,7 @@ class ComposableFactoryTests(TestCase):
         interpolator = _CountingInterpolator(padding_mode="border")
         volume = GridComposableFactory(
             coordinate_system=coordinate_system,
-            grid_mapping_args=GridMappingArgs(
+            interpolation_args=InterpolationArgs(
                 interpolator=interpolator, mask_outside_fov=True, mask_threshold=1.0
             ),
         ).create_volume(
@@ -261,7 +265,7 @@ class ComposableFactoryTests(TestCase):
         )
         mapping = GridComposableFactory(
             coordinate_system=coordinate_system,
-            grid_mapping_args=GridMappingArgs(
+            interpolation_args=InterpolationArgs(
                 interpolator=interpolator, mask_outside_fov=True, mask_threshold=1.0
             ),
         ).create_deformation(
