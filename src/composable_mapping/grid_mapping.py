@@ -147,7 +147,7 @@ class GridVolume(BaseComposableMapping):
 
     def _threshold_mask(self, mask: Tensor) -> Tensor:
         if self._grid_mapping_args.mask_threshold is not None:
-            return (mask < self._grid_mapping_args.mask_threshold).logical_not().type(mask.dtype)
+            return (mask >= self._grid_mapping_args.mask_threshold).type(mask.dtype)
         return mask
 
     def invert(self, **inversion_parameters) -> IComposableMapping:

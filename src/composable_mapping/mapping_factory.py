@@ -6,14 +6,6 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 
-from composable_mapping.identity import ComposableIdentity
-from composable_mapping.masked_tensor import MaskedTensor
-from composable_mapping.samplable_mapping import (
-    BaseSamplableMapping,
-    SamplableDeformationMapping,
-    SamplableVolumeMapping,
-)
-
 from .affine import AffineTransformation, ComposableAffine
 from .grid_mapping import (
     GridMappingArgs,
@@ -21,12 +13,19 @@ from .grid_mapping import (
     create_deformation_from_world_data,
     create_volume,
 )
+from .identity import ComposableIdentity
 from .interface import (
     IComposableMapping,
     IMaskedTensor,
     ITensorLike,
     IVoxelCoordinateSystem,
     IVoxelCoordinateSystemFactory,
+)
+from .masked_tensor import MaskedTensor
+from .samplable_mapping import (
+    BaseSamplableMapping,
+    SamplableDeformationMapping,
+    SamplableVolumeMapping,
 )
 
 
@@ -40,7 +39,7 @@ def create_composable_identity() -> ComposableIdentity:
     return ComposableIdentity()
 
 
-class BaseComposableFactory(IVoxelCoordinateSystemFactory):
+class BaseMappingFactory(IVoxelCoordinateSystemFactory):
     """Base class for composable mapping factories"""
 
     def __init__(
@@ -89,7 +88,7 @@ class BaseComposableFactory(IVoxelCoordinateSystemFactory):
         return MaskedTensor(data, mask)
 
 
-class SamplableComposableFactory(BaseComposableFactory):
+class SamplableMappingFactory(BaseMappingFactory):
     """Factory for creating composable mappings which have specific coordinate system attached"""
 
     @overload
@@ -258,7 +257,7 @@ def create_samplable_identity_from(
     )
 
 
-class GridComposableFactory(BaseComposableFactory):
+class GridComposableFactory(BaseMappingFactory):
     """Factory for creating grid based composable mappings"""
 
     @overload

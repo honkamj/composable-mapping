@@ -7,10 +7,13 @@ from torch import device as torch_device
 from torch import dtype as torch_dtype
 from torch import eye, get_default_dtype, inverse, matmul, ones
 
-from composable_mapping.interface import ITensorLike
-
 from .base import BaseComposableMapping, BaseTensorLikeWrapper
-from .interface import IAffineTransformation, IComposableMapping, IMaskedTensor
+from .interface import (
+    IAffineTransformation,
+    IComposableMapping,
+    IMaskedTensor,
+    ITensorLike,
+)
 from .util import (
     broadcast_tensors_around_channel_dims,
     broadcast_to_shape_around_channel_dims,
