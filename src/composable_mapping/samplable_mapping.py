@@ -63,7 +63,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
 
     def sample_to(
         self,
-        target_coordinates: Union[
+        target: Union[
             IMaskedTensor,
             IVoxelCoordinateSystem,
             "BaseSamplableMapping",
@@ -71,15 +71,13 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
         ],
     ) -> IMaskedTensor:
         """Sample the mapping wtih respect to the target coordinates"""
-        if isinstance(target_coordinates, IVoxelCoordinateSystem):
-            target_coordinates = target_coordinates.grid
-        elif isinstance(target_coordinates, BaseSamplableMapping):
-            target_coordinates = target_coordinates.coordinate_system.grid
-        elif isinstance(target_coordinates, IVoxelCoordinateSystemFactory):
-            target_coordinates = target_coordinates.create(
-                dtype=self.mapping.dtype, device=self.mapping.device
-            ).grid
-        return self.mapping(target_coordinates)
+        if isinstance(target, IVoxelCoordinateSystem):
+            target = target.grid
+        elif isinstance(target, BaseSamplableMapping):
+            target = target.coordinate_system.grid
+        elif isinstance(target, IVoxelCoordinateSystemFactory):
+            target = target.create(dtype=self.mapping.dtype, device=self.mapping.device).grid
+        return self.mapping(target)
 
     @abstractmethod
     def resample_to(
