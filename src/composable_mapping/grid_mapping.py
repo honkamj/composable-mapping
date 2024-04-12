@@ -9,6 +9,7 @@ from deformation_inversion_layer import (
     fixed_point_invert_deformation,
 )
 from deformation_inversion_layer.interface import Interpolator
+from deformation_inversion_layer.interpolator import LinearInterpolator
 from torch import Tensor
 
 from .base import BaseComposableMapping
@@ -427,10 +428,12 @@ _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK = local()
 _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack = []
 
 
-def get_default_interpolation_args() -> Optional[InterpolationArgs]:
+def get_default_interpolation_args() -> InterpolationArgs:
     """Get current default interpolation args"""
     if _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack:
         return _DEFAULT_INTERPOLATION_ARGS_CONTEXT_STACK.stack[-1]
+    if _DEFAULT_INTERPOLATION_ARGS is None:
+        return InterpolationArgs(interpolator=LinearInterpolator())
     return _DEFAULT_INTERPOLATION_ARGS
 
 
@@ -448,12 +451,9 @@ def clear_default_interpolation_args() -> None:
 
 def get_interpolation_args(interpolation_args: Optional[InterpolationArgs]) -> InterpolationArgs:
     """Get interpolation args, either from argument or default"""
-    interpolation_args = (
+    return (
         interpolation_args if interpolation_args is not None else get_default_interpolation_args()
     )
-    if interpolation_args is None:
-        raise ValueError("No interpolation args provided, and no default set")
-    return interpolation_args
 
 
 class default_interpolation_args(  # this is supposed to appear as function - pylint: disable=invalid-name
@@ -461,7 +461,7 @@ class default_interpolation_args(  # this is supposed to appear as function - py
 ):
     """Context manager for setting default interpolation args"""
 
-    def __init__(self, interpolation_args: Optional[InterpolationArgs]):
+    def __init__(self, interpolation_args: InterpolationArgs):
         self.interpolation_args = interpolation_args
 
     def __enter__(self) -> None:
