@@ -59,7 +59,29 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
 
     def sample(self) -> IMaskedTensor:
         """Sample the mapping"""
-        return self.mapping(self.coordinate_system.grid)
+        return self.sample_to(self)
+
+    def sample_to(
+        self,
+        target_coordinates: Union[IMaskedTensor, IVoxelCoordinateSystem, "BaseSamplableMapping"],
+    ) -> IMaskedTensor:
+        """Sample the mapping wtih respect to the target coordinates"""
+        if isinstance(target_coordinates, IVoxelCoordinateSystem):
+            target_coordinates = target_coordinates.grid
+        elif isinstance(target_coordinates, BaseSamplableMapping):
+            target_coordinates = target_coordinates.coordinate_system.grid
+        return self.mapping(target_coordinates)
+
+    @abstractmethod
+    def resample_to(
+        self: BaseSamplableMappingT,
+        target: "BaseSamplableMapping",
+    ) -> BaseSamplableMappingT:
+        """Resample the mapping with respect to the target coordinates"""
+
+    def resample(self: BaseSamplableMappingT) -> BaseSamplableMappingT:
+        """Resample the mapping"""
+        return self.resample_to(self)
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -208,37 +230,50 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         )
         self.resample_as = resample_as
 
-    def as_displacement_field(self, *, in_voxel_coordinates: bool = True) -> IMaskedTensor:
-        """Return the mapping as displacement field"""
-        coordinates = self.sample()
+    def as_displacement_field_to(
+        self, target: BaseSamplableMapping, *, in_voxel_coordinates: bool = True
+    ) -> IMaskedTensor:
+        """Return the mapping as displacement field with respect to the
+        coordinates of the target mapping"""
+        coordinates = self.sample_to(target)
         if not in_voxel_coordinates:
             return coordinates.modify_values(
-                coordinates.generate_values() - self.coordinate_system.grid.generate_values()
+                coordinates.generate_values() - target.coordinate_system.grid.generate_values()
             )
-        voxel_coordinates = self.coordinate_system.to_voxel_coordinates(coordinates)
+        voxel_coordinates = target.coordinate_system.to_voxel_coordinates(coordinates)
         return voxel_coordinates.modify_values(
             voxel_coordinates.generate_values()
-            - self.coordinate_system.voxel_grid.generate_values()
+            - target.coordinate_system.voxel_grid.generate_values()
         )
 
-    def resample(self) -> "SamplableDeformationMapping":
+    def as_displacement_field(self, *, in_voxel_coordinates: bool = True) -> IMaskedTensor:
+        """Return the mapping as displacement field"""
+        return self.as_displacement_field_to(self, in_voxel_coordinates=in_voxel_coordinates)
+
+    def resample_to(self, target: BaseSamplableMapping) -> "SamplableDeformationMapping":
         """Resample the mapping"""
-        if self.resample_as == "displacement_field":
-            data = self.as_displacement_field(in_voxel_coordinates=True)
-        elif self.resample_as == "coordinate_field":
-            data = self.coordinate_system.to_voxel_coordinates(self.sample())
+        if isinstance(target, SamplableVolumeMapping):
+            resample_as = self.resample_as
+        elif isinstance(target, SamplableDeformationMapping):
+            resample_as = target.resample_as
+        else:
+            raise ValueError("Invalid target for resampling")
+        if resample_as == "displacement_field":
+            data = self.as_displacement_field_to(target, in_voxel_coordinates=True)
+        elif resample_as == "coordinate_field":
+            data = target.coordinate_system.to_voxel_coordinates(self.sample_to(target))
         else:
             raise ValueError(f"Invalid resample_as value: {self.resample_as}")
         return SamplableDeformationMapping(
             mapping=create_deformation_from_voxel_data(
                 data=data,
-                grid_mapping_args=self.grid_mapping_args,
-                coordinate_system=self.coordinate_system,
-                data_format=self.resample_as,
+                grid_mapping_args=target.grid_mapping_args,
+                coordinate_system=target.coordinate_system,
+                data_format=resample_as,
             ),
-            coordinate_system=self.coordinate_system,
-            grid_mapping_args=self.grid_mapping_args,
-            resample_as=self.resample_as,
+            coordinate_system=target.coordinate_system,
+            grid_mapping_args=target.grid_mapping_args,
+            resample_as=resample_as,
         )
 
     @overload
@@ -360,18 +395,18 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 class SamplableVolumeMapping(BaseSamplableMapping):
     """Wrapper for composable mapping volume bundled together with a coordinate system"""
 
-    def resample(self) -> "SamplableVolumeMapping":
-        """Resample the mapping"""
-        sampled = self.sample()
+    def resample_to(self, target: BaseSamplableMapping) -> "SamplableVolumeMapping":
+        """Resample the mapping with respect to the target coordinates"""
+        sampled = self.sample_to(target)
         resampled_volume = GridVolume(
-            data=self.mapping(self.coordinate_system.grid),
-            grid_mapping_args=self.grid_mapping_args,
+            data=sampled,
+            grid_mapping_args=target.grid_mapping_args,
             n_channel_dims=len(sampled.channels_shape),
         )
         return SamplableVolumeMapping(
             mapping=resampled_volume,
-            coordinate_system=self.coordinate_system,
-            grid_mapping_args=self.grid_mapping_args,
+            coordinate_system=target.coordinate_system,
+            grid_mapping_args=target.grid_mapping_args,
         )
 
     def _simplified_modified_copy(
