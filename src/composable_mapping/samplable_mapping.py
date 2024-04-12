@@ -31,7 +31,6 @@ from .interface import (
     IVoxelCoordinateSystem,
     IVoxelCoordinateSystemFactory,
 )
-from .mapping_factory import BaseComposableFactory
 
 BaseSamplableMappingT = TypeVar("BaseSamplableMappingT", bound="BaseSamplableMapping")
 
@@ -69,7 +68,6 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
             IVoxelCoordinateSystem,
             "BaseSamplableMapping",
             IVoxelCoordinateSystemFactory,
-            BaseComposableFactory,
         ],
     ) -> IMaskedTensor:
         """Sample the mapping wtih respect to the target coordinates"""
@@ -79,10 +77,6 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
             target_coordinates = target_coordinates.coordinate_system.grid
         elif isinstance(target_coordinates, IVoxelCoordinateSystemFactory):
             target_coordinates = target_coordinates.create(
-                dtype=self.mapping.dtype, device=self.mapping.device
-            ).grid
-        elif isinstance(target_coordinates, BaseComposableFactory):
-            target_coordinates = target_coordinates.obtain_coordinate_system(
                 dtype=self.mapping.dtype, device=self.mapping.device
             ).grid
         return self.mapping(target_coordinates)
