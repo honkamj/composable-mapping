@@ -8,17 +8,16 @@ from matplotlib.figure import Figure  # type: ignore
 from matplotlib.pyplot import subplots  # type: ignore
 from torch import Tensor
 
-from composable_mapping.finite_difference import (
-    estimate_spatial_derivatives_for_mapping,
-    estimate_spatial_jacobian_matrices_for_mapping,
-)
-
 from .affine import (
     ComposableAffine,
     NotAffineTransformationError,
     as_affine_transformation,
 )
 from .base import BaseTensorLikeWrapper
+from .finite_difference import (
+    estimate_spatial_derivatives_for_mapping,
+    estimate_spatial_jacobian_matrices_for_mapping,
+)
 from .grid_mapping import (
     GridMappingArgs,
     GridVolume,
@@ -30,7 +29,9 @@ from .interface import (
     IMaskedTensor,
     ITensorLike,
     IVoxelCoordinateSystem,
+    IVoxelCoordinateSystemFactory,
 )
+from .mapping_factory import BaseComposableFactory
 
 BaseSamplableMappingT = TypeVar("BaseSamplableMappingT", bound="BaseSamplableMapping")
 
@@ -63,13 +64,27 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
 
     def sample_to(
         self,
-        target_coordinates: Union[IMaskedTensor, IVoxelCoordinateSystem, "BaseSamplableMapping"],
+        target_coordinates: Union[
+            IMaskedTensor,
+            IVoxelCoordinateSystem,
+            "BaseSamplableMapping",
+            IVoxelCoordinateSystemFactory,
+            BaseComposableFactory,
+        ],
     ) -> IMaskedTensor:
         """Sample the mapping wtih respect to the target coordinates"""
         if isinstance(target_coordinates, IVoxelCoordinateSystem):
             target_coordinates = target_coordinates.grid
         elif isinstance(target_coordinates, BaseSamplableMapping):
             target_coordinates = target_coordinates.coordinate_system.grid
+        elif isinstance(target_coordinates, IVoxelCoordinateSystemFactory):
+            target_coordinates = target_coordinates.create(
+                dtype=self.mapping.dtype, device=self.mapping.device
+            ).grid
+        elif isinstance(target_coordinates, BaseComposableFactory):
+            target_coordinates = target_coordinates.obtain_coordinate_system(
+                dtype=self.mapping.dtype, device=self.mapping.device
+            ).grid
         return self.mapping(target_coordinates)
 
     @abstractmethod

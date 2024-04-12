@@ -40,7 +40,9 @@ def create_composable_identity() -> ComposableIdentity:
     return ComposableIdentity()
 
 
-class _BaseComposableFactory:
+class BaseComposableFactory:
+    """Base class for composable mapping factories"""
+
     def __init__(
         self,
         grid_mapping_args: GridMappingArgs,
@@ -59,13 +61,15 @@ class _BaseComposableFactory:
         self.coordinate_system_factory = coordinate_system_factory
         self.grid_mapping_args = grid_mapping_args
 
-    def _obtain_coordinate_system(
+    def obtain_coordinate_system(
         self, dtype: Optional[torch_dtype], device: Optional[torch_device]
     ) -> IVoxelCoordinateSystem:
+        """Obtain coordinate system"""
         if self.coordinate_system is None:
-            assert (
-                self.coordinate_system_factory is not None
-            ), "Either coordinate_system or coordinate_system_factory should have been provided"
+            if self.coordinate_system_factory is None:
+                raise ValueError(
+                    "Either coordinate_system or coordinate_system_factory must be provided"
+                )
             return self.coordinate_system_factory.create(dtype=dtype, device=device)
         return self.coordinate_system
 
@@ -86,7 +90,7 @@ class _BaseComposableFactory:
         return MaskedTensor(data, mask)
 
 
-class SamplableComposableFactory(_BaseComposableFactory):
+class SamplableComposableFactory(BaseComposableFactory):
     """Factory for creating composable mappings which have specific coordinate system attached"""
 
     @overload
@@ -115,7 +119,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
     ) -> SamplableVolumeMapping:
         """Create samplable volume mapping"""
         data = self._handle_tensor_inputs(data, mask)
-        coordinate_system = self._obtain_coordinate_system(
+        coordinate_system = self.obtain_coordinate_system(
             dtype=data.dtype,
             device=data.device,
         )
@@ -164,7 +168,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
         if resample_as is None:
             resample_as = data_format
         data = self._handle_tensor_inputs(data, mask)
-        coordinate_system = self._obtain_coordinate_system(
+        coordinate_system = self.obtain_coordinate_system(
             dtype=data.dtype,
             device=data.device,
         )
@@ -192,7 +196,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
         """Create samplable affine mapping"""
         return SamplableDeformationMapping(
             create_composable_affine(transformation_matrix),
-            coordinate_system=self._obtain_coordinate_system(
+            coordinate_system=self.obtain_coordinate_system(
                 dtype=transformation_matrix.dtype, device=transformation_matrix.device
             ),
             grid_mapping_args=self.grid_mapping_args,
@@ -213,7 +217,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
         """
         return SamplableDeformationMapping(
             create_composable_identity(),
-            coordinate_system=self._obtain_coordinate_system(dtype=dtype, device=device),
+            coordinate_system=self.obtain_coordinate_system(dtype=dtype, device=device),
             grid_mapping_args=self.grid_mapping_args,
             resample_as=resample_as,
         )
@@ -231,7 +235,7 @@ class SamplableComposableFactory(_BaseComposableFactory):
         """
         return SamplableDeformationMapping(
             create_composable_identity(),
-            coordinate_system=self._obtain_coordinate_system(
+            coordinate_system=self.obtain_coordinate_system(
                 dtype=reference.dtype, device=reference.device
             ),
             grid_mapping_args=self.grid_mapping_args,
@@ -257,7 +261,7 @@ def create_samplable_identity_from(
     )
 
 
-class GridComposableFactory(_BaseComposableFactory):
+class GridComposableFactory(BaseComposableFactory):
     """Factory for creating grid based composable mappings"""
 
     @overload
@@ -289,7 +293,7 @@ class GridComposableFactory(_BaseComposableFactory):
         return create_volume(
             data=data,
             grid_mapping_args=self.grid_mapping_args,
-            coordinate_system=self._obtain_coordinate_system(
+            coordinate_system=self.obtain_coordinate_system(
                 dtype=data.dtype,
                 device=data.device,
             ),
@@ -334,7 +338,7 @@ class GridComposableFactory(_BaseComposableFactory):
         return factory(
             data=data,
             grid_mapping_args=self.grid_mapping_args,
-            coordinate_system=self._obtain_coordinate_system(
+            coordinate_system=self.obtain_coordinate_system(
                 dtype=data.dtype,
                 device=data.device,
             ),
