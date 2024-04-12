@@ -193,7 +193,7 @@ class _BaseGridDeformation(GridVolume):
             coordinate_mask = masked_coordinates.generate_mask(generate_missing_mask=False)
         else:
             raise ValueError(f"Invalid data format: {self._data_format}")
-        values = super()._evaluate(
+        values = self._evaluate(
             voxel_coordinates_generator=voxel_coordinates_generator,
             coordinate_mask=coordinate_mask,
             coordinates_as_slice=masked_coordinates.as_slice(self._volume_shape),
