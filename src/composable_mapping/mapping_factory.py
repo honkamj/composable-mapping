@@ -164,7 +164,7 @@ class SamplableMappingFactory(BaseMappingFactory):
         data: Union[Tensor, IMaskedTensor],
         mask: Optional[Tensor] = None,
         *,
-        data_format: str = "displacement_field",
+        data_format: str = "displacement",
         data_coordinates: str = "voxel",
         resample_as: Optional[str] = None,
     ) -> SamplableDeformationMapping:
@@ -313,7 +313,7 @@ class GridMappingFactory(BaseMappingFactory):
         data: Union[Tensor, IMaskedTensor],
         mask: Optional[Tensor] = None,
         *,
-        data_format: str = "displacement_field",
+        data_format: str = "displacement",
         data_coordinates: str = "voxel",
     ) -> IComposableMapping:
         """Create deformation based on regular grid of samples"""

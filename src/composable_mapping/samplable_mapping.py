@@ -1,6 +1,5 @@
 """"Composable mapping bundled together with a coordinate system"""
 
-from abc import abstractmethod
 from itertools import combinations
 from typing import Any, Literal, Mapping, Optional, Tuple, TypeVar, Union, overload
 
@@ -19,10 +18,9 @@ from .finite_difference import (
     estimate_spatial_jacobian_matrices_for_mapping,
 )
 from .grid_mapping import (
-    GridVolume,
     InterpolationArgs,
     create_deformation_from_voxel_data,
-    get_interpolation_args,
+    create_volume,
 )
 from .interface import (
     IAffineTransformation,
@@ -79,49 +77,21 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
             ).grid
         return self.mapping(target)
 
-    def resample_to(
-        self: BaseSamplableMappingT,
+    def _obtain_resampling_coordinate_system(
+        self,
         target: Union[
-            IVoxelCoordinateSystem,
-            "BaseSamplableMapping",
-            IVoxelCoordinateSystemFactory,
+            IVoxelCoordinateSystem, "BaseSamplableMapping", IVoxelCoordinateSystemFactory
         ],
-        interpolation_args: Optional[InterpolationArgs] = None,
-    ) -> BaseSamplableMappingT:
-        """Resample the mapping with respect to the target coordinates
-
-        Args:
-            target: Target coordinates with respect to which to resample
-            interpolation_args: Interpolation arguments to use for the resampled
-                volume volume, does not affect the sampling of the mapping
-                (default: None, will use the default interpolation arguments)
-        """
-
+    ) -> IVoxelCoordinateSystem:
+        if isinstance(target, IVoxelCoordinateSystem):
+            return target
         if isinstance(target, BaseSamplableMapping):
-            coordinate_system = target.coordinate_system
-        elif isinstance(target, IVoxelCoordinateSystem):
-            coordinate_system = target
-        elif isinstance(target, IVoxelCoordinateSystemFactory):
-            coordinate_system = target.create_coordinate_system(
+            return target.coordinate_system
+        if isinstance(target, IVoxelCoordinateSystemFactory):
+            return target.create_coordinate_system(
                 dtype=self.mapping.dtype, device=self.mapping.device
             )
-        return self._resample_to(
-            coordinate_system, interpolation_args=get_interpolation_args(interpolation_args)
-        )
-
-    @abstractmethod
-    def _resample_to(
-        self: BaseSamplableMappingT,
-        coordinate_system: "IVoxelCoordinateSystem",
-        interpolation_args: InterpolationArgs,
-    ) -> BaseSamplableMappingT:
-        """Resample the mapping with respect to the target coordinates"""
-
-    def resample(
-        self: BaseSamplableMappingT, interpolation_args: Optional[InterpolationArgs] = None
-    ) -> BaseSamplableMappingT:
-        """Resample the mapping"""
-        return self.resample_to(self, interpolation_args=interpolation_args)
+        raise ValueError(f"Invalid target: {target}")
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -328,9 +298,6 @@ class SamplableDeformationMapping(BaseSamplableMapping):
     Arguments:
         mapping: Composable mapping to be wrapped
         coordinate_system: Coordinate system to use for sampling and resampling
-        interpolation_args: Grid mapping arguments to use for resampling
-        resample_as: How to perform potential resampling, either
-            "displacement_field" or "coordinate_field"
     """
 
     def sample_to_as_displacement_field(
@@ -341,7 +308,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
             IVoxelCoordinateSystemFactory,
         ],
         *,
-        in_voxel_coordinates: bool = True,
+        data_coordinates: str = "voxel",
     ) -> IMaskedTensor:
         """Return the mapping as displacement field with respect to the
         coordinates of the target mapping"""
@@ -353,42 +320,47 @@ class SamplableDeformationMapping(BaseSamplableMapping):
             coordinate_system = target.create_coordinate_system(
                 dtype=self.mapping.dtype, device=self.mapping.device
             )
-        coordinates = self.sample_to(target)
-        if not in_voxel_coordinates:
-            return coordinates.modify_values(
-                coordinates.generate_values() - coordinate_system.grid.generate_values()
+        data = self.sample_to(target)
+        if data_coordinates == "world":
+            return data.modify_values(
+                data.generate_values() - coordinate_system.grid.generate_values()
             )
-        voxel_coordinates = coordinate_system.to_voxel_coordinates(coordinates)
-        return voxel_coordinates.modify_values(
-            voxel_coordinates.generate_values() - coordinate_system.voxel_grid.generate_values()
-        )
+        if data_coordinates == "voxel":
+            voxel_coordinates = coordinate_system.to_voxel_coordinates(data)
+            return voxel_coordinates.modify_values(
+                voxel_coordinates.generate_values() - coordinate_system.voxel_grid.generate_values()
+            )
+        raise ValueError(f"Invalid option for data coordinates: {data_coordinates}")
 
-    def sample_as_displacement_field(self, *, in_voxel_coordinates: bool = True) -> IMaskedTensor:
+    def sample_as_displacement_field(self, *, data_coordinates: str = "voxel") -> IMaskedTensor:
         """Return the mapping as displacement field"""
-        return self.sample_to_as_displacement_field(self, in_voxel_coordinates=in_voxel_coordinates)
+        return self.sample_to_as_displacement_field(self, data_coordinates=data_coordinates)
 
-    def _resample_to(
+    def resample_to(
         self,
-        coordinate_system: IVoxelCoordinateSystem,
-        interpolation_args: InterpolationArgs,
+        target: Union[
+            IVoxelCoordinateSystem,
+            "BaseSamplableMapping",
+            IVoxelCoordinateSystemFactory,
+        ],
+        interpolation_args: Optional[InterpolationArgs] = None,
         *,
-        resample_as: str = "displacement_field",
+        data_format: str = "displacement",
     ) -> "SamplableDeformationMapping":
         """Resample the mapping"""
-        if resample_as == "displacement_field":
-            data = self.sample_to_as_displacement_field(
-                coordinate_system, in_voxel_coordinates=True
-            )
-        elif resample_as == "coordinate_field":
+        coordinate_system = self._obtain_resampling_coordinate_system(target)
+        if data_format == "displacement":
+            data = self.sample_to_as_displacement_field(coordinate_system, data_coordinates="voxel")
+        elif data_format == "coordinate":
             data = coordinate_system.to_voxel_coordinates(self.sample_to(coordinate_system))
         else:
-            raise ValueError(f"Invalid resampling option: {resample_as}")
+            raise ValueError(f"Invalid data_format option: {data_format}")
         return SamplableDeformationMapping(
             mapping=create_deformation_from_voxel_data(
                 data=data,
                 interpolation_args=interpolation_args,
                 coordinate_system=coordinate_system,
-                data_format=resample_as,
+                data_format=data_format,
             ),
             coordinate_system=coordinate_system,
         )
@@ -501,16 +473,27 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 class SamplableVolumeMapping(BaseSamplableMapping):
     """Wrapper for composable mapping volume bundled together with a coordinate system"""
 
-    def _resample_to(
-        self, coordinate_system: IVoxelCoordinateSystem, interpolation_args: InterpolationArgs
+    def resample_to(
+        self,
+        target: Union[
+            IVoxelCoordinateSystem,
+            "BaseSamplableMapping",
+            IVoxelCoordinateSystemFactory,
+        ],
+        interpolation_args: Optional[InterpolationArgs] = None,
     ) -> "SamplableVolumeMapping":
+        """Resample the mapping"""
+        coordinate_system = self._obtain_resampling_coordinate_system(target)
         sampled = self.sample_to(coordinate_system)
-        resampled_volume = GridVolume(
-            data=sampled,
-            interpolation_args=interpolation_args,
-            n_channel_dims=len(sampled.channels_shape),
+        return SamplableVolumeMapping(
+            mapping=create_volume(
+                data=sampled,
+                coordinate_system=coordinate_system,
+                interpolation_args=interpolation_args,
+                n_channel_dims=len(sampled.channels_shape),
+            ),
+            coordinate_system=coordinate_system,
         )
-        return SamplableVolumeMapping(mapping=resampled_volume, coordinate_system=coordinate_system)
 
     def __repr__(self) -> str:
         return (

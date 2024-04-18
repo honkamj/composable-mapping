@@ -74,11 +74,11 @@ class GridVolume(BaseComposableMapping):
     def __init__(
         self,
         data: IMaskedTensor,
-        interpolation_args: InterpolationArgs,
+        interpolation_args: Optional[InterpolationArgs] = None,
         n_channel_dims: int = 1,
     ) -> None:
         self._data = data
-        self._interpolation_args = interpolation_args
+        self._interpolation_args = get_interpolation_args(interpolation_args)
         self._n_channel_dims = n_channel_dims
         self._volume_shape = data.shape[n_channel_dims + 1 :]
         self._n_dims = len(self._volume_shape)
@@ -170,8 +170,8 @@ class _BaseGridDeformation(GridVolume):
     def __init__(
         self,
         data: IMaskedTensor,
-        interpolation_args: InterpolationArgs,
-        data_format: str = "displacement_field",
+        interpolation_args: Optional[InterpolationArgs] = None,
+        data_format: str = "displacement",
     ) -> None:
         if data.shape[1] != len(data.shape) - 2:
             raise ValueError("Data should have the same dimensionality as the spatial dimensions")
@@ -183,7 +183,7 @@ class _BaseGridDeformation(GridVolume):
         self._data_format = data_format
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
-        if self._data_format == "displacement_field":
+        if self._data_format == "displacement":
             voxel_coordinates, coordinate_mask = masked_coordinates.generate(
                 generate_missing_mask=False
             )
@@ -201,7 +201,7 @@ class _BaseGridDeformation(GridVolume):
             coordinate_mask=coordinate_mask,
             coordinates_as_slice=masked_coordinates.as_slice(self._volume_shape),
         )
-        if self._data_format == "displacement_field":
+        if self._data_format == "displacement":
             values = values.modify_values(values=values.generate_values() + voxel_coordinates)
         return values
 
@@ -222,7 +222,7 @@ class GridDeformation(_BaseGridDeformation):
             should be given in voxel coordinates, and the grid is also assumed
             to be in voxel coordinates.
         interpolation_args: Arguments defining interpolation and extrapolation behavior
-        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
+        data_format: Format of the provided data, either "displacement" or "coordinate_field"
     """
 
     def _modified_copy(
@@ -277,7 +277,7 @@ class _GridDeformationInverse(_BaseGridDeformation):
         super().__init__(
             data=inverted_data,
             interpolation_args=interpolation_args,
-            data_format="displacement_field",
+            data_format="displacement",
         )
         self._inversion_arguments = inversion_arguments
         self._inverted_data_format = data_format
@@ -304,9 +304,7 @@ class _GridDeformationInverse(_BaseGridDeformation):
         voxel_coordinates = voxel_coordinates_generator()
         inverted_values = fixed_point_invert_deformation(
             displacement_field=(
-                data
-                if self._inverted_data_format == "displacement_field"
-                else data - voxel_coordinates
+                data if self._inverted_data_format == "displacement" else data - voxel_coordinates
             ),
             arguments=self._inversion_arguments,
             initial_guess=(None if coordinates_as_slice is None else -data[coordinates_as_slice]),
@@ -332,8 +330,9 @@ class _GridDeformationInverse(_BaseGridDeformation):
 
 def create_volume(
     data: IMaskedTensor,
-    interpolation_args: InterpolationArgs,
     coordinate_system: IVoxelCoordinateSystem,
+    interpolation_args: Optional[InterpolationArgs] = None,
+    *,
     n_channel_dims: int = 1,
 ) -> IComposableMapping:
     """Create volume based on grid samples"""
@@ -347,9 +346,10 @@ def create_volume(
 
 def create_deformation_from_voxel_data(
     data: IMaskedTensor,
-    interpolation_args: InterpolationArgs,
     coordinate_system: IVoxelCoordinateSystem,
-    data_format: str = "displacement_field",
+    interpolation_args: Optional[InterpolationArgs] = None,
+    *,
+    data_format: str = "displacement",
 ) -> IComposableMapping:
     """Create deformation mapping based on grid samples in given coordinate system
     with data given in voxel coordinates
@@ -364,7 +364,7 @@ def create_deformation_from_voxel_data(
         interpolation_args: Arguments defining interpolation and extrapolation behavior
         coordinate_system: Coordinate system defining transformations between voxel and
             world coordinates
-        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
+        data_format: Format of the provided data, either "displacement" or "coordinate_field"
     """
     grid_volume = GridDeformation(
         data=data,
@@ -378,9 +378,10 @@ def create_deformation_from_voxel_data(
 
 def create_deformation_from_world_data(
     data: IMaskedTensor,
-    interpolation_args: InterpolationArgs,
     coordinate_system: IVoxelCoordinateSystem,
-    data_format: str = "displacement_field",
+    interpolation_args: Optional[InterpolationArgs] = None,
+    *,
+    data_format: str = "displacement",
 ) -> IComposableMapping:
     """Create deformation mapping based on grid samples in given coordinate system
     with data given in world coordinates
@@ -398,9 +399,9 @@ def create_deformation_from_world_data(
         interpolation_args: Arguments defining interpolation and extrapolation behavior
         coordinate_system: Coordinate system defining transformations between voxel and
             world coordinates
-        data_format: Format of the provided data, either "displacement_field" or "coordinate_field"
+        data_format: Format of the provided data, either "displacement" or "coordinate_field"
     """
-    if data_format == "displacement_field":
+    if data_format == "displacement":
         ddf, ddf_mask = data.generate(generate_missing_mask=False)
         coordinates_in_voxel_coordinates, mask_in_voxel_coordinates = (
             coordinate_system.to_voxel_coordinates(
