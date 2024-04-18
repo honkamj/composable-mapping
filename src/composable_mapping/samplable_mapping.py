@@ -74,7 +74,9 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
         elif isinstance(target, BaseSamplableMapping):
             target = target.coordinate_system.grid
         elif isinstance(target, IVoxelCoordinateSystemFactory):
-            target = target.create(dtype=self.mapping.dtype, device=self.mapping.device).grid
+            target = target.create_coordinate_system(
+                dtype=self.mapping.dtype, device=self.mapping.device
+            ).grid
         return self.mapping(target)
 
     def resample_to(
@@ -100,7 +102,9 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
         elif isinstance(target, IVoxelCoordinateSystem):
             coordinate_system = target
         elif isinstance(target, IVoxelCoordinateSystemFactory):
-            coordinate_system = target.create(dtype=self.mapping.dtype, device=self.mapping.device)
+            coordinate_system = target.create_coordinate_system(
+                dtype=self.mapping.dtype, device=self.mapping.device
+            )
         return self._resample_to(
             coordinate_system, interpolation_args=get_interpolation_args(interpolation_args)
         )
@@ -346,7 +350,9 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         elif isinstance(target, BaseSamplableMapping):
             coordinate_system = target.coordinate_system
         elif isinstance(target, IVoxelCoordinateSystemFactory):
-            coordinate_system = target.create(dtype=self.mapping.dtype, device=self.mapping.device)
+            coordinate_system = target.create_coordinate_system(
+                dtype=self.mapping.dtype, device=self.mapping.device
+            )
         coordinates = self.sample_to(target)
         if not in_voxel_coordinates:
             return coordinates.modify_values(

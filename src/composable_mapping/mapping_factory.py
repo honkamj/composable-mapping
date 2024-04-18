@@ -41,7 +41,11 @@ def create_composable_identity() -> ComposableIdentity:
 
 
 class BaseMappingFactory(IVoxelCoordinateSystemFactory):
-    """Base class for composable mapping factories"""
+    """Base class for composable mapping factories
+
+    Implements IVoxelCoordinateSystemFactory interface for it to be usable as an
+    argument for resampling operations.
+    """
 
     def __init__(
         self,
@@ -61,7 +65,7 @@ class BaseMappingFactory(IVoxelCoordinateSystemFactory):
         self.coordinate_system_factory = coordinate_system_factory
         self.interpolation_args = get_interpolation_args(interpolation_args)
 
-    def create(
+    def create_coordinate_system(
         self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
     ) -> IVoxelCoordinateSystem:
         if self.coordinate_system is None:
@@ -69,7 +73,9 @@ class BaseMappingFactory(IVoxelCoordinateSystemFactory):
                 raise ValueError(
                     "Either coordinate_system or coordinate_system_factory must be provided"
                 )
-            return self.coordinate_system_factory.create(dtype=dtype, device=device)
+            return self.coordinate_system_factory.create_coordinate_system(
+                dtype=dtype, device=device
+            )
         return self.coordinate_system
 
     def __repr__(self) -> str:
@@ -118,7 +124,7 @@ class SamplableMappingFactory(BaseMappingFactory):
     ) -> SamplableVolumeMapping:
         """Create samplable volume mapping"""
         data = self._handle_tensor_inputs(data, mask)
-        coordinate_system = self.create(
+        coordinate_system = self.create_coordinate_system(
             dtype=data.dtype,
             device=data.device,
         )
@@ -166,7 +172,7 @@ class SamplableMappingFactory(BaseMappingFactory):
         if resample_as is None:
             resample_as = data_format
         data = self._handle_tensor_inputs(data, mask)
-        coordinate_system = self.create(
+        coordinate_system = self.create_coordinate_system(
             dtype=data.dtype,
             device=data.device,
         )
@@ -193,7 +199,7 @@ class SamplableMappingFactory(BaseMappingFactory):
         """Create samplable affine mapping"""
         return SamplableDeformationMapping(
             create_composable_affine(transformation_matrix),
-            coordinate_system=self.create(
+            coordinate_system=self.create_coordinate_system(
                 dtype=transformation_matrix.dtype, device=transformation_matrix.device
             ),
         )
@@ -210,7 +216,7 @@ class SamplableMappingFactory(BaseMappingFactory):
         """
         return SamplableDeformationMapping(
             create_composable_identity(),
-            coordinate_system=self.create(dtype=dtype, device=device),
+            coordinate_system=self.create_coordinate_system(dtype=dtype, device=device),
         )
 
     def create_identity_from(
@@ -224,7 +230,9 @@ class SamplableMappingFactory(BaseMappingFactory):
         """
         return SamplableDeformationMapping(
             create_composable_identity(),
-            coordinate_system=self.create(dtype=reference.dtype, device=reference.device),
+            coordinate_system=self.create_coordinate_system(
+                dtype=reference.dtype, device=reference.device
+            ),
         )
 
 
@@ -274,7 +282,7 @@ class GridMappingFactory(BaseMappingFactory):
         return create_volume(
             data=data,
             interpolation_args=self.interpolation_args,
-            coordinate_system=self.create(
+            coordinate_system=self.create_coordinate_system(
                 dtype=data.dtype,
                 device=data.device,
             ),
@@ -319,7 +327,7 @@ class GridMappingFactory(BaseMappingFactory):
         return factory(
             data=data,
             interpolation_args=self.interpolation_args,
-            coordinate_system=self.create(
+            coordinate_system=self.create_coordinate_system(
                 dtype=data.dtype,
                 device=data.device,
             ),

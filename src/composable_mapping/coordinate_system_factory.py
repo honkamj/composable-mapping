@@ -28,7 +28,7 @@ class BaseVoxelCoordinateSystemFactory(IVoxelCoordinateSystemFactory):
                 Tuple[torch_dtype, torch_device], IVoxelCoordinateSystem
             ] = {}
 
-    def create(
+    def create_coordinate_system(
         self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
     ) -> IVoxelCoordinateSystem:
         if dtype is None:
@@ -37,14 +37,16 @@ class BaseVoxelCoordinateSystemFactory(IVoxelCoordinateSystemFactory):
             device = torch_device("cpu")
         if self._cache:
             if (dtype, device) not in self._coordinate_system_cache:
-                self._coordinate_system_cache[(dtype, device)] = self._create(
+                self._coordinate_system_cache[(dtype, device)] = self._create_coordinate_system(
                     dtype=dtype, device=device
                 )
             return self._coordinate_system_cache[(dtype, device)]
-        return self._create(dtype=dtype, device=device)
+        return self._create_coordinate_system(dtype=dtype, device=device)
 
     @abstractmethod
-    def _create(self, dtype: torch_dtype, device: torch_device) -> IVoxelCoordinateSystem:
+    def _create_coordinate_system(
+        self, dtype: torch_dtype, device: torch_device
+    ) -> IVoxelCoordinateSystem:
         """Create voxel coordinate system with given dtype on given device"""
 
 
@@ -73,7 +75,9 @@ class CenteredNormalizedFactory(BaseVoxelCoordinateSystemFactory):
         self.downsampling_factor = downsampling_factor
         self.center_coordinate = center_coordinate
 
-    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create_coordinate_system(
+        self, dtype: torch_dtype, device: torch_device
+    ) -> VoxelCoordinateSystem:
         return create_centered_normalized(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -117,7 +121,9 @@ class TopLeftAlignedNormalizedFactory(BaseVoxelCoordinateSystemFactory):
         self.voxel_size = voxel_size
         self.downsampling_factor = downsampling_factor
 
-    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create_coordinate_system(
+        self, dtype: torch_dtype, device: torch_device
+    ) -> VoxelCoordinateSystem:
         return create_top_left_aligned_normalized(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -162,7 +168,9 @@ class CenteredFactory(BaseVoxelCoordinateSystemFactory):
         self.downsampling_factor = downsampling_factor
         self.center_coordinate = center_coordinate
 
-    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create_coordinate_system(
+        self, dtype: torch_dtype, device: torch_device
+    ) -> VoxelCoordinateSystem:
         return create_centered(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -206,7 +214,9 @@ class TopLeftAlignedFactory(BaseVoxelCoordinateSystemFactory):
         self.voxel_size = voxel_size
         self.downsampling_factor = downsampling_factor
 
-    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create_coordinate_system(
+        self, dtype: torch_dtype, device: torch_device
+    ) -> VoxelCoordinateSystem:
         return create_top_left_aligned(
             original_grid_shape=self.original_grid_shape,
             original_voxel_size=self.original_voxel_size,
@@ -243,7 +253,9 @@ class VoxelFactory(BaseVoxelCoordinateSystemFactory):
         self.grid_shape = grid_shape
         self.voxel_size = voxel_size
 
-    def _create(self, dtype: torch_dtype, device: torch_device) -> VoxelCoordinateSystem:
+    def _create_coordinate_system(
+        self, dtype: torch_dtype, device: torch_device
+    ) -> VoxelCoordinateSystem:
         return create_voxel(
             grid_shape=self.grid_shape,
             voxel_size=self.voxel_size,

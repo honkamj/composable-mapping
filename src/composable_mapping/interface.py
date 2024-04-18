@@ -239,7 +239,7 @@ class IVoxelCoordinateSystemFactory(ABC):
     """Factory for creating voxel coordinate systems"""
 
     @abstractmethod
-    def create(
+    def create_coordinate_system(
         self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
     ) -> IVoxelCoordinateSystem:
         """Create voxel coordinate system with given dtype on given device"""
