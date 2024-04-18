@@ -242,7 +242,7 @@ def create_samplable_identity_from(
     )
 
 
-class GridComposableFactory(BaseMappingFactory):
+class GridMappingFactory(BaseMappingFactory):
     """Factory for creating grid based composable mappings"""
 
     @overload
