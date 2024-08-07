@@ -1,11 +1,13 @@
 """Affine transformation implementations"""
 
-from typing import Mapping, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 from torch import Tensor, allclose, cat
 from torch import device as torch_device
+from torch import diag_embed
 from torch import dtype as torch_dtype
-from torch import eye, get_default_dtype, inverse, matmul, ones
+from torch import eye, get_default_dtype, inverse, matmul, ones, zeros
+from torch.jit import script
 
 from .base import BaseComposableMapping, BaseTensorLikeWrapper
 from .interface import (
@@ -177,30 +179,36 @@ class CPUAffineTransformation(BaseAffineTransformation):
     Arguments:
         transformation_matrix_on_cpu: Transformation matrix on cpu
         device: Device to use for the transformation matrix produced by as_matrix method
-        pin_memory: Whether to pin memory for the cpu transformation matrix
     """
 
     def __init__(
         self,
         transformation_matrix_on_cpu: Tensor,
         device: Optional[torch_device] = None,
-        pin_memory: bool = True,
     ) -> None:
         if transformation_matrix_on_cpu.device != torch_device("cpu"):
             raise ValueError("Please give the matrix on CPU")
         if transformation_matrix_on_cpu.requires_grad:
             raise ValueError("The implementation assumes a detached transformation matrix.")
-        self._transformation_matrix_cpu = (
-            transformation_matrix_on_cpu.pin_memory()
-            if pin_memory
-            else transformation_matrix_on_cpu
-        )
+        self._transformation_matrix_cpu = transformation_matrix_on_cpu
         self._device = torch_device("cpu") if device is None else device
 
     def __call__(self, coordinates: Tensor) -> Tensor:
         if self._is_identity():
             return coordinates
         return _broadcast_and_transform_coordinates(coordinates, self.as_matrix())
+
+    def pin_memory_if_needed(self) -> "CPUAffineTransformation":
+        """Pin memory of the cpu transformation matrices needed for producing
+        output of as_matrix on gpu"""
+        return CPUAffineTransformation(
+            (
+                self._transformation_matrix_cpu.pin_memory()
+                if self._device != torch_device("cpu")
+                else self._transformation_matrix_cpu
+            ),
+            device=self._device,
+        )
 
     def as_matrix(
         self,
@@ -252,10 +260,11 @@ class CPUAffineTransformation(BaseAffineTransformation):
             )
         return super().compose(affine_transformation)
 
-    def reduce(self, pin_memory: bool = True) -> "CPUAffineTransformation":
+    def reduce(self) -> "CPUAffineTransformation":
         """Reduce the transformation to non-lazy version"""
         return CPUAffineTransformation(
-            self.as_cpu_matrix(), device=self._device, pin_memory=pin_memory
+            self.as_cpu_matrix(),
+            device=self._device,
         )
 
     @property
@@ -313,9 +322,14 @@ class _CPUAffineTransformationInverse(CPUAffineTransformation):
         super().__init__(
             inverted_transformation_matrix_cpu,
             device=transformation_to_invert.device,
-            pin_memory=False,
         )
         self._transformation_to_invert = transformation_to_invert
+
+    def pin_memory_if_needed(self) -> "_CPUAffineTransformationInverse":
+        return _CPUAffineTransformationInverse(
+            inverted_transformation_matrix_cpu=self.as_cpu_matrix(),
+            transformation_to_invert=(self._transformation_to_invert.pin_memory_if_needed()),
+        )
 
     def to(
         self,
@@ -352,10 +366,16 @@ class _CPUAffineTransformationComposition(CPUAffineTransformation):
         super().__init__(
             compsed_transformation_matrix_cpu,
             device=left_transformation.device,
-            pin_memory=False,
         )
         self._left_transformation = left_transformation
         self._right_transformation = right_transformation
+
+    def pin_memory_if_needed(self) -> "_CPUAffineTransformationComposition":
+        return _CPUAffineTransformationComposition(
+            compsed_transformation_matrix_cpu=self.as_cpu_matrix(),
+            left_transformation=self._left_transformation.pin_memory_if_needed(),
+            right_transformation=self._right_transformation.pin_memory_if_needed(),
+        )
 
     def to(
         self,
@@ -538,20 +558,21 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
 
 
 def compose_affine_transformation_matrices(
-    transformation_1: Tensor, transformation_2: Tensor
+    *transformations: Tensor,
 ) -> Tensor:
     """Compose two transformation matrices
 
     Args:
-        transformation_1: Tensor with shape ([batch_size, ]n_dims + 1, n_dims + 1, *)
-        transformation_2: Tensor with shape ([batch_size, ]n_dims + 1, n_dims + 1, *)
+        transformations: Tensors with shape ([batch_size, ]n_dims + 1, n_dims + 1, *)
 
     Returns: transformation_1: Tensor with shape ([batch_size, ]n_dims + 1, n_dims + 1, *)
     """
-    transformation_1 = move_channels_last(transformation_1, 2)
-    transformation_2 = move_channels_last(transformation_2, 2)
-    composed = matmul(transformation_1, transformation_2)
-    return move_channels_first(composed, 2)
+    if len(transformations) == 0:
+        raise ValueError("At least one transformation matrix must be given.")
+    composition = move_channels_last(transformations[0], 2)
+    for transformation in transformations[1:]:
+        composition = matmul(composition, move_channels_last(transformation, 2))
+    return move_channels_first(composition, 2)
 
 
 def convert_to_homogenous_coordinates(coordinates: Tensor) -> Tensor:
@@ -578,6 +599,115 @@ def convert_to_homogenous_coordinates(coordinates: Tensor) -> Tensor:
         homogenous_coordinates, batch_dimensions_shape=batch_dimensions_shape
     )
     return move_channels_first(homogenous_coordinates)
+
+
+@script
+def embed_transformation(matrix: Tensor, target_shape: List[int]) -> Tensor:
+    """Embed transformation into larger dimensional space
+
+    Args:
+        matrix: Tensor with shape ([batch_size, ]n_dims, n_dims, ...)
+        target_shape: Target matrix shape
+
+    Returns: Tensor with shape (batch_size, *target_shape)
+    """
+    if len(target_shape) != 2:
+        raise ValueError("Matrix shape must be two dimensional.")
+    matrix = move_channels_last(matrix, 2)
+    matrix, batch_dimensions_shape = merge_batch_dimensions(matrix, 2)
+    batch_size = matrix.size(0)
+    n_rows_needed = target_shape[0] - matrix.size(1)
+    n_cols_needed = target_shape[1] - matrix.size(2)
+    if n_rows_needed == 0 and n_cols_needed == 0:
+        return matrix
+    rows = cat(
+        [
+            zeros(
+                n_rows_needed,
+                min(matrix.size(2), matrix.size(1)),
+                device=matrix.device,
+                dtype=matrix.dtype,
+            ),
+            eye(
+                n_rows_needed,
+                max(0, matrix.size(2) - matrix.size(1)),
+                device=matrix.device,
+                dtype=matrix.dtype,
+            ),
+        ],
+        dim=1,
+    ).expand(batch_size, -1, -1)
+    cols = cat(
+        [
+            zeros(
+                min(target_shape[0], matrix.size(2)),
+                n_cols_needed,
+                device=matrix.device,
+                dtype=matrix.dtype,
+            ),
+            eye(
+                max(0, target_shape[0] - matrix.size(2)),
+                n_cols_needed,
+                device=matrix.device,
+                dtype=matrix.dtype,
+            ),
+        ],
+        dim=0,
+    ).expand(batch_size, -1, -1)
+    embedded_matrix = cat([cat([matrix, rows], dim=1), cols], dim=2)
+    embedded_matrix = unmerge_batch_dimensions(
+        embedded_matrix, batch_dimensions_shape=batch_dimensions_shape, num_channel_dims=2
+    )
+    return move_channels_first(embedded_matrix, 2)
+
+
+@script
+def generate_translation_matrix(translations: Tensor) -> Tensor:
+    """Generator homogenous translation matrix with given translations
+
+    Args:
+        translations: Tensor with shape (batch_size, n_dims, ...)
+
+    Returns: Tensor with shape (batch_size, n_dims + 1, n_dims + 1, ...)
+    """
+    translations = move_channels_last(translations)
+    translations, batch_dimensions_shape = merge_batch_dimensions(translations)
+    batch_size = translations.size(0)
+    n_dims = translations.size(1)
+    homogenous_translation = convert_to_homogenous_coordinates(coordinates=translations)
+    translation_matrix = cat(
+        [
+            cat(
+                [
+                    eye(n_dims, device=translations.device, dtype=translations.dtype),
+                    zeros(1, n_dims, device=translations.device, dtype=translations.dtype),
+                ],
+                dim=0,
+            ).expand(batch_size, -1, -1),
+            homogenous_translation[..., None],
+        ],
+        dim=2,
+    ).view(-1, n_dims + 1, n_dims + 1)
+    translation_matrix = unmerge_batch_dimensions(
+        translation_matrix, batch_dimensions_shape=batch_dimensions_shape, num_channel_dims=2
+    )
+    return move_channels_first(translation_matrix, 2)
+
+
+@script
+def generate_scale_matrix(
+    scales: Tensor,
+) -> Tensor:
+    """Generator scale matrix from given scales
+
+    Args:
+        scales: Tensor with shape (batch_size, n_scale_and_shear_axes, ...)
+
+    Returns: Tensor with shape (batch_size, n_dims, n_dims, ...)
+    """
+    scales = move_channels_last(scales)
+    scale_matrix = diag_embed(scales)
+    return move_channels_first(scale_matrix, num_channel_dims=2)
 
 
 @channels_last({"coordinates": 1, "transformation_matrix": 2}, 1)

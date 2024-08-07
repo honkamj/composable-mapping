@@ -1,7 +1,6 @@
 """Interfaces for composable mapping"""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Literal, Optional, Sequence, Tuple, TypeVar, Union, overload
 
 from torch import Tensor
@@ -203,43 +202,3 @@ class IComposableMapping(ITensorLike):
         Args:
             inversion_parameters: Possible inversion parameters
         """
-
-
-@dataclass
-class IVoxelCoordinateSystem(ITensorLike):
-    """Represents coordinate system between voxel and world coordinates"""
-
-    @property
-    @abstractmethod
-    def from_voxel_coordinates(self) -> IComposableMapping:
-        """Mapping from voxel to world coordinates"""
-
-    @property
-    @abstractmethod
-    def to_voxel_coordinates(self) -> IComposableMapping:
-        """Mapping from world to voxel coordinates"""
-
-    @property
-    @abstractmethod
-    def grid(self) -> IMaskedTensor:
-        """Grid in world coordinates"""
-
-    @property
-    @abstractmethod
-    def voxel_grid(self) -> IMaskedTensor:
-        """Grid in voxel coordinates"""
-
-    @property
-    @abstractmethod
-    def grid_spacing(self) -> Sequence[float]:
-        """Spacing of the grid"""
-
-
-class IVoxelCoordinateSystemFactory(ABC):
-    """Factory for creating voxel coordinate systems"""
-
-    @abstractmethod
-    def create_coordinate_system(
-        self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
-    ) -> IVoxelCoordinateSystem:
-        """Create voxel coordinate system with given dtype on given device"""

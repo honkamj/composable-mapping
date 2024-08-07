@@ -27,14 +27,16 @@ from .interface import (
     IComposableMapping,
     IMaskedTensor,
     ITensorLike,
-    IVoxelCoordinateSystem,
-    IVoxelCoordinateSystemFactory,
+)
+from .voxel_coordinate_system import (
+    IVoxelCoordinateSystemContainer,
+    VoxelCoordinateSystem,
 )
 
 BaseSamplableMappingT = TypeVar("BaseSamplableMappingT", bound="BaseSamplableMapping")
 
 
-class BaseSamplableMapping(BaseTensorLikeWrapper):
+class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContainer):
     """Base implementation for composable mappings bundled together with a coordinate system
 
     Arguments:
@@ -45,7 +47,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
     def __init__(
         self,
         mapping: IComposableMapping,
-        coordinate_system: IVoxelCoordinateSystem,
+        coordinate_system: VoxelCoordinateSystem,
     ):
         self.mapping = mapping
         self.coordinate_system = coordinate_system
@@ -61,37 +63,13 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
         self,
         target: Union[
             IMaskedTensor,
-            IVoxelCoordinateSystem,
-            "BaseSamplableMapping",
-            IVoxelCoordinateSystemFactory,
+            IVoxelCoordinateSystemContainer,
         ],
     ) -> IMaskedTensor:
         """Sample the mapping wtih respect to the target coordinates"""
-        if isinstance(target, IVoxelCoordinateSystem):
-            target = target.grid
-        elif isinstance(target, BaseSamplableMapping):
-            target = target.coordinate_system.grid
-        elif isinstance(target, IVoxelCoordinateSystemFactory):
-            target = target.create_coordinate_system(
-                dtype=self.mapping.dtype, device=self.mapping.device
-            ).grid
+        if isinstance(target, IVoxelCoordinateSystemContainer):
+            target = target.coordinate_system.grid()
         return self.mapping(target)
-
-    def _obtain_resampling_coordinate_system(
-        self,
-        target: Union[
-            IVoxelCoordinateSystem, "BaseSamplableMapping", IVoxelCoordinateSystemFactory
-        ],
-    ) -> IVoxelCoordinateSystem:
-        if isinstance(target, IVoxelCoordinateSystem):
-            return target
-        if isinstance(target, BaseSamplableMapping):
-            return target.coordinate_system
-        if isinstance(target, IVoxelCoordinateSystemFactory):
-            return target.create_coordinate_system(
-                dtype=self.mapping.dtype, device=self.mapping.device
-            )
-        raise ValueError(f"Invalid target: {target}")
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -109,7 +87,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
     def _simplified_modified_copy(
         self: BaseSamplableMappingT,
         mapping: IComposableMapping,
-        coordinate_system: IVoxelCoordinateSystem,
+        coordinate_system: VoxelCoordinateSystem,
     ) -> BaseSamplableMappingT:
         return self.__class__(mapping=mapping, coordinate_system=coordinate_system)
 
@@ -119,7 +97,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper):
         children: Mapping[str, ITensorLike],
     ) -> BaseSamplableMappingT:
         if not isinstance(children["mapping"], IComposableMapping) or not isinstance(
-            children["coordinate_system"], IVoxelCoordinateSystem
+            children["coordinate_system"], VoxelCoordinateSystem
         ):
             raise ValueError("Invalid children for samplable mapping")
         return self.__class__(
@@ -302,28 +280,17 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 
     def sample_to_as_displacement_field(
         self,
-        target: Union[
-            IVoxelCoordinateSystem,
-            "BaseSamplableMapping",
-            IVoxelCoordinateSystemFactory,
-        ],
+        target: IVoxelCoordinateSystemContainer,
         *,
         data_coordinates: str = "voxel",
     ) -> IMaskedTensor:
         """Return the mapping as displacement field with respect to the
-        coordinates of the target mapping"""
-        if isinstance(target, IVoxelCoordinateSystem):
-            coordinate_system = target
-        elif isinstance(target, BaseSamplableMapping):
-            coordinate_system = target.coordinate_system
-        elif isinstance(target, IVoxelCoordinateSystemFactory):
-            coordinate_system = target.create_coordinate_system(
-                dtype=self.mapping.dtype, device=self.mapping.device
-            )
+        coordinates of the target"""
+        coordinate_system = target.coordinate_system
         data = self.sample_to(target)
         if data_coordinates == "world":
             return data.modify_values(
-                data.generate_values() - coordinate_system.grid.generate_values()
+                data.generate_values() - coordinate_system.grid().generate_values()
             )
         if data_coordinates == "voxel":
             voxel_coordinates = coordinate_system.to_voxel_coordinates(data)
@@ -338,17 +305,13 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 
     def resample_to(
         self,
-        target: Union[
-            IVoxelCoordinateSystem,
-            "BaseSamplableMapping",
-            IVoxelCoordinateSystemFactory,
-        ],
+        target: IVoxelCoordinateSystemContainer,
         interpolation_args: Optional[InterpolationArgs] = None,
         *,
         data_format: str = "displacement",
     ) -> "SamplableDeformationMapping":
         """Resample the mapping"""
-        coordinate_system = self._obtain_resampling_coordinate_system(target)
+        coordinate_system = target.coordinate_system
         if data_format == "displacement":
             data = self.sample_to_as_displacement_field(coordinate_system, data_coordinates="voxel")
         elif data_format == "coordinate":
@@ -378,9 +341,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
     ) -> Optional[IAffineTransformation]:
         """Return the mapping as affine transformation, if possible"""
         try:
-            return as_affine_transformation(
-                self.mapping, n_dims=len(self.coordinate_system.grid.spatial_shape)
-            )
+            return as_affine_transformation(self.mapping, n_dims=len(self.coordinate_system.shape))
         except NotAffineTransformationError:
             if return_none_if_not_affine:
                 return None
@@ -413,8 +374,10 @@ class SamplableDeformationMapping(BaseSamplableMapping):
             emphasize_every_nth_line: Tuple of two integers, the first one is the number of lines
                 to emphasize, the second one is the offset
         """
-        transformed_grid = self.mapping(self.coordinate_system.grid).generate_values()[batch_index]
-        n_dims = len(self.coordinate_system.grid.spatial_shape)
+        transformed_grid = self.mapping(self.coordinate_system.grid()).generate_values()[
+            batch_index
+        ]
+        n_dims = len(self.coordinate_system.shape)
         if n_dims > 1:
             grids = []
             dimension_pairs = list(combinations(range(n_dims), 2))
@@ -475,15 +438,11 @@ class SamplableVolumeMapping(BaseSamplableMapping):
 
     def resample_to(
         self,
-        target: Union[
-            IVoxelCoordinateSystem,
-            "BaseSamplableMapping",
-            IVoxelCoordinateSystemFactory,
-        ],
+        target: IVoxelCoordinateSystemContainer,
         interpolation_args: Optional[InterpolationArgs] = None,
     ) -> "SamplableVolumeMapping":
         """Resample the mapping"""
-        coordinate_system = self._obtain_resampling_coordinate_system(target)
+        coordinate_system = target.coordinate_system
         sampled = self.sample_to(coordinate_system)
         return SamplableVolumeMapping(
             mapping=create_volume(

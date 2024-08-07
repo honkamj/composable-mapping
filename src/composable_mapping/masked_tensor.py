@@ -18,7 +18,11 @@ from .affine import IdentityAffineTransformation
 from .base import BaseTensorLikeWrapper
 from .dense_deformation import generate_voxel_coordinate_grid
 from .interface import IAffineTransformation, IMaskedTensor, ITensorLike
-from .util import index_by_channel_dims, reduce_channel_shape_to_ones
+from .util import (
+    get_other_than_channel_dims,
+    index_by_channel_dims,
+    reduce_channel_shape_to_ones,
+)
 
 
 def concatenate_channels(
@@ -384,7 +388,8 @@ class VoxelCoordinateGrid(IMaskedTensor, BaseTensorLikeWrapper):
         transformation_matrix = self._affine_transformation.as_cpu_matrix()
         if transformation_matrix is None:
             return None
-        transformation_matrix = transformation_matrix.squeeze()
+        other_than_channel_dims = get_other_than_channel_dims(transformation_matrix.ndim, 2)
+        transformation_matrix = transformation_matrix.squeeze(dim=other_than_channel_dims)
         if transformation_matrix.ndim != 2:
             return None
         scale = diagonal(transformation_matrix[:-1, :-1])
