@@ -3,8 +3,6 @@
 from typing import Optional, Union, overload
 
 from torch import Tensor
-from torch import device as torch_device
-from torch import dtype as torch_dtype
 
 from .affine import AffineTransformation, ComposableAffine
 from .grid_mapping import (
@@ -15,18 +13,12 @@ from .grid_mapping import (
     get_interpolation_args,
 )
 from .identity import ComposableIdentity
-from .interface import (
-    IComposableMapping,
-    IMaskedTensor,
-    ITensorLike,
-    IVoxelCoordinateSystem,
-    IVoxelCoordinateSystemFactory,
-)
+from .interface import IComposableMapping, IMaskedTensor
 from .masked_tensor import MaskedTensor
-from .samplable_mapping import (
-    BaseSamplableMapping,
-    SamplableDeformationMapping,
-    SamplableVolumeMapping,
+from .samplable_mapping import SamplableDeformationMapping, SamplableVolumeMapping
+from .voxel_coordinate_system import (
+    IVoxelCoordinateSystemContainer,
+    VoxelCoordinateSystem,
 )
 
 
@@ -40,7 +32,7 @@ def create_composable_identity() -> ComposableIdentity:
     return ComposableIdentity()
 
 
-class BaseMappingFactory(IVoxelCoordinateSystemFactory):
+class BaseMappingFactory(IVoxelCoordinateSystemContainer):
     """Base class for composable mapping factories
 
     Implements IVoxelCoordinateSystemFactory interface for it to be usable as an
@@ -49,39 +41,19 @@ class BaseMappingFactory(IVoxelCoordinateSystemFactory):
 
     def __init__(
         self,
+        coordinate_system: VoxelCoordinateSystem,
         interpolation_args: Optional[InterpolationArgs] = None,
-        coordinate_system: Optional[IVoxelCoordinateSystem] = None,
-        coordinate_system_factory: Optional[IVoxelCoordinateSystemFactory] = None,
     ) -> None:
-        if coordinate_system is not None and coordinate_system_factory is not None:
-            raise ValueError(
-                "Only one of coordinate_system or coordinate_system_factory can be provided"
-            )
-        if coordinate_system is None and coordinate_system_factory is None:
-            raise ValueError(
-                "Either coordinate_system or coordinate_system_factory must be provided"
-            )
-        self.coordinate_system = coordinate_system
-        self.coordinate_system_factory = coordinate_system_factory
+        self._coordinate_system = coordinate_system
         self.interpolation_args = get_interpolation_args(interpolation_args)
 
-    def create_coordinate_system(
-        self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
-    ) -> IVoxelCoordinateSystem:
-        if self.coordinate_system is None:
-            if self.coordinate_system_factory is None:
-                raise ValueError(
-                    "Either coordinate_system or coordinate_system_factory must be provided"
-                )
-            return self.coordinate_system_factory.create_coordinate_system(
-                dtype=dtype, device=device
-            )
-        return self.coordinate_system
+    @property
+    def coordinate_system(self) -> VoxelCoordinateSystem:
+        return self._coordinate_system
 
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}(coordinate_system={self.coordinate_system}, "
-            f"coordinate_system_factory={self.coordinate_system_factory}, "
             f"interpolation_args={self.interpolation_args})"
         )
 
@@ -124,18 +96,14 @@ class SamplableMappingFactory(BaseMappingFactory):
     ) -> SamplableVolumeMapping:
         """Create samplable volume mapping"""
         data = self._handle_tensor_inputs(data, mask)
-        coordinate_system = self.create_coordinate_system(
-            dtype=data.dtype,
-            device=data.device,
-        )
         return SamplableVolumeMapping(
             mapping=create_volume(
                 data=data,
                 interpolation_args=self.interpolation_args,
-                coordinate_system=coordinate_system,
+                coordinate_system=self.coordinate_system,
                 n_channel_dims=n_channel_dims,
             ),
-            coordinate_system=coordinate_system,
+            coordinate_system=self.coordinate_system,
         )
 
     @overload
@@ -172,10 +140,6 @@ class SamplableMappingFactory(BaseMappingFactory):
         if resample_as is None:
             resample_as = data_format
         data = self._handle_tensor_inputs(data, mask)
-        coordinate_system = self.create_coordinate_system(
-            dtype=data.dtype,
-            device=data.device,
-        )
         if data_coordinates == "voxel":
             factory = create_deformation_from_voxel_data
         elif data_coordinates == "world":
@@ -186,10 +150,10 @@ class SamplableMappingFactory(BaseMappingFactory):
             mapping=factory(
                 data=data,
                 interpolation_args=self.interpolation_args,
-                coordinate_system=coordinate_system,
+                coordinate_system=self.coordinate_system,
                 data_format=data_format,
             ),
-            coordinate_system=coordinate_system,
+            coordinate_system=self.coordinate_system,
         )
 
     def create_affine(
@@ -199,55 +163,16 @@ class SamplableMappingFactory(BaseMappingFactory):
         """Create samplable affine mapping"""
         return SamplableDeformationMapping(
             create_composable_affine(transformation_matrix),
-            coordinate_system=self.create_coordinate_system(
-                dtype=transformation_matrix.dtype, device=transformation_matrix.device
-            ),
+            coordinate_system=self.coordinate_system,
         )
 
     def create_identity(
         self,
-        dtype: Optional[torch_dtype] = None,
-        device: Optional[torch_device] = None,
     ) -> SamplableDeformationMapping:
-        """Create samplable identity mapping
-
-        Data type and device have effect only if coordinate system factory, not
-        coordinate system, is available.
-        """
+        """Create samplable identity mapping"""
         return SamplableDeformationMapping(
-            create_composable_identity(),
-            coordinate_system=self.create_coordinate_system(dtype=dtype, device=device),
+            create_composable_identity(), coordinate_system=self.coordinate_system
         )
-
-    def create_identity_from(
-        self,
-        reference: Union[ITensorLike, Tensor],
-    ) -> SamplableDeformationMapping:
-        """Create samplable identity mapping
-
-        Data type and device for creating the coordinate system are inferred
-        from the reference if coordinate system factory is available.
-        """
-        return SamplableDeformationMapping(
-            create_composable_identity(),
-            coordinate_system=self.create_coordinate_system(
-                dtype=reference.dtype, device=reference.device
-            ),
-        )
-
-
-def create_samplable_identity_from(
-    reference: BaseSamplableMapping,
-) -> SamplableDeformationMapping:
-    """Create samplable identity mapping
-
-    Data type and device for creating the coordinate system are inferred
-    from the reference if coordinate system factory is available.
-    """
-    return SamplableDeformationMapping(
-        create_composable_identity(),
-        coordinate_system=reference.coordinate_system,
-    )
 
 
 class GridMappingFactory(BaseMappingFactory):
@@ -282,10 +207,7 @@ class GridMappingFactory(BaseMappingFactory):
         return create_volume(
             data=data,
             interpolation_args=self.interpolation_args,
-            coordinate_system=self.create_coordinate_system(
-                dtype=data.dtype,
-                device=data.device,
-            ),
+            coordinate_system=self.coordinate_system,
             n_channel_dims=n_channel_dims,
         )
 
@@ -327,9 +249,6 @@ class GridMappingFactory(BaseMappingFactory):
         return factory(
             data=data,
             interpolation_args=self.interpolation_args,
-            coordinate_system=self.create_coordinate_system(
-                dtype=data.dtype,
-                device=data.device,
-            ),
+            coordinate_system=self.coordinate_system,
             data_format=data_format,
         )

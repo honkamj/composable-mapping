@@ -12,16 +12,14 @@ from deformation_inversion_layer.interface import Interpolator
 from deformation_inversion_layer.interpolator import LinearInterpolator
 from torch import Tensor
 
+from composable_mapping.affine import ComposableAffine
+
 from .base import BaseComposableMapping
 from .dense_deformation import compute_fov_mask_at_voxel_coordinates
-from .interface import (
-    IComposableMapping,
-    IMaskedTensor,
-    ITensorLike,
-    IVoxelCoordinateSystem,
-)
+from .interface import IComposableMapping, IMaskedTensor, ITensorLike
 from .masked_tensor import MaskedTensor
 from .util import combine_optional_masks
+from .voxel_coordinate_system import VoxelCoordinateSystem
 
 
 class InterpolationArgs:
@@ -191,7 +189,7 @@ class _BaseGridDeformation(GridVolume):
             def voxel_coordinates_generator():
                 return voxel_coordinates
 
-        elif self._data_format == "coordinate_field":
+        elif self._data_format == "coordinate":
             voxel_coordinates_generator = masked_coordinates.generate_values
             coordinate_mask = masked_coordinates.generate_mask(generate_missing_mask=False)
         else:
@@ -222,7 +220,7 @@ class GridDeformation(_BaseGridDeformation):
             should be given in voxel coordinates, and the grid is also assumed
             to be in voxel coordinates.
         interpolation_args: Arguments defining interpolation and extrapolation behavior
-        data_format: Format of the provided data, either "displacement" or "coordinate_field"
+        data_format: Format of the provided data, either "displacement" or "coordinate"
     """
 
     def _modified_copy(
@@ -330,7 +328,7 @@ class _GridDeformationInverse(_BaseGridDeformation):
 
 def create_volume(
     data: IMaskedTensor,
-    coordinate_system: IVoxelCoordinateSystem,
+    coordinate_system: VoxelCoordinateSystem,
     interpolation_args: Optional[InterpolationArgs] = None,
     *,
     n_channel_dims: int = 1,
@@ -341,12 +339,12 @@ def create_volume(
         interpolation_args=interpolation_args,
         n_channel_dims=n_channel_dims,
     )
-    return grid_volume.compose(coordinate_system.to_voxel_coordinates)
+    return grid_volume.compose(ComposableAffine(coordinate_system.to_voxel_coordinates))
 
 
 def create_deformation_from_voxel_data(
     data: IMaskedTensor,
-    coordinate_system: IVoxelCoordinateSystem,
+    coordinate_system: VoxelCoordinateSystem,
     interpolation_args: Optional[InterpolationArgs] = None,
     *,
     data_format: str = "displacement",
@@ -364,21 +362,23 @@ def create_deformation_from_voxel_data(
         interpolation_args: Arguments defining interpolation and extrapolation behavior
         coordinate_system: Coordinate system defining transformations between voxel and
             world coordinates
-        data_format: Format of the provided data, either "displacement" or "coordinate_field"
+        data_format: Format of the provided data, either "displacement" or "coordinate"
     """
     grid_volume = GridDeformation(
         data=data,
         interpolation_args=interpolation_args,
         data_format=data_format,
     )
-    return coordinate_system.from_voxel_coordinates.compose(grid_volume).compose(
-        coordinate_system.to_voxel_coordinates
+    return (
+        ComposableAffine(coordinate_system.from_voxel_coordinates)
+        .compose(grid_volume)
+        .compose(ComposableAffine(coordinate_system.to_voxel_coordinates))
     )
 
 
 def create_deformation_from_world_data(
     data: IMaskedTensor,
-    coordinate_system: IVoxelCoordinateSystem,
+    coordinate_system: VoxelCoordinateSystem,
     interpolation_args: Optional[InterpolationArgs] = None,
     *,
     data_format: str = "displacement",
@@ -399,25 +399,22 @@ def create_deformation_from_world_data(
         interpolation_args: Arguments defining interpolation and extrapolation behavior
         coordinate_system: Coordinate system defining transformations between voxel and
             world coordinates
-        data_format: Format of the provided data, either "displacement" or "coordinate_field"
+        data_format: Format of the provided data, either "displacement" or "coordinate"
     """
+    data_values, data_mask = data.generate(generate_missing_mask=False)
     if data_format == "displacement":
-        ddf, ddf_mask = data.generate(generate_missing_mask=False)
-        coordinates_in_voxel_coordinates, mask_in_voxel_coordinates = (
-            coordinate_system.to_voxel_coordinates(
-                MaskedTensor(ddf + coordinate_system.grid.generate_values(), mask=ddf_mask)
-            ).generate()
+        coordinates_in_voxel_coordinates = coordinate_system.to_voxel_coordinates(
+            data_values + coordinate_system.grid().generate_values()
         )
-        data_in_voxel_coordinates: IMaskedTensor = MaskedTensor(
-            coordinates_in_voxel_coordinates - coordinate_system.voxel_grid.generate_values(),
-            mask=mask_in_voxel_coordinates,
+        data_in_voxel_coordinates = (
+            coordinates_in_voxel_coordinates - coordinate_system.voxel_grid().generate_values()
         )
-    elif data_format == "coordinate_field":
-        data_in_voxel_coordinates = coordinate_system.to_voxel_coordinates(data).reduce()
+    elif data_format == "coordinate":
+        data_in_voxel_coordinates = coordinate_system.to_voxel_coordinates(data_values)
     else:
         raise ValueError(f"Invalid data format: {data_format}")
     return create_deformation_from_voxel_data(
-        data=data_in_voxel_coordinates,
+        data=MaskedTensor(data_in_voxel_coordinates, data_mask),
         interpolation_args=interpolation_args,
         coordinate_system=coordinate_system,
         data_format=data_format,

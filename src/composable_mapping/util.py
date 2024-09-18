@@ -422,8 +422,12 @@ def index_by_channel_dims(n_total_dims: int, channel_dim_index: int, n_channel_d
 def get_other_than_channel_dims(n_total_dims: int, n_channel_dims: int) -> List[int]:
     """Returns indices for dimensions other than channel dimensions"""
     first_channel_dim_index = index_by_channel_dims(n_total_dims, 0, n_channel_dims=n_channel_dims)
-    channel_dims = range(first_channel_dim_index, first_channel_dim_index + n_channel_dims)
-    return [dim for dim in range(n_channel_dims) if dim not in channel_dims]
+    channel_dims = list(range(first_channel_dim_index, first_channel_dim_index + n_channel_dims))
+    dims: List[int] = []
+    for dim in range(n_total_dims):
+        if dim not in channel_dims:
+            dims.append(dim)
+    return dims
 
 
 def reduce_channel_shape_to_ones(shape: Sequence[int], n_channel_dims: int) -> Tuple[int, ...]:

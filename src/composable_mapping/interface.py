@@ -32,12 +32,16 @@ class ITensorLike(ABC):
         """Return the device of the underlying tensor(s)"""
 
     @abstractmethod
-    def to(  # It is the clearest approach to use same method name as pytorch, pylint: disable=invalid-name
+    def cast(
         self: ITensorLikeT,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> ITensorLikeT:
-        """Cast underlying tensors to given dtype and device"""
+        """Cast underlying tensors to given dtype and device
+
+        We will not use method name "to" as it would create conflict with
+        torch.nn.Module.to method which does casting in-place.
+        """
 
     @abstractmethod
     def detach(self: ITensorLikeT) -> ITensorLikeT:

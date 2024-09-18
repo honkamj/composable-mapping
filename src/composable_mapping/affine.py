@@ -141,7 +141,7 @@ class IdentityAffineTransformation(BaseAffineTransformation):
     ) -> torch_device:
         return self._device
 
-    def to(
+    def cast(
         self,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -198,7 +198,7 @@ class CPUAffineTransformation(BaseAffineTransformation):
             return coordinates
         return _broadcast_and_transform_coordinates(coordinates, self.as_matrix())
 
-    def pin_memory_if_needed(self) -> "CPUAffineTransformation":
+    def pin_memory_if_target_not_cpu(self) -> "CPUAffineTransformation":
         """Pin memory of the cpu transformation matrices needed for producing
         output of as_matrix on gpu"""
         return CPUAffineTransformation(
@@ -292,7 +292,7 @@ class CPUAffineTransformation(BaseAffineTransformation):
     ) -> torch_device:
         return self._device
 
-    def to(
+    def cast(
         self,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -325,13 +325,15 @@ class _CPUAffineTransformationInverse(CPUAffineTransformation):
         )
         self._transformation_to_invert = transformation_to_invert
 
-    def pin_memory_if_needed(self) -> "_CPUAffineTransformationInverse":
+    def pin_memory_if_target_not_cpu(self) -> "_CPUAffineTransformationInverse":
         return _CPUAffineTransformationInverse(
             inverted_transformation_matrix_cpu=self.as_cpu_matrix(),
-            transformation_to_invert=(self._transformation_to_invert.pin_memory_if_needed()),
+            transformation_to_invert=(
+                self._transformation_to_invert.pin_memory_if_target_not_cpu()
+            ),
         )
 
-    def to(
+    def cast(
         self,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -340,7 +342,9 @@ class _CPUAffineTransformationInverse(CPUAffineTransformation):
             inverted_transformation_matrix_cpu=self._transformation_matrix_cpu.to(
                 dtype=self._transformation_matrix_cpu.dtype if dtype is None else dtype,
             ),
-            transformation_to_invert=self._transformation_to_invert.to(dtype=dtype, device=device),
+            transformation_to_invert=self._transformation_to_invert.cast(
+                dtype=dtype, device=device
+            ),
         )
 
     def as_matrix(
@@ -370,14 +374,14 @@ class _CPUAffineTransformationComposition(CPUAffineTransformation):
         self._left_transformation = left_transformation
         self._right_transformation = right_transformation
 
-    def pin_memory_if_needed(self) -> "_CPUAffineTransformationComposition":
+    def pin_memory_if_target_not_cpu(self) -> "_CPUAffineTransformationComposition":
         return _CPUAffineTransformationComposition(
             compsed_transformation_matrix_cpu=self.as_cpu_matrix(),
-            left_transformation=self._left_transformation.pin_memory_if_needed(),
-            right_transformation=self._right_transformation.pin_memory_if_needed(),
+            left_transformation=self._left_transformation.pin_memory_if_target_not_cpu(),
+            right_transformation=self._right_transformation.pin_memory_if_target_not_cpu(),
         )
 
-    def to(
+    def cast(
         self,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -386,8 +390,8 @@ class _CPUAffineTransformationComposition(CPUAffineTransformation):
             compsed_transformation_matrix_cpu=self._transformation_matrix_cpu.to(
                 dtype=self._transformation_matrix_cpu.dtype if dtype is None else dtype,
             ),
-            left_transformation=self._left_transformation.to(dtype=dtype, device=device),
-            right_transformation=self._right_transformation.to(dtype=dtype, device=device),
+            left_transformation=self._left_transformation.cast(dtype=dtype, device=device),
+            right_transformation=self._right_transformation.cast(dtype=dtype, device=device),
         )
 
     def as_matrix(

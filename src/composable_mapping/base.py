@@ -57,7 +57,7 @@ class BaseTensorLikeWrapper(ITensorLike):
             return next(iter(self._get_children().values())).device
         return next(iter(tensors.values())).device
 
-    def to(
+    def cast(
         self: BaseTensorLikeWrapperT,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -67,7 +67,8 @@ class BaseTensorLikeWrapper(ITensorLike):
             for key, tensor in self._get_tensors().items()
         }
         modified_children = {
-            key: child.to(dtype=dtype, device=device) for key, child in self._get_children().items()
+            key: child.cast(dtype=dtype, device=device)
+            for key, child in self._get_children().items()
         }
         return self._modified_copy(modified_tensors, modified_children)
 

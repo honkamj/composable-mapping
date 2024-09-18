@@ -7,6 +7,8 @@ from matplotlib.figure import Figure  # type: ignore
 from matplotlib.pyplot import subplots  # type: ignore
 from torch import Tensor
 
+from composable_mapping.masked_tensor import MaskedTensor
+
 from .affine import (
     ComposableAffine,
     NotAffineTransformationError,
@@ -50,7 +52,11 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
         coordinate_system: VoxelCoordinateSystem,
     ):
         self.mapping = mapping
-        self.coordinate_system = coordinate_system
+        self._coordinate_system = coordinate_system
+
+    @property
+    def coordinate_system(self) -> VoxelCoordinateSystem:
+        return self._coordinate_system
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
         return self.mapping(masked_coordinates)
@@ -293,9 +299,10 @@ class SamplableDeformationMapping(BaseSamplableMapping):
                 data.generate_values() - coordinate_system.grid().generate_values()
             )
         if data_coordinates == "voxel":
-            voxel_coordinates = coordinate_system.to_voxel_coordinates(data)
-            return voxel_coordinates.modify_values(
-                voxel_coordinates.generate_values() - coordinate_system.voxel_grid.generate_values()
+            data_values, data_mask = data.generate()
+            voxel_coordinates = coordinate_system.to_voxel_coordinates(data_values)
+            return MaskedTensor(
+                voxel_coordinates - coordinate_system.voxel_grid().generate_values(), mask=data_mask
             )
         raise ValueError(f"Invalid option for data coordinates: {data_coordinates}")
 
@@ -315,7 +322,10 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         if data_format == "displacement":
             data = self.sample_to_as_displacement_field(coordinate_system, data_coordinates="voxel")
         elif data_format == "coordinate":
-            data = coordinate_system.to_voxel_coordinates(self.sample_to(coordinate_system))
+            data_values_world, data_mask = self.sample_to(coordinate_system).generate()
+            data = MaskedTensor(
+                coordinate_system.to_voxel_coordinates(data_values_world), data_mask
+            )
         else:
             raise ValueError(f"Invalid data_format option: {data_format}")
         return SamplableDeformationMapping(
