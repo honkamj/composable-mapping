@@ -4,6 +4,7 @@ from typing import Literal, Mapping, Optional, Sequence, Tuple, Union, overload
 
 from torch import Tensor, allclose
 from torch import any as torch_any
+from torch import bool as torch_bool
 from torch import cat
 from torch import device as torch_device
 from torch import diag, diagonal
@@ -12,7 +13,7 @@ from torch import get_default_dtype
 from torch import int32 as torch_int32
 from torch import ones
 from torch import round as torch_round
-from torch import tensor
+from torch import stack, tensor
 
 from .affine import IdentityAffineTransformation
 from .base import BaseTensorLikeWrapper
@@ -25,9 +26,7 @@ from .util import (
 )
 
 
-def concatenate_channels(
-    *masked_tensors: IMaskedTensor, combine_masks: bool = True, channel_index: int = 0
-) -> IMaskedTensor:
+def concatenate_channels(*masked_tensors: IMaskedTensor, channel_index: int = 0) -> "MaskedTensor":
     """Concatenate masked tensors along the channel dimension
 
     Args:
@@ -35,15 +34,14 @@ def concatenate_channels(
         combine_mask: Combine masks of the masked tensors by multiplying,
             otherwise the mask of the first tensor is used.
         channel_index: Index of the channel dimension starting from the first
-            channel dimension (second dimension of the tensor)
+            channel dimension (second dimension of the tensor if batch dimension
+            is present)
     """
     if not all(
         len(masked_tensor.channels_shape) == len(masked_tensors[0].channels_shape)
         for masked_tensor in masked_tensors
     ):
         raise ValueError("Lengths of channel shapes of masked tensors must be the same")
-    if channel_index >= len(masked_tensors[0].channels_shape) or channel_index < 0:
-        raise ValueError("Invalid channel index")
     n_channel_dims = len(masked_tensors[0].channels_shape)
     concatenation_index = index_by_channel_dims(
         n_total_dims=len(masked_tensors[0].shape),
@@ -54,18 +52,56 @@ def concatenate_channels(
         [masked_tensor.generate_values() for masked_tensor in masked_tensors],
         dim=concatenation_index,
     )
-    if combine_masks:
-        mask = masked_tensors[0].generate_mask(generate_missing_mask=False)
-        for masked_tensor in masked_tensors[1:]:
-            update_mask = masked_tensor.generate_mask(generate_missing_mask=False)
-            if mask is not None and update_mask is not None:
-                mask = mask * update_mask
-    else:
-        mask = masked_tensors[0].generate_mask(generate_missing_mask=False)
+    mask: Optional[Tensor] = None
+    for masked_tensor in masked_tensors:
+        update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
+        if mask is not None and update_mask is not None:
+            mask = mask & update_mask
     return MaskedTensor(
         values=values,
         mask=mask,
         n_channel_dims=n_channel_dims,
+    )
+
+
+def stack_channels(*masked_tensors: IMaskedTensor, channel_index: int = 0) -> "MaskedTensor":
+    """Concatenate masked tensors along the channel dimension
+
+    Args:
+        masked_tensors: Masked tensors to concatenate
+        combine_mask: Combine masks of the masked tensors by multiplying,
+            otherwise the mask of the first tensor is used.
+        channel_index: Index of the channel dimension over which to stack
+            starting from the first channel dimension (second dimension of the
+            tensor if batch dimension is present)
+    """
+    if not all(
+        len(masked_tensor.channels_shape) == len(masked_tensors[0].channels_shape)
+        for masked_tensor in masked_tensors
+    ):
+        raise ValueError("Lengths of channel shapes of masked tensors must be the same")
+    n_channel_dims = len(masked_tensors[0].channels_shape)
+    stack_index = index_by_channel_dims(
+        n_total_dims=len(masked_tensors[0].shape),
+        channel_dim_index=channel_index,
+        n_channel_dims=n_channel_dims,
+        inclusive_upper_bound=True,
+    )
+    values = stack(
+        [masked_tensor.generate_values() for masked_tensor in masked_tensors],
+        dim=stack_index,
+    )
+    mask: Optional[Tensor] = None
+    for masked_tensor in masked_tensors:
+        update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
+        if update_mask is not None:
+            update_mask = update_mask.unsqueeze(dim=stack_index)
+            if mask is not None:
+                mask = mask & update_mask
+    return MaskedTensor(
+        values=values,
+        mask=mask,
+        n_channel_dims=n_channel_dims + 1,
     )
 
 
@@ -86,6 +122,8 @@ class MaskedTensor(IMaskedTensor, BaseTensorLikeWrapper):
     ) -> None:
         self._values = values
         self._mask = mask
+        if mask is not None and mask.dtype != torch_bool:
+            raise ValueError("Mask must be a boolean tensor")
         self._n_channel_dims = n_channel_dims
         self._affine_transformation: IAffineTransformation = (
             IdentityAffineTransformation(
@@ -113,46 +151,53 @@ class MaskedTensor(IMaskedTensor, BaseTensorLikeWrapper):
     def generate(
         self,
         generate_missing_mask: Literal[True] = True,
+        cast_mask: bool = ...,
     ) -> Tuple[Tensor, Tensor]: ...
 
     @overload
     def generate(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
         self,
         generate_missing_mask: bool,
+        cast_mask: bool = ...,
     ) -> Tuple[Tensor, Optional[Tensor]]: ...
 
     def generate(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ) -> Tuple[Tensor, Optional[Tensor]]:
         return (
             self.generate_values(),
-            self.generate_mask(generate_missing_mask=generate_missing_mask),
+            self.generate_mask(generate_missing_mask=generate_missing_mask, cast_mask=cast_mask),
         )
 
     @overload
     def generate_mask(
         self,
         generate_missing_mask: Literal[True] = ...,
+        cast_mask: bool = ...,
     ) -> Tensor: ...
 
     @overload
     def generate_mask(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
         self,
         generate_missing_mask: Union[bool, Literal[False]],
+        cast_mask: bool = ...,
     ) -> Optional[Tensor]: ...
 
     def generate_mask(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ) -> Optional[Tensor]:
+        target_dtype = self._values.dtype if cast_mask else torch_bool
         if self._mask is not None:
-            return self._mask
+            return self._mask.to(target_dtype)
         return (
             ones(
                 reduce_channel_shape_to_ones(self._values.shape, self._n_channel_dims),
                 device=self._values.device,
-                dtype=self._values.dtype,
+                dtype=target_dtype,
             )
             if generate_missing_mask
             else None
@@ -294,44 +339,51 @@ class VoxelCoordinateGrid(IMaskedTensor, BaseTensorLikeWrapper):
     def generate(
         self,
         generate_missing_mask: Literal[True] = True,
+        cast_mask: bool = ...,
     ) -> Tuple[Tensor, Tensor]: ...
 
     @overload
     def generate(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
         self,
         generate_missing_mask: bool,
+        cast_mask: bool = ...,
     ) -> Tuple[Tensor, Optional[Tensor]]: ...
 
     def generate(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ) -> Tuple[Tensor, Optional[Tensor]]:
         return (
             self.generate_values(),
-            self.generate_mask(generate_missing_mask=generate_missing_mask),
+            self.generate_mask(generate_missing_mask=generate_missing_mask, cast_mask=cast_mask),
         )
 
     @overload
     def generate_mask(
         self,
         generate_missing_mask: Literal[True] = ...,
+        cast_mask: bool = ...,
     ) -> Tensor: ...
 
     @overload
     def generate_mask(  # https://github.com/pylint-dev/pylint/issues/5264 - pylint: disable=signature-differs
         self,
         generate_missing_mask: Union[bool, Literal[False]],
+        cast_mask: bool = ...,
     ) -> Optional[Tensor]: ...
 
     def generate_mask(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ) -> Optional[Tensor]:
+        target_dtype = self._dtype if cast_mask else torch_bool
         return (
             ones(
                 (1, 1) + tuple(self._spatial_shape),
                 device=self._device,
-                dtype=self._dtype,
+                dtype=target_dtype,
             )
             if generate_missing_mask
             else None
@@ -389,7 +441,8 @@ class VoxelCoordinateGrid(IMaskedTensor, BaseTensorLikeWrapper):
         if transformation_matrix is None:
             return None
         other_than_channel_dims = get_other_than_channel_dims(transformation_matrix.ndim, 2)
-        transformation_matrix = transformation_matrix.squeeze(dim=other_than_channel_dims)
+        for dim in other_than_channel_dims:
+            transformation_matrix = transformation_matrix.squeeze(dim)
         if transformation_matrix.ndim != 2:
             return None
         scale = diagonal(transformation_matrix[:-1, :-1])

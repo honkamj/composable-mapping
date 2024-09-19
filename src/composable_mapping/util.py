@@ -402,7 +402,12 @@ def broadcast_tensors_around_channel_dims(
 
 
 @script
-def index_by_channel_dims(n_total_dims: int, channel_dim_index: int, n_channel_dims: int) -> int:
+def index_by_channel_dims(
+    n_total_dims: int,
+    channel_dim_index: int,
+    n_channel_dims: int,
+    inclusive_upper_bound: bool = False,
+) -> int:
     """Returns index in orignal tensor based on channel dim index
 
     E.g. (3, 5, 4, 4) with channel_dim_index = 0, n_channel_dims = 1 returns 1
@@ -411,7 +416,11 @@ def index_by_channel_dims(n_total_dims: int, channel_dim_index: int, n_channel_d
         raise RuntimeError("Number of channel dimensions do not match")
     if channel_dim_index < 0:
         channel_dim_index += n_channel_dims
-    if channel_dim_index < 0 or channel_dim_index >= n_channel_dims:
+    if (
+        channel_dim_index < 0
+        or (channel_dim_index >= n_channel_dims and not inclusive_upper_bound)
+        or channel_dim_index > n_total_dims
+    ):
         raise RuntimeError("Invalid channel dimension index")
     if n_total_dims == n_channel_dims:
         return channel_dim_index
@@ -460,5 +469,5 @@ def combine_optional_masks(masks: List[Optional[Tensor]]) -> Optional[Tensor]:
             if combined_mask is None:
                 combined_mask = mask
             else:
-                combined_mask = combined_mask * mask
+                combined_mask = combined_mask & mask
     return combined_mask

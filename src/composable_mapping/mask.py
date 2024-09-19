@@ -34,15 +34,20 @@ class RectangleMask(BaseComposableMapping):
         return RectangleMask(min_values=self._min_values, max_values=self._max_values)
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
-        coordinates, mask = masked_coordinates.generate(generate_missing_mask=False)
+        coordinates, mask = masked_coordinates.generate(
+            generate_missing_mask=False, cast_mask=False
+        )
         update_mask = compute_fov_mask_based_on_bounds(
             coordinates=coordinates,
             min_values=self._min_values,
             max_values=self._max_values,
-            dtype=coordinates.dtype,
         )
         updated_mask = combine_optional_masks([mask, update_mask])
-        return MaskedTensor(values=coordinates, mask=updated_mask)
+        return MaskedTensor(
+            values=coordinates,
+            mask=updated_mask,
+            n_channel_dims=len(masked_coordinates.channels_shape),
+        )
 
     def invert(self, **inversion_parameters):
         raise NotImplementedError("Rectangle mask is not invertible")

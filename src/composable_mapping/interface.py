@@ -86,23 +86,27 @@ class IMaskedTensor(ITensorLike):
     def generate(
         self,
         generate_missing_mask: Literal[True] = True,
+        cast_mask: bool = ...,
     ) -> Tuple[Tensor, Tensor]: ...
 
     @overload
     def generate(
         self,
         generate_missing_mask: bool,
+        cast_mask: bool = ...,
     ) -> Tuple[Tensor, Optional[Tensor]]: ...
 
     @abstractmethod
     def generate(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ) -> Tuple[Tensor, Optional[Tensor]]:
         """Generate values and mask contained by the wrapper
 
         Args:
             generate_mask: Generate mask of ones if the object does not have a mask
+            cast_mask: Mask is stored as a boolean tensor, cast it to dtype of values if True
         """
 
     @abstractmethod
@@ -115,23 +119,27 @@ class IMaskedTensor(ITensorLike):
     def generate_mask(
         self,
         generate_missing_mask: Literal[True] = ...,
+        cast_mask: bool = ...,
     ) -> Tensor: ...
 
     @overload
     def generate_mask(
         self,
         generate_missing_mask: Union[bool, Literal[False]],
+        cast_mask: bool = ...,
     ) -> Optional[Tensor]: ...
 
     @abstractmethod
     def generate_mask(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ) -> Optional[Tensor]:
         """Generate mask contained by the wrapper
 
         Args:
             generate_mask: Generate mask of ones if the object does not have a mask
+            cast_mask: Mask is stored as a boolean tensor, cast it to dtype of values if True
         """
 
     @abstractmethod

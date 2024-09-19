@@ -7,8 +7,6 @@ from matplotlib.figure import Figure  # type: ignore
 from matplotlib.pyplot import subplots  # type: ignore
 from torch import Tensor
 
-from composable_mapping.masked_tensor import MaskedTensor
-
 from .affine import (
     ComposableAffine,
     NotAffineTransformationError,
@@ -16,8 +14,10 @@ from .affine import (
 )
 from .base import BaseTensorLikeWrapper
 from .finite_difference import (
-    estimate_spatial_derivatives_for_mapping,
-    estimate_spatial_jacobian_matrices_for_mapping,
+    estimate_spatial_derivatives,
+    estimate_spatial_jacobian_matrices,
+    update_coordinate_system_for_derivatives,
+    update_coordinate_system_for_jacobian_matrices,
 )
 from .grid_mapping import (
     InterpolationArgs,
@@ -30,6 +30,7 @@ from .interface import (
     IMaskedTensor,
     ITensorLike,
 )
+from .masked_tensor import MaskedTensor
 from .voxel_coordinate_system import (
     IVoxelCoordinateSystemContainer,
     VoxelCoordinateSystem,
@@ -226,14 +227,57 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
     ) -> BaseSamplableMappingT:
         return self.right_compose(left_mapping)
 
+    def estimate_spatial_derivatives_to(
+        self,
+        target: IVoxelCoordinateSystemContainer,
+        spatial_dim: int,
+        *,
+        other_dims: Optional[str] = None,
+        central: bool = False,
+        interpolation_args: Optional[InterpolationArgs] = None,
+    ) -> "SamplableVolumeMapping":
+        """Estimate spatial derivatives over the mapping at the grid locations
+        of the target
+
+        Args:
+            spatial_dim: Spatial dimension to estimate the derivative for
+            other_dims: How to handle the other dimensions, see
+                finite_difference.estimate_spatial_derivatives for more details
+            central: Whether to use central differences
+            interpolation_args: Interpolation arguments to use for the generated
+                volume of derivatives
+        """
+        updated_coordinate_system = update_coordinate_system_for_derivatives(
+            coordinate_system=target.coordinate_system,
+            spatial_dim=spatial_dim,
+            other_dims=other_dims,
+            central=central,
+        )
+        derivatives = estimate_spatial_derivatives(
+            volume=self.sample_to(target),
+            spatial_dim=spatial_dim,
+            spacing=target.coordinate_system.grid_spacing()[..., spatial_dim],
+            other_dims=other_dims,
+            central=central,
+        )
+
+        return SamplableVolumeMapping(
+            create_volume(
+                data=derivatives,
+                coordinate_system=updated_coordinate_system,
+                interpolation_args=interpolation_args,
+            ),
+            coordinate_system=updated_coordinate_system,
+        )
+
     def estimate_spatial_derivatives(
         self,
         spatial_dim: int,
         *,
         other_dims: Optional[str] = None,
         central: bool = False,
-        out: Optional[Tensor] = None,
-    ) -> Tensor:
+        interpolation_args: Optional[InterpolationArgs] = None,
+    ) -> "SamplableVolumeMapping":
         """Estimate spatial derivatives over the mapping at the grid locations
 
         Args:
@@ -241,38 +285,64 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
             other_dims: How to handle the other dimensions, see
                 finite_difference.estimate_spatial_derivatives for more details
             central: Whether to use central differences
-            out: Output tensor to store the result
+            interpolation_args: Interpolation arguments to use for the generated
+                volume of derivatives
         """
-        return estimate_spatial_derivatives_for_mapping(
-            mapping=self.mapping,
-            coordinate_system=self.coordinate_system,
+        return self.estimate_spatial_derivatives_to(
+            self,
             spatial_dim=spatial_dim,
             other_dims=other_dims,
             central=central,
-            out=out,
+            interpolation_args=interpolation_args,
+        )
+
+    def estimate_spatial_jacobian_matrices_to(
+        self,
+        target: IVoxelCoordinateSystemContainer,
+        *,
+        central: bool = False,
+        interpolation_args: Optional[InterpolationArgs] = None,
+    ) -> "SamplableVolumeMapping":
+        """Estimate spatial Jacobian matrices over the mapping at the grid locations
+        of the target
+
+        Args:
+            central: Whether to use central differences
+            interpolation_args: Interpolation arguments to use for the generated
+                volume of Jacobian matrices
+        """
+        updated_coordinate_system = update_coordinate_system_for_jacobian_matrices(
+            coordinate_system=target.coordinate_system, central=central
+        )
+        jacobian_matrices = estimate_spatial_jacobian_matrices(
+            volume=self.sample_to(target),
+            spacing=target.coordinate_system.grid_spacing(),
+            central=central,
+        )
+        return SamplableVolumeMapping(
+            create_volume(
+                data=jacobian_matrices,
+                coordinate_system=updated_coordinate_system,
+                interpolation_args=interpolation_args,
+            ),
+            coordinate_system=updated_coordinate_system,
         )
 
     def estimate_spatial_jacobian_matrices(
         self,
         *,
-        other_dims: str = "average",
         central: bool = False,
-        out: Optional[Tensor] = None,
-    ) -> Tensor:
+        interpolation_args: Optional[InterpolationArgs] = None,
+    ) -> "SamplableVolumeMapping":
         """Estimate spatial Jacobian matrices over the mapping at the grid locations
 
         Args:
-            other_dims: How to handle the other dimensions, see
-                finite_difference.estimate_spatial_jacobian_matrices for more details
             central: Whether to use central differences
-            out: Output tensor to store the result
+            interpolation_args: Interpolation arguments to use for the generated
+                volume of Jacobian matrices
         """
-        return estimate_spatial_jacobian_matrices_for_mapping(
-            mapping=self.mapping,
-            coordinate_system=self.coordinate_system,
-            other_dims=other_dims,
-            central=central,
-            out=out,
+        return self.estimate_spatial_jacobian_matrices_to(
+            self, central=central, interpolation_args=interpolation_args
         )
 
 
@@ -299,7 +369,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
                 data.generate_values() - coordinate_system.grid().generate_values()
             )
         if data_coordinates == "voxel":
-            data_values, data_mask = data.generate()
+            data_values, data_mask = data.generate(generate_missing_mask=False, cast_mask=False)
             voxel_coordinates = coordinate_system.to_voxel_coordinates(data_values)
             return MaskedTensor(
                 voxel_coordinates - coordinate_system.voxel_grid().generate_values(), mask=data_mask
@@ -322,7 +392,9 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         if data_format == "displacement":
             data = self.sample_to_as_displacement_field(coordinate_system, data_coordinates="voxel")
         elif data_format == "coordinate":
-            data_values_world, data_mask = self.sample_to(coordinate_system).generate()
+            data_values_world, data_mask = self.sample_to(coordinate_system).generate(
+                generate_missing_mask=False, cast_mask=False
+            )
             data = MaskedTensor(
                 coordinate_system.to_voxel_coordinates(data_values_world), data_mask
             )
@@ -459,7 +531,6 @@ class SamplableVolumeMapping(BaseSamplableMapping):
                 data=sampled,
                 coordinate_system=coordinate_system,
                 interpolation_args=interpolation_args,
-                n_channel_dims=len(sampled.channels_shape),
             ),
             coordinate_system=coordinate_system,
         )

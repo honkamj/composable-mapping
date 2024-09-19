@@ -58,13 +58,13 @@ class BaseMappingFactory(IVoxelCoordinateSystemContainer):
         )
 
     def _handle_tensor_inputs(
-        self, data: Union[Tensor, IMaskedTensor], mask: Optional[Tensor]
+        self, data: Union[Tensor, IMaskedTensor], mask: Optional[Tensor], n_channel_dims: int = 1
     ) -> IMaskedTensor:
         if isinstance(data, IMaskedTensor):
             if mask is not None:
                 raise ValueError("Mask should not be provided when data is IMaskedTensor")
             return data
-        return MaskedTensor(data, mask)
+        return MaskedTensor(data, mask, n_channel_dims=n_channel_dims)
 
 
 class SamplableMappingFactory(BaseMappingFactory):
@@ -74,8 +74,6 @@ class SamplableMappingFactory(BaseMappingFactory):
     def create_volume(
         self,
         data: IMaskedTensor,
-        *,
-        n_channel_dims: int = ...,
     ) -> SamplableVolumeMapping: ...
 
     @overload
@@ -95,13 +93,12 @@ class SamplableMappingFactory(BaseMappingFactory):
         n_channel_dims: int = 1,
     ) -> SamplableVolumeMapping:
         """Create samplable volume mapping"""
-        data = self._handle_tensor_inputs(data, mask)
+        data = self._handle_tensor_inputs(data, mask, n_channel_dims)
         return SamplableVolumeMapping(
             mapping=create_volume(
                 data=data,
                 interpolation_args=self.interpolation_args,
                 coordinate_system=self.coordinate_system,
-                n_channel_dims=n_channel_dims,
             ),
             coordinate_system=self.coordinate_system,
         )
@@ -113,7 +110,6 @@ class SamplableMappingFactory(BaseMappingFactory):
         *,
         data_format: str = ...,
         data_coordinates: str = ...,
-        resample_as: Optional[str] = ...,
     ) -> SamplableDeformationMapping: ...
 
     @overload
@@ -124,7 +120,6 @@ class SamplableMappingFactory(BaseMappingFactory):
         *,
         data_format: str = ...,
         data_coordinates: str = ...,
-        resample_as: Optional[str] = ...,
     ) -> SamplableDeformationMapping: ...
 
     def create_deformation(
@@ -134,11 +129,8 @@ class SamplableMappingFactory(BaseMappingFactory):
         *,
         data_format: str = "displacement",
         data_coordinates: str = "voxel",
-        resample_as: Optional[str] = None,
     ) -> SamplableDeformationMapping:
         """Create samplable deformation mapping"""
-        if resample_as is None:
-            resample_as = data_format
         data = self._handle_tensor_inputs(data, mask)
         if data_coordinates == "voxel":
             factory = create_deformation_from_voxel_data
@@ -182,8 +174,6 @@ class GridMappingFactory(BaseMappingFactory):
     def create_volume(
         self,
         data: IMaskedTensor,
-        *,
-        n_channel_dims: int = ...,
     ) -> IComposableMapping: ...
 
     @overload
@@ -203,12 +193,11 @@ class GridMappingFactory(BaseMappingFactory):
         n_channel_dims: int = 1,
     ) -> IComposableMapping:
         """Create volume based on grid samples"""
-        data = self._handle_tensor_inputs(data, mask)
+        data = self._handle_tensor_inputs(data, mask, n_channel_dims)
         return create_volume(
             data=data,
             interpolation_args=self.interpolation_args,
             coordinate_system=self.coordinate_system,
-            n_channel_dims=n_channel_dims,
         )
 
     @overload

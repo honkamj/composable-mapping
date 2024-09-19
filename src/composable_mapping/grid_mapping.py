@@ -73,13 +73,9 @@ class GridVolume(BaseComposableMapping):
         self,
         data: IMaskedTensor,
         interpolation_args: Optional[InterpolationArgs] = None,
-        n_channel_dims: int = 1,
     ) -> None:
         self._data = data
         self._interpolation_args = get_interpolation_args(interpolation_args)
-        self._n_channel_dims = n_channel_dims
-        self._volume_shape = data.shape[n_channel_dims + 1 :]
-        self._n_dims = len(self._volume_shape)
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -97,14 +93,13 @@ class GridVolume(BaseComposableMapping):
         return GridVolume(
             data=children["data"],
             interpolation_args=self._interpolation_args,
-            n_channel_dims=self._n_channel_dims,
         )
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
         return self._evaluate(
             voxel_coordinates_generator=masked_coordinates.generate_values,
             coordinate_mask=masked_coordinates.generate_mask(generate_missing_mask=False),
-            coordinates_as_slice=masked_coordinates.as_slice(self._volume_shape),
+            coordinates_as_slice=masked_coordinates.as_slice(self._data.spatial_shape),
         )
 
     def _evaluate(
@@ -113,7 +108,7 @@ class GridVolume(BaseComposableMapping):
         coordinate_mask: Optional[Tensor],
         coordinates_as_slice: Optional[Tuple[Union["ellipsis", slice], ...]],
     ) -> MaskedTensor:
-        data, data_mask = self._data.generate(generate_missing_mask=False)
+        data, data_mask = self._data.generate(generate_missing_mask=False, cast_mask=False)
         if coordinates_as_slice is None:
             voxel_coordinates = voxel_coordinates_generator()
             values = self._interpolation_args.interpolator(data, voxel_coordinates)
@@ -122,7 +117,7 @@ class GridVolume(BaseComposableMapping):
             values = data[coordinates_as_slice]
             mask = data_mask[coordinates_as_slice] if data_mask is not None else None
         mask = combine_optional_masks([mask, coordinate_mask])
-        return MaskedTensor(values, mask, self._n_channel_dims)
+        return MaskedTensor(values, mask, n_channel_dims=len(self._data.channels_shape))
 
     def _evaluate_mask(
         self, voxel_coordinates: Tensor, data_mask: Optional[Tensor]
@@ -131,14 +126,13 @@ class GridVolume(BaseComposableMapping):
             interpolated_mask: Optional[Tensor] = None
         else:
             interpolated_mask = self._interpolation_args.mask_interpolator(
-                data_mask, voxel_coordinates
+                data_mask.to(voxel_coordinates.dtype), voxel_coordinates
             )
             interpolated_mask = self._threshold_mask(interpolated_mask)
         fov_mask = (
             compute_fov_mask_at_voxel_coordinates(
                 voxel_coordinates,
-                volume_shape=self._volume_shape,
-                dtype=voxel_coordinates.dtype,
+                volume_shape=self._data.spatial_shape,
             )
             if self._interpolation_args.mask_outside_fov
             else None
@@ -148,17 +142,14 @@ class GridVolume(BaseComposableMapping):
 
     def _threshold_mask(self, mask: Tensor) -> Tensor:
         if self._interpolation_args.mask_threshold is not None:
-            return (mask >= self._interpolation_args.mask_threshold).type(mask.dtype)
+            return mask >= self._interpolation_args.mask_threshold
         return mask
 
     def invert(self, **inversion_parameters) -> IComposableMapping:
         raise NotImplementedError("No inversion implemented for grid volumes")
 
     def __repr__(self) -> str:
-        return (
-            f"GridVolume(data={self._data}, interpolation_args={self._interpolation_args}, "
-            f"n_channel_dims={self._n_channel_dims})"
-        )
+        return f"GridVolume(data={self._data}, interpolation_args={self._interpolation_args}, "
 
 
 class _BaseGridDeformation(GridVolume):
@@ -176,14 +167,13 @@ class _BaseGridDeformation(GridVolume):
         super().__init__(
             data=data,
             interpolation_args=interpolation_args,
-            n_channel_dims=1,
         )
         self._data_format = data_format
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
         if self._data_format == "displacement":
             voxel_coordinates, coordinate_mask = masked_coordinates.generate(
-                generate_missing_mask=False
+                generate_missing_mask=False, cast_mask=False
             )
 
             def voxel_coordinates_generator():
@@ -191,13 +181,15 @@ class _BaseGridDeformation(GridVolume):
 
         elif self._data_format == "coordinate":
             voxel_coordinates_generator = masked_coordinates.generate_values
-            coordinate_mask = masked_coordinates.generate_mask(generate_missing_mask=False)
+            coordinate_mask = masked_coordinates.generate_mask(
+                generate_missing_mask=False, cast_mask=False
+            )
         else:
             raise ValueError(f"Invalid data format: {self._data_format}")
         values = self._evaluate(
             voxel_coordinates_generator=voxel_coordinates_generator,
             coordinate_mask=coordinate_mask,
-            coordinates_as_slice=masked_coordinates.as_slice(self._volume_shape),
+            coordinates_as_slice=masked_coordinates.as_slice(self._data.spatial_shape),
         )
         if self._data_format == "displacement":
             values = values.modify_values(values=values.generate_values() + voxel_coordinates)
@@ -298,7 +290,7 @@ class _GridDeformationInverse(_BaseGridDeformation):
         coordinate_mask: Optional[Tensor],
         coordinates_as_slice: Optional[Tuple[Union["ellipsis", slice], ...]],
     ) -> MaskedTensor:
-        data, data_mask = self._data.generate(generate_missing_mask=False)
+        data, data_mask = self._data.generate(generate_missing_mask=False, cast_mask=False)
         voxel_coordinates = voxel_coordinates_generator()
         inverted_values = fixed_point_invert_deformation(
             displacement_field=(
@@ -310,7 +302,7 @@ class _GridDeformationInverse(_BaseGridDeformation):
         )
         mask = self._evaluate_mask(voxel_coordinates + inverted_values, data_mask)
         mask = combine_optional_masks([mask, coordinate_mask])
-        return MaskedTensor(inverted_values, mask, self._n_channel_dims)
+        return MaskedTensor(inverted_values, mask)
 
     def invert(self, **inversion_parameters) -> GridDeformation:
         return GridDeformation(
@@ -330,14 +322,11 @@ def create_volume(
     data: IMaskedTensor,
     coordinate_system: VoxelCoordinateSystem,
     interpolation_args: Optional[InterpolationArgs] = None,
-    *,
-    n_channel_dims: int = 1,
 ) -> IComposableMapping:
     """Create volume based on grid samples"""
     grid_volume = GridVolume(
         data=data,
         interpolation_args=interpolation_args,
-        n_channel_dims=n_channel_dims,
     )
     return grid_volume.compose(ComposableAffine(coordinate_system.to_voxel_coordinates))
 
@@ -401,7 +390,7 @@ def create_deformation_from_world_data(
             world coordinates
         data_format: Format of the provided data, either "displacement" or "coordinate"
     """
-    data_values, data_mask = data.generate(generate_missing_mask=False)
+    data_values, data_mask = data.generate(generate_missing_mask=False, cast_mask=False)
     if data_format == "displacement":
         coordinates_in_voxel_coordinates = coordinate_system.to_voxel_coordinates(
             data_values + coordinate_system.grid().generate_values()
@@ -414,7 +403,9 @@ def create_deformation_from_world_data(
     else:
         raise ValueError(f"Invalid data format: {data_format}")
     return create_deformation_from_voxel_data(
-        data=MaskedTensor(data_in_voxel_coordinates, data_mask),
+        data=MaskedTensor(
+            data_in_voxel_coordinates, data_mask, n_channel_dims=len(data.channels_shape)
+        ),
         interpolation_args=interpolation_args,
         coordinate_system=coordinate_system,
         data_format=data_format,

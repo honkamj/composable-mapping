@@ -217,7 +217,6 @@ def compute_fov_mask_based_on_bounds(
     coordinates: Tensor,
     min_values: List[float],
     max_values: List[float],
-    dtype: torch_dtype,
 ) -> Tensor:
     """Calculate mask at coordinates
 
@@ -236,14 +235,13 @@ def compute_fov_mask_based_on_bounds(
     )
     fov_mask = (normalized_coordinates >= 0) & (normalized_coordinates <= 1)
     fov_mask = move_channels_first(torch_all(fov_mask, dim=-1, keepdim=True))
-    return fov_mask.type(dtype)
+    return fov_mask
 
 
 @script
 def compute_fov_mask_at_voxel_coordinates(
     coordinates_at_voxel_coordinates: Tensor,
     volume_shape: List[int],
-    dtype: torch_dtype,
 ) -> Tensor:
     """Calculate mask at coordinates
 
@@ -256,5 +254,4 @@ def compute_fov_mask_at_voxel_coordinates(
         coordinates=coordinates_at_voxel_coordinates,
         min_values=[0.0] * len(volume_shape),
         max_values=[float(dim_size - 1) for dim_size in volume_shape],
-        dtype=dtype,
     )

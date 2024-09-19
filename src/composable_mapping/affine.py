@@ -483,6 +483,7 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
     def generate(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ):
         raise NotAffineTransformationError(
             "Affine tracer has no values or mask! Usually this error means that "
@@ -492,6 +493,7 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
     def generate_mask(
         self,
         generate_missing_mask: bool = True,
+        cast_mask: bool = False,
     ):
         raise NotAffineTransformationError(
             "Affine tracer has no mask! Usually this error means that "
