@@ -21,71 +21,101 @@ from torch.jit import script
 
 
 @script
-def move_channels_first(tensor: Tensor, num_channel_dims: int = 1) -> Tensor:
+def index_by_channel_dims(
+    n_total_dims: int,
+    channel_dim_index: int,
+    n_channel_dims: int,
+    inclusive_upper_bound: bool = False,
+) -> int:
+    """Returns index in orignal tensor based on channel dim index
+
+    E.g. (3, 5, 4, 4) with channel_dim_index = 0, n_channel_dims = 1 returns 1
+    """
+    if n_total_dims < n_channel_dims:
+        raise RuntimeError("Number of channel dimensions do not match")
+    if channel_dim_index < 0:
+        channel_dim_index += n_channel_dims
+    if (
+        channel_dim_index < 0
+        or (channel_dim_index >= n_channel_dims and not inclusive_upper_bound)
+        or channel_dim_index > n_total_dims
+    ):
+        raise RuntimeError("Invalid channel dimension index")
+    if n_total_dims == n_channel_dims:
+        return channel_dim_index
+    return channel_dim_index + 1
+
+
+@script
+def move_channels_first(tensor: Tensor, n_channel_dims: int = 1) -> Tensor:
     """Move channel dimensions first
 
     Args:
-        tensor: Tensor with shape (batch_size, *, channel_1, ..., channel_{num_channel_dims})
-        num_channel_dims: Number of channel dimensions
+        tensor: Tensor with shape (batch_size, *, channel_1, ..., channel_{n_channel_dims})
+        n_channel_dims: Number of channel dimensions
 
-    Returns: Tensor with shape (batch_size, channel_1, ..., channel_{num_channel_dims}, *)
+    Returns: Tensor with shape (batch_size, channel_1, ..., channel_{n_channel_dims}, *)
     """
-    if tensor.ndim == num_channel_dims:
+    if tensor.ndim == n_channel_dims:
         return tensor
-    return tensor.permute(
-        [0] + list(range(-num_channel_dims, 0)) + list(range(1, tensor.ndim - num_channel_dims))
+    first_channel_index = index_by_channel_dims(tensor.ndim, 0, n_channel_dims=n_channel_dims)
+    return tensor.moveaxis(
+        list(range(-n_channel_dims, 0)),
+        list(range(first_channel_index, first_channel_index + n_channel_dims)),
     )
 
 
 @script
-def move_channels_last(tensor: Tensor, num_channel_dims: int = 1) -> Tensor:
+def move_channels_last(tensor: Tensor, n_channel_dims: int = 1) -> Tensor:
     """Move channel dimensions last
 
     Args:
-        tensor: Tensor with shape (batch_size, channel_1, ..., channel_{num_channel_dims}, *)
-        num_channel_dims: Number of channel dimensions
+        tensor: Tensor with shape (batch_size, channel_1, ..., channel_{n_channel_dims}, *)
+        n_channel_dims: Number of channel dimensions
 
-    Returns: Tensor with shape (batch_size, *, channel_1, ..., channel_{num_channel_dims})
+    Returns: Tensor with shape (batch_size, *, channel_1, ..., channel_{n_channel_dims})
     """
-    if tensor.ndim == num_channel_dims:
+    if tensor.ndim == n_channel_dims:
         return tensor
-    return tensor.permute(
-        [0] + list(range(num_channel_dims + 1, tensor.ndim)) + list(range(1, num_channel_dims + 1))
+    first_channel_index = index_by_channel_dims(tensor.ndim, 0, n_channel_dims=n_channel_dims)
+    return tensor.moveaxis(
+        list(range(first_channel_index, first_channel_index + n_channel_dims)),
+        list(range(-n_channel_dims, 0)),
     )
 
 
 @script
-def merge_batch_dimensions(tensor: Tensor, num_channel_dims: int = 1) -> Tuple[Tensor, List[int]]:
+def merge_batch_dimensions(tensor: Tensor, n_channel_dims: int = 1) -> Tuple[Tensor, List[int]]:
     """Merges batch dimensions
 
     Args:
-        tensor: Tensor with shape (..., channel_1, ..., channel_{num_channel_dims})
+        tensor: Tensor with shape (..., channel_1, ..., channel_{n_channel_dims})
 
-    Returns: Tensor with shape (batch_size, channel_1, ..., channel_{num_channel_dims})
+    Returns: Tensor with shape (batch_size, channel_1, ..., channel_{n_channel_dims})
     """
-    batch_dimensions_shape = list(tensor.shape[:-num_channel_dims])
-    if num_channel_dims == 0:
+    batch_dimensions_shape = list(tensor.shape[:-n_channel_dims])
+    if n_channel_dims == 0:
         channels_shape: List[int] = []
     else:
-        channels_shape = list(tensor.shape[-num_channel_dims:])
+        channels_shape = list(tensor.shape[-n_channel_dims:])
     return tensor.reshape([-1] + channels_shape), batch_dimensions_shape
 
 
 @script
 def unmerge_batch_dimensions(
-    tensor: Tensor, batch_dimensions_shape: List[int], num_channel_dims: int = 1
+    tensor: Tensor, batch_dimensions_shape: List[int], n_channel_dims: int = 1
 ) -> Tensor:
     """Unmerges batch dimensions
 
     Args:
-        tensor: Tensor with shape (batch_size, channel_1, ..., channel_{num_channel_dims})
+        tensor: Tensor with shape (batch_size, channel_1, ..., channel_{n_channel_dims})
 
-    Returns: Tensor with shape (*batch_dimensions_shape, channel_1, ..., channel_{num_channel_dims})
+    Returns: Tensor with shape (*batch_dimensions_shape, channel_1, ..., channel_{n_channel_dims})
     """
-    if num_channel_dims == 0:
+    if n_channel_dims == 0:
         channels_shape: List[int] = []
     else:
-        channels_shape = list(tensor.shape[-num_channel_dims:])
+        channels_shape = list(tensor.shape[-n_channel_dims:])
     return tensor.view(batch_dimensions_shape + channels_shape)
 
 
@@ -98,20 +128,20 @@ class BatchDimensionMerger:
     def __init__(self) -> None:
         self._original_batch_shape: Optional[Sequence[int]] = None
 
-    def merge(self, tensor: Tensor, num_channel_dims: int) -> Tensor:
+    def merge(self, tensor: Tensor, n_channel_dims: int) -> Tensor:
         """Merge batch dimensions"""
-        batch_merged_tensor, batch_shape = merge_batch_dimensions(tensor, num_channel_dims)
+        batch_merged_tensor, batch_shape = merge_batch_dimensions(tensor, n_channel_dims)
         if self._original_batch_shape is None:
             self._original_batch_shape = batch_shape
         else:
             self._original_batch_shape = broadcast_shapes(self._original_batch_shape, batch_shape)
         return batch_merged_tensor
 
-    def unmerge(self, tensor: Tensor, num_channel_dims: int) -> Tensor:
+    def unmerge(self, tensor: Tensor, n_channel_dims: int) -> Tensor:
         """Unmerge batch dimensions"""
         if self._original_batch_shape is None:
             raise RuntimeError("BatchDimensionMerger::merge must be called first!")
-        return unmerge_batch_dimensions(tensor, self._original_batch_shape, num_channel_dims)
+        return unmerge_batch_dimensions(tensor, self._original_batch_shape, n_channel_dims)
 
 
 def merged_batch_dimensions(
@@ -187,19 +217,19 @@ class FunctionDimensionStructureModifier:
         )
         modified_args = [
             (
-                self._input_modifier(arg_value, num_channel_dims)
-                if num_channel_dims is not None
+                self._input_modifier(arg_value, n_channel_dims)
+                if n_channel_dims is not None
                 else arg_value
             )
-            for arg_value, num_channel_dims in args_num_channels
+            for arg_value, n_channel_dims in args_num_channels
         ]
         modified_kwargs = {
             kwarg_name: (
-                self._input_modifier(kwarg_value, num_channel_dims)
-                if num_channel_dims is not None
+                self._input_modifier(kwarg_value, n_channel_dims)
+                if n_channel_dims is not None
                 else kwarg_value
             )
-            for kwarg_name, (kwarg_value, num_channel_dims) in kwargs_num_channels.items()
+            for kwarg_name, (kwarg_value, n_channel_dims) in kwargs_num_channels.items()
         }
         return_values = func(*modified_args, **modified_kwargs)
         return self._modify_return_values(return_values)
@@ -302,10 +332,6 @@ def _anchor_dim(n_dims: int, channel_dims: int) -> int:
     return min(channel_dims, n_dims - 1)
 
 
-def _num_spatial_dimensions(n_dims: int, n_channel_dims: int) -> int:
-    return max(n_dims - n_channel_dims - 1, 0)
-
-
 def _channel_dims_to_iterable(n_channel_dims: Union[int, Iterable[int]]) -> Iterable[int]:
     if isinstance(n_channel_dims, int):
         return repeat(n_channel_dims)
@@ -342,7 +368,7 @@ def broadcast_shapes_around_channel_dims(
     """
     channel_dims_iterable = _channel_dims_to_iterable(n_channel_dims)
     max_spatial_dimensions = max(
-        _num_spatial_dimensions(len(shape), channel_dims)
+        num_spatial_dims(len(shape), channel_dims)
         for shape, channel_dims in zip(shapes, channel_dims_iterable)
     )
     batch_shape: Tuple[int, ...] = tuple()
@@ -354,7 +380,7 @@ def broadcast_shapes_around_channel_dims(
         if len(shape) > channel_dims:
             batch_shape = broadcast_shapes(batch_shape, shape[:1])
             spatial_shape = broadcast_shapes(spatial_shape, shape[anchor_dim + 1 :])
-        dims_to_add = max_spatial_dimensions - _num_spatial_dimensions(len(shape), channel_dims)
+        dims_to_add = max_spatial_dimensions - num_spatial_dims(len(shape), channel_dims)
         dimesion_added_shapes.append(
             shape[: anchor_dim + 1] + (1,) * dims_to_add + shape[anchor_dim + 1 :]
         )
@@ -370,7 +396,7 @@ def broadcast_to_shape_around_channel_dims(
 ) -> Tensor:
     """Broadcasts tensor to shape based around the channel dimension (or dimensions)"""
     anchor_dim = _anchor_dim(tensor.ndim, n_channel_dims)
-    dims_to_add = _num_spatial_dimensions(len(shape), n_channel_dims) - _num_spatial_dimensions(
+    dims_to_add = num_spatial_dims(len(shape), n_channel_dims) - num_spatial_dims(
         tensor.ndim, n_channel_dims
     )
     new_shape = tensor.shape[: anchor_dim + 1] + (1,) * dims_to_add + tensor.shape[anchor_dim + 1 :]
@@ -399,32 +425,6 @@ def broadcast_tensors_around_channel_dims(
         broadcast_to_shape_around_channel_dims(tensor, shape, channel_dims)
         for tensor, shape, channel_dims in zip(tensors, target_shapes, channel_dims_iterable)
     ]
-
-
-@script
-def index_by_channel_dims(
-    n_total_dims: int,
-    channel_dim_index: int,
-    n_channel_dims: int,
-    inclusive_upper_bound: bool = False,
-) -> int:
-    """Returns index in orignal tensor based on channel dim index
-
-    E.g. (3, 5, 4, 4) with channel_dim_index = 0, n_channel_dims = 1 returns 1
-    """
-    if n_total_dims < n_channel_dims:
-        raise RuntimeError("Number of channel dimensions do not match")
-    if channel_dim_index < 0:
-        channel_dim_index += n_channel_dims
-    if (
-        channel_dim_index < 0
-        or (channel_dim_index >= n_channel_dims and not inclusive_upper_bound)
-        or channel_dim_index > n_total_dims
-    ):
-        raise RuntimeError("Invalid channel dimension index")
-    if n_total_dims == n_channel_dims:
-        return channel_dim_index
-    return channel_dim_index + 1
 
 
 @script

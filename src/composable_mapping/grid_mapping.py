@@ -8,15 +8,14 @@ from deformation_inversion_layer import (
     DeformationInversionArguments,
     fixed_point_invert_deformation,
 )
-from deformation_inversion_layer.interface import Interpolator
-from deformation_inversion_layer.interpolator import LinearInterpolator
 from torch import Tensor
 
 from composable_mapping.affine import ComposableAffine
 
 from .base import BaseComposableMapping
 from .dense_deformation import compute_fov_mask_at_voxel_coordinates
-from .interface import IComposableMapping, IMaskedTensor, ITensorLike
+from .interface import IComposableMapping, IInterpolator, IMaskedTensor, ITensorLike
+from .interpolator import LinearInterpolator
 from .masked_tensor import MaskedTensor
 from .util import combine_optional_masks
 from .voxel_coordinate_system import VoxelCoordinateSystem
@@ -37,13 +36,15 @@ class InterpolationArgs:
 
     def __init__(
         self,
-        interpolator: Interpolator,
-        mask_interpolator: Optional[Interpolator] = None,
+        interpolator: Optional[IInterpolator] = None,
+        mask_interpolator: Optional[IInterpolator] = None,
         mask_outside_fov: bool = True,
         mask_threshold: Optional[float] = 1.0 - 1e-5,
     ) -> None:
-        self.interpolator = interpolator
-        self.mask_interpolator = interpolator if mask_interpolator is None else mask_interpolator
+        self.interpolator = LinearInterpolator() if interpolator is None else interpolator
+        self.mask_interpolator = (
+            self.interpolator if mask_interpolator is None else mask_interpolator
+        )
         self.mask_outside_fov = mask_outside_fov
         self.mask_threshold = mask_threshold
 
@@ -84,6 +85,9 @@ class GridVolume(BaseComposableMapping):
         return {
             "data": self._data,
         }
+
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        return False
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
@@ -169,6 +173,11 @@ class _BaseGridDeformation(GridVolume):
             interpolation_args=interpolation_args,
         )
         self._data_format = data_format
+
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        # Note necessarily identity outside of the field of view even if
+        # the displacement field is zero
+        return False
 
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
         if self._data_format == "displacement":

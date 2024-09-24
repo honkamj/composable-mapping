@@ -5,10 +5,12 @@ from typing import Any, Literal, Mapping, Optional, Tuple, TypeVar, Union, overl
 
 from matplotlib.figure import Figure  # type: ignore
 from matplotlib.pyplot import subplots  # type: ignore
+from numpy import ndarray
 from torch import Tensor
 
 from .affine import (
     ComposableAffine,
+    IdentityAffineTransformation,
     NotAffineTransformationError,
     as_affine_transformation,
 )
@@ -54,6 +56,15 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
     ):
         self.mapping = mapping
         self._coordinate_system = coordinate_system
+
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        """Return whether the transformation is easily identifiable as an identity
+
+        Args:
+            check_only_if_can_be_done_on_cpu: Only returns True if the check can
+                be done on CPU (to avoid CPU-GPU synchronization).
+        """
+        return self.mapping.is_identity(check_only_if_can_be_done_on_cpu)
 
     @property
     def coordinate_system(self) -> VoxelCoordinateSystem:
@@ -387,7 +398,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         *,
         data_format: str = "displacement",
     ) -> "SamplableDeformationMapping":
-        """Resample the mapping"""
+        """Resample the mapping to target"""
         coordinate_system = target.coordinate_system
         if data_format == "displacement":
             data = self.sample_to_as_displacement_field(coordinate_system, data_coordinates="voxel")
@@ -410,6 +421,17 @@ class SamplableDeformationMapping(BaseSamplableMapping):
             coordinate_system=coordinate_system,
         )
 
+    def resample(
+        self,
+        interpolation_args: Optional[InterpolationArgs] = None,
+        *,
+        data_format: str = "displacement",
+    ) -> "SamplableDeformationMapping":
+        """Resample the mapping"""
+        return self.resample_to(
+            self, interpolation_args=interpolation_args, data_format=data_format
+        )
+
     @overload
     def as_affine(
         self, *, return_none_if_not_affine: Literal[False] = ...
@@ -422,6 +444,12 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         self, *, return_none_if_not_affine: bool = False
     ) -> Optional[IAffineTransformation]:
         """Return the mapping as affine transformation, if possible"""
+        if self.mapping.is_identity():
+            return IdentityAffineTransformation(
+                n_dims=len(self.coordinate_system.shape),
+                dtype=self.mapping.dtype,
+                device=self.mapping.device,
+            )
         try:
             return as_affine_transformation(self.mapping, n_dims=len(self.coordinate_system.shape))
         except NotAffineTransformationError:
@@ -436,7 +464,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         )
 
     @staticmethod
-    def _to_numpy(tensor: Tensor) -> Tensor:
+    def _to_numpy(tensor: Tensor) -> ndarray:
         return tensor.detach().cpu().resolve_conj().resolve_neg().numpy()
 
     def visualize(

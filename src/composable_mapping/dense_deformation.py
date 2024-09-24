@@ -18,7 +18,6 @@ from .util import (
 )
 
 
-@script
 def _convert_between_coordinates(
     coordinates: Tensor, volume_shape: Optional[List[int]], to_voxel_coordinates: bool
 ) -> Tensor:
@@ -28,25 +27,17 @@ def _convert_between_coordinates(
     inferred_volume_shape = coordinates.shape[-n_dims:] if volume_shape is None else volume_shape
     add_spatial_dims_view = (-1,) + n_spatial_dims * (1,)
     volume_shape_tensor = tensor(
-        inferred_volume_shape, dtype=coordinates.dtype, device=coordinates.device
+        inferred_volume_shape,
+        dtype=coordinates.dtype,
     ).view(add_spatial_dims_view)
-    coordinate_grid_start = tensor(-1.0, dtype=coordinates.dtype, device=coordinates.device).view(
-        add_spatial_dims_view
-    )
-    coordinate_grid_end = tensor(1.0, dtype=coordinates.dtype, device=coordinates.device).view(
-        add_spatial_dims_view
-    )
+    if coordinates.device != torch_device("cpu"):
+        volume_shape_tensor = volume_shape_tensor.pin_memory().to(
+            device=coordinates.device, non_blocking=True
+        )
     if to_voxel_coordinates:
-        output = (
-            (coordinates - coordinate_grid_start)
-            / (coordinate_grid_end - coordinate_grid_start)
-            * (volume_shape_tensor - 1)
-        )
+        output = (coordinates + 1) / 2 * (volume_shape_tensor - 1)
     else:
-        output = (
-            coordinates / (volume_shape_tensor - 1) * (coordinate_grid_end - coordinate_grid_start)
-            + coordinate_grid_start
-        )
+        output = coordinates / (volume_shape_tensor - 1) * 2 - 1
     return output
 
 
@@ -125,7 +116,6 @@ def generate_voxel_coordinate_grid(
     return coordinates[None]
 
 
-@script
 def _broadcast_batch_size(tensor_1: Tensor, tensor_2: Tensor) -> Tuple[Tensor, Tensor]:
     batch_size = max(tensor_1.size(0), tensor_2.size(0))
     if tensor_1.size(0) == 1 and batch_size != 1:
@@ -137,7 +127,6 @@ def _broadcast_batch_size(tensor_1: Tensor, tensor_2: Tensor) -> Tuple[Tensor, T
     return tensor_1, tensor_2
 
 
-@script
 def _match_grid_shape_to_dims(grid: Tensor) -> Tensor:
     batch_size = grid.size(0)
     n_dims = grid.size(1)
@@ -228,8 +217,15 @@ def compute_fov_mask_based_on_bounds(
         dtype: Type of the generated mask
     """
     coordinates = move_channels_last(coordinates.detach())
-    min_values_tensor = tensor(min_values, dtype=coordinates.dtype, device=coordinates.device)
-    max_values_tensor = tensor(max_values, dtype=coordinates.dtype, device=coordinates.device)
+    min_values_tensor = tensor(min_values, dtype=coordinates.dtype)
+    max_values_tensor = tensor(max_values, dtype=coordinates.dtype)
+    if coordinates.device != torch_device("cpu"):
+        min_values_tensor = min_values_tensor.pin_memory().to(
+            device=coordinates.device, non_blocking=True
+        )
+        max_values_tensor = max_values_tensor.pin_memory().to(
+            device=coordinates.device, non_blocking=True
+        )
     normalized_coordinates = (coordinates - min_values_tensor) / (
         max_values_tensor - min_values_tensor
     )

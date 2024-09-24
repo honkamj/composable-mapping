@@ -78,6 +78,15 @@ class IAffineTransformation(ITensorLike):
     def n_dims(self) -> int:
         """Number of dimensions the transformation expects"""
 
+    @abstractmethod
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        """Return whether the transformation is identity
+
+        Args:
+            check_only_if_can_be_done_on_cpu: Only returns True if the check can
+                be done on CPU (to avoid CPU-GPU synchronization).
+        """
+
 
 class IMaskedTensor(ITensorLike):
     """Wrapper for masked tensor"""
@@ -213,4 +222,32 @@ class IComposableMapping(ITensorLike):
 
         Args:
             inversion_parameters: Possible inversion parameters
+        """
+
+    @abstractmethod
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        """Return whether the transformation is easily identifiable as an identity
+
+        Args:
+            check_only_if_can_be_done_on_cpu: Only returns True if the check can
+                be done on CPU (to avoid CPU-GPU synchronization).
+        """
+
+
+class IInterpolator(ABC):
+    """Interpolates values on regular grid in voxel coordinates"""
+
+    @abstractmethod
+    def __call__(self, volume: Tensor, coordinates: Tensor) -> Tensor:
+        """Interpolate
+
+        Args:
+            volume: Volume to be interpolated with shape
+                (batch_size, *channel_dims, dim_1, ..., dim_{n_dims}). Dimension
+                order is the same as the coordinate order of the coordinates
+            coordinates: Interpolation coordinates with shape
+                (batch_size, n_dims, *target_shape)
+
+        Returns:
+            Interpolated volume with shape (batch_size, *channel_dims, *target_shape)
         """

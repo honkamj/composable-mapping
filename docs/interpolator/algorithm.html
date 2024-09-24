@@ -40,13 +40,13 @@ from torch.nn.functional import grid_sample
 
 
 @script
-def _move_channels_last(tensor_to_modify: Tensor, num_channel_dims: int = 1) -&gt; Tensor:
-    if tensor_to_modify.ndim == num_channel_dims:
+def _move_channels_last(tensor_to_modify: Tensor, n_channel_dims: int = 1) -&gt; Tensor:
+    if tensor_to_modify.ndim == n_channel_dims:
         return tensor_to_modify
     return tensor_to_modify.permute(
         [0]
-        + list(range(num_channel_dims + 1, tensor_to_modify.ndim))
-        + list(range(1, num_channel_dims + 1))
+        + list(range(n_channel_dims + 1, tensor_to_modify.ndim))
+        + list(range(1, n_channel_dims + 1))
     )
 
 

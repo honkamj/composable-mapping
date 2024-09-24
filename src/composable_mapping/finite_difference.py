@@ -3,7 +3,9 @@
 from itertools import product
 from typing import Optional, Sequence, Union
 
-from torch import Tensor, tensor
+from torch import Tensor
+from torch import device as torch_device
+from torch import tensor
 
 from .interface import IMaskedTensor
 from .masked_tensor import MaskedTensor, stack_channels
@@ -56,9 +58,7 @@ def update_coordinate_system_for_derivatives(
         )
         for dim, dim_size in enumerate(coordinate_system.shape)
     )
-    return coordinate_system.reformat(
-        shape=target_shape, source_reference=shifts, target_reference=0
-    )
+    return coordinate_system.reformat(shape=target_shape, reference=shifts, target_reference=0)
 
 
 def update_coordinate_system_for_jacobian_matrices(
@@ -69,9 +69,7 @@ def update_coordinate_system_for_jacobian_matrices(
     target_shape = tuple(
         (dim_size + _CENTRAL_TO_SHAPE_DIFFERENCE[central]) for dim_size in coordinate_system.shape
     )
-    return coordinate_system.reformat(
-        shape=target_shape, source_reference=ReferenceOption("center")
-    )
+    return coordinate_system.reformat(shape=target_shape, reference=ReferenceOption("center"))
 
 
 def estimate_spatial_derivatives(
@@ -133,7 +131,9 @@ def estimate_spatial_derivatives(
     if spacing is None:
         spacing = 1.0
     if isinstance(spacing, float) or isinstance(spacing, int):
-        spacing = tensor(spacing, dtype=data.dtype, device=data.device)
+        spacing = tensor(spacing, dtype=data.dtype)
+        if data.device != torch_device("cpu"):
+            spacing = spacing.pin_memory().to(data.device, non_blocking=True)
     spacing = spacing.expand((batch_size,))[(...,) + (None,) * (data.ndim - 1)]
     n_spatial_dims = num_spatial_dims(data.ndim, n_channel_dims)
     if other_dims == "crop":
@@ -175,10 +175,11 @@ def estimate_spatial_derivatives(
             else:
                 summed_derivatives = summed_derivatives + derivatives[shifting_slice]
             if mask is not None:
+                assert updated_mask is not None
                 if combined_mask is None:
-                    combined_mask = mask[shifting_slice]
+                    combined_mask = updated_mask[shifting_slice]
                 else:
-                    combined_mask = combined_mask & mask[shifting_slice]
+                    combined_mask = combined_mask & updated_mask[shifting_slice]
         derivatives = summed_derivatives / 2 ** (n_spatial_dims - 1)
         updated_mask = combined_mask
     return MaskedTensor(derivatives, mask=updated_mask, n_channel_dims=n_channel_dims)

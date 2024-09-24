@@ -20,6 +20,7 @@ from .base import BaseTensorLikeWrapper
 from .dense_deformation import generate_voxel_coordinate_grid
 from .interface import IAffineTransformation, IMaskedTensor, ITensorLike
 from .util import (
+    combine_optional_masks,
     get_other_than_channel_dims,
     index_by_channel_dims,
     reduce_channel_shape_to_ones,
@@ -55,8 +56,7 @@ def concatenate_channels(*masked_tensors: IMaskedTensor, channel_index: int = 0)
     mask: Optional[Tensor] = None
     for masked_tensor in masked_tensors:
         update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
-        if mask is not None and update_mask is not None:
-            mask = mask & update_mask
+        mask = combine_optional_masks([mask, update_mask])
     return MaskedTensor(
         values=values,
         mask=mask,
@@ -96,8 +96,7 @@ def stack_channels(*masked_tensors: IMaskedTensor, channel_index: int = 0) -> "M
         update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
         if update_mask is not None:
             update_mask = update_mask.unsqueeze(dim=stack_index)
-            if mask is not None:
-                mask = mask & update_mask
+            mask = combine_optional_masks([mask, update_mask])
     return MaskedTensor(
         values=values,
         mask=mask,

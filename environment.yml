@@ -1,13 +1,14 @@
+name: composable-mapping
 channels:
   - defaults
   - pytorch
   - nvidia
 dependencies:
   - python=3.8
-  - pytorch::pytorch-cuda=11.7
+  - pytorch::pytorch-cuda=11.8
   - pytorch::torchvision
   - pytorch::torchaudio
-  - pytorch::pytorch=1.10
+  - pytorch::pytorch=2.4
   - ipykernel
   - matplotlib
   - mypy

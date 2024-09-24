@@ -77,6 +77,14 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
     ) -> Tensor:
         return self._transformation_matrix
 
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        cpu_matrix = self.as_cpu_matrix()
+        if cpu_matrix is None:
+            if check_only_if_can_be_done_on_cpu:
+                return False
+            return _is_identity_matrix(self._transformation_matrix)
+        return _is_identity_matrix(cpu_matrix)
+
     def as_cpu_matrix(self) -> Optional[Tensor]:
         if self._transformation_matrix.device == torch_device("cpu"):
             return self._transformation_matrix
@@ -120,6 +128,9 @@ class IdentityAffineTransformation(BaseAffineTransformation):
         return IdentityAffineTransformation(
             n_dims=self._n_dims, dtype=self._dtype, device=self._device
         )
+
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        return True
 
     def as_matrix(
         self,
@@ -194,7 +205,7 @@ class CPUAffineTransformation(BaseAffineTransformation):
         self._device = torch_device("cpu") if device is None else device
 
     def __call__(self, coordinates: Tensor) -> Tensor:
-        if self._is_identity():
+        if self.is_identity():
             return coordinates
         return _broadcast_and_transform_coordinates(coordinates, self.as_matrix())
 
@@ -220,23 +231,8 @@ class CPUAffineTransformation(BaseAffineTransformation):
     def as_cpu_matrix(self) -> Tensor:
         return self._transformation_matrix_cpu
 
-    def _is_identity(self) -> bool:
-        first_channel_dim = index_by_channel_dims(
-            n_total_dims=self._transformation_matrix_cpu.ndim, channel_dim_index=0, n_channel_dims=2
-        )
-        n_rows = self._transformation_matrix_cpu.size(first_channel_dim)
-        identity_matrix = eye(
-            n_rows,
-            dtype=self._transformation_matrix_cpu.dtype,
-            device=self._transformation_matrix_cpu.device,
-        )
-        broadcasted_identity_matrix = broadcast_to_shape_around_channel_dims(
-            identity_matrix, shape=self._transformation_matrix_cpu.shape, n_channel_dims=2
-        )
-        return allclose(
-            self._transformation_matrix_cpu,
-            broadcasted_identity_matrix,
-        )
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        return _is_identity_matrix(self._transformation_matrix_cpu)
 
     def invert(self) -> "CPUAffineTransformation":
         return _CPUAffineTransformationInverse(
@@ -438,6 +434,9 @@ class ComposableAffine(BaseComposableMapping):
     def __repr__(self) -> str:
         return f"ComposableAffine(affine_transformation={self._affine_transformation})"
 
+    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
+        return self._affine_transformation.is_identity(check_only_if_can_be_done_on_cpu)
+
 
 class NotAffineTransformationError(Exception):
     """Error raised when a composable mapping is not affine"""
@@ -590,8 +589,8 @@ def convert_to_homogenous_coordinates(coordinates: Tensor) -> Tensor:
 
     Returns: Tensor with shape (batch_size, n_channels + 1, *)
     """
-    coordinates = move_channels_last(coordinates)
-    coordinates, batch_dimensions_shape = merge_batch_dimensions(coordinates)
+    coordinates = move_channels_last(coordinates, 1)
+    coordinates, batch_dimensions_shape = merge_batch_dimensions(coordinates, 1)
     homogenous_coordinates = cat(
         [
             coordinates,
@@ -602,9 +601,9 @@ def convert_to_homogenous_coordinates(coordinates: Tensor) -> Tensor:
         dim=-1,
     )
     homogenous_coordinates = unmerge_batch_dimensions(
-        homogenous_coordinates, batch_dimensions_shape=batch_dimensions_shape
+        homogenous_coordinates, batch_dimensions_shape=batch_dimensions_shape, n_channel_dims=1
     )
-    return move_channels_first(homogenous_coordinates)
+    return move_channels_first(homogenous_coordinates, 1)
 
 
 @script
@@ -662,7 +661,7 @@ def embed_transformation(matrix: Tensor, target_shape: List[int]) -> Tensor:
     ).expand(batch_size, -1, -1)
     embedded_matrix = cat([cat([matrix, rows], dim=1), cols], dim=2)
     embedded_matrix = unmerge_batch_dimensions(
-        embedded_matrix, batch_dimensions_shape=batch_dimensions_shape, num_channel_dims=2
+        embedded_matrix, batch_dimensions_shape=batch_dimensions_shape, n_channel_dims=2
     )
     return move_channels_first(embedded_matrix, 2)
 
@@ -676,8 +675,8 @@ def generate_translation_matrix(translations: Tensor) -> Tensor:
 
     Returns: Tensor with shape (batch_size, n_dims + 1, n_dims + 1, ...)
     """
-    translations = move_channels_last(translations)
-    translations, batch_dimensions_shape = merge_batch_dimensions(translations)
+    translations = move_channels_last(translations, n_channel_dims=1)
+    translations, batch_dimensions_shape = merge_batch_dimensions(translations, n_channel_dims=1)
     batch_size = translations.size(0)
     n_dims = translations.size(1)
     homogenous_translation = convert_to_homogenous_coordinates(coordinates=translations)
@@ -695,7 +694,7 @@ def generate_translation_matrix(translations: Tensor) -> Tensor:
         dim=2,
     ).view(-1, n_dims + 1, n_dims + 1)
     translation_matrix = unmerge_batch_dimensions(
-        translation_matrix, batch_dimensions_shape=batch_dimensions_shape, num_channel_dims=2
+        translation_matrix, batch_dimensions_shape=batch_dimensions_shape, n_channel_dims=2
     )
     return move_channels_first(translation_matrix, 2)
 
@@ -711,9 +710,9 @@ def generate_scale_matrix(
 
     Returns: Tensor with shape (batch_size, n_dims, n_dims, ...)
     """
-    scales = move_channels_last(scales)
+    scales = move_channels_last(scales, n_channel_dims=1)
     scale_matrix = diag_embed(scales)
-    return move_channels_first(scale_matrix, num_channel_dims=2)
+    return move_channels_first(scale_matrix, n_channel_dims=2)
 
 
 @channels_last({"coordinates": 1, "transformation_matrix": 2}, 1)
@@ -732,3 +731,24 @@ def _broadcast_and_transform_coordinates(
         (coordinates, transformation_matrix), n_channel_dims=(1, 2)
     )
     return _transform_coordinates(coordinates, transformation_matrix)
+
+
+def _is_identity_matrix(matrix: Tensor) -> bool:
+    if matrix.size(-2) != matrix.size(-1):
+        return False
+    first_channel_dim = index_by_channel_dims(
+        n_total_dims=matrix.ndim, channel_dim_index=0, n_channel_dims=2
+    )
+    n_rows = matrix.size(first_channel_dim)
+    identity_matrix = eye(
+        n_rows,
+        dtype=matrix.dtype,
+        device=matrix.device,
+    )
+    broadcasted_identity_matrix = broadcast_to_shape_around_channel_dims(
+        identity_matrix, shape=matrix.shape, n_channel_dims=2
+    )
+    return allclose(
+        matrix,
+        broadcasted_identity_matrix,
+    )

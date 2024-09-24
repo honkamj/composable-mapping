@@ -338,7 +338,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
                 Tensor,
             ]
         ] = None,
-        source_reference: Optional[
+        reference: Optional[
             Union[
                 Sequence[Union[IReformattingReferenceOption, float, int]],
                 IReformattingReferenceOption,
@@ -369,7 +369,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
                 Tensor,
             ]
         ] = None,
-        source_reference: Optional[
+        reference: Optional[
             Union[
                 Sequence[Union[IReformattingReferenceOption, float, int]],
                 IReformattingReferenceOption,
@@ -403,7 +403,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
                 Tensor,
             ]
         ] = None,
-        source_reference: Optional[
+        reference: Optional[
             Union[
                 Sequence[Union[IReformattingReferenceOption, float, int]],
                 IReformattingReferenceOption,
@@ -439,17 +439,17 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
                 each dimension or as a single value in which case the same value
                 is used for all the dimensions. Defaults to
                 FitToFOVOption("round", "full_voxels")
-            source_reference: Defines the point in the original voxel
+            reference: Defines the point in the original voxel
                 coordinates which will be aligned with the target reference in
                 the reformatted coordinates. Either given separately for each
                 dimension or as a single value in which case the same value is
                 used for all the dimensions. Defaults to ReferenceOption("left",
                 "full_voxels")
-            target_reference: Defines the point in the reformatted voxel
-                coordinates which will be aligned with the source reference in
-                the original coordinates. Either given separately for each
-                dimension or as a single value in which case the same value is
-                used for all the dimensions. Defaults to source_reference.
+            target_reference: Defaults to reference. Defines the point in the
+                reformatted voxel coordinates which will be aligned with the
+                source reference in the original coordinates. Either given
+                separately for each dimension or as a single value in which case
+                the same value is used for all the dimensions.
         """
         original_voxel_size = self.grid_spacing_cpu()
         downsampling_factor = self._as_downsampling_factor(
@@ -458,13 +458,13 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         if shape is None:
             shape = FitToFOVOption(fitting_method="round", fov_convention="full_voxels")
         target_shape = self._get_target_shape(downsampling_factor, shape)
-        if source_reference is None:
-            source_reference = ReferenceOption(position="left", fov_convention="full_voxels")
+        if reference is None:
+            reference = ReferenceOption(position="left", fov_convention="full_voxels")
         source_reference_in_voxel_coordinates = original_voxel_size.new_tensor(
-            self._get_reference_in_voxel_coordinates(source_reference, self._shape)
+            self._get_reference_in_voxel_coordinates(reference, self._shape)
         )
         if target_reference is None:
-            target_reference = source_reference
+            target_reference = reference
         target_reference_in_voxel_coordinates = original_voxel_size.new_tensor(
             self._get_reference_in_voxel_coordinates(target_reference, target_shape)
         )
@@ -623,7 +623,7 @@ def create_centered_normalized(
     target_voxel_size = 2 / max_fov_size
     return centered.reformat(
         voxel_size=target_voxel_size,
-        source_reference=ReferenceOption(position="center"),
+        reference=ReferenceOption(position="center"),
         shape=RetainShapeOption(),
     )
 
