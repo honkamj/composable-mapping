@@ -10,6 +10,7 @@ from torch import eye, get_default_dtype, ones_like, tensor
 from torch.nn import Module
 
 from .affine import (
+    ComposableAffine,
     CPUAffineTransformation,
     compose_affine_transformation_matrices,
     embed_transformation,
@@ -17,8 +18,13 @@ from .affine import (
     generate_translation_matrix,
 )
 from .ceildiv import ceildiv
-from .interface import IAffineTransformation, IMaskedTensor, ITensorLike
-from .masked_tensor import VoxelCoordinateGrid
+from .interface import (
+    IAffineTransformation,
+    IComposableMapping,
+    IMaskedTensor,
+    ITensorLike,
+)
+from .masked_tensor import Grid, VoxelGrid
 
 
 class IVoxelCoordinateSystemContainer(ABC):
@@ -150,12 +156,8 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
             )
         if not transformation_matrix.is_floating_point():
             raise ValueError("Affine matrices should be floating point")
-        affine_transformation = CPUAffineTransformation(
-            transformation_matrix, device=device
-        ).pin_memory_if_target_not_cpu()
-        inverse_affine_transformation = (
-            affine_transformation.invert().reduce().pin_memory_if_target_not_cpu()
-        )
+        affine_transformation = CPUAffineTransformation(transformation_matrix, device=device)
+        inverse_affine_transformation = affine_transformation.invert().reduce()
         self._from_voxel_coordinates, self._to_voxel_coordinates = (
             (inverse_affine_transformation, affine_transformation)
             if from_voxel_coordinates is None
@@ -220,36 +222,37 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
             ).pin_memory_if_target_not_cpu()
 
     @property
-    def from_voxel_coordinates(self) -> IAffineTransformation:
+    def from_voxel_coordinates(self) -> IComposableMapping:
         """Mapping from voxel to world coordinates"""
         self.enforce_type_conversion()
-        return self._from_voxel_coordinates
+        return ComposableAffine(self._from_voxel_coordinates)
 
     @property
-    def to_voxel_coordinates(self) -> IAffineTransformation:
+    def to_voxel_coordinates(self) -> IComposableMapping:
         """Mapping from world to voxel coordinates"""
         self.enforce_type_conversion()
-        return self._to_voxel_coordinates
+        return ComposableAffine(self._to_voxel_coordinates)
 
     @property
     def shape(self) -> Sequence[int]:
         """Shape of the coordinate system grid"""
         return self._shape
 
-    def grid(self) -> VoxelCoordinateGrid:
+    def grid(self) -> IMaskedTensor:
         """Grid in the world coordinates"""
         self.enforce_type_conversion()
-        return VoxelCoordinateGrid(
-            shape=self._shape,
-            affine_transformation=self.from_voxel_coordinates,
-            dtype=self.dtype,
-            device=self.device,
+        return self.from_voxel_coordinates(
+            VoxelGrid(
+                spatial_shape=self._shape,
+                dtype=self.dtype,
+                device=self.device,
+            )
         )
 
     def voxel_grid(self) -> IMaskedTensor:
         """Grid in the voxel coordinates"""
         self.enforce_type_conversion()
-        return VoxelCoordinateGrid(shape=self._shape, dtype=self.dtype, device=self.device)
+        return VoxelGrid(spatial_shape=self._shape, dtype=self.dtype, device=self.device)
 
     @staticmethod
     def _calculate_voxel_size(affine_matrix: Tensor) -> Tensor:

@@ -1,6 +1,6 @@
 """Affine transformation implementations"""
 
-from typing import List, Mapping, Optional, Sequence
+from typing import List, Literal, Mapping, Optional, Sequence
 
 from torch import Tensor, allclose, cat
 from torch import device as torch_device
@@ -20,9 +20,9 @@ from .util import (
     broadcast_tensors_around_channel_dims,
     broadcast_to_shape_around_channel_dims,
     channels_last,
+    get_channels_shape,
     index_by_channel_dims,
     merge_batch_dimensions,
-    merged_batch_dimensions,
     move_channels_first,
     move_channels_last,
     unmerge_batch_dimensions,
@@ -32,15 +32,30 @@ from .util import (
 class BaseAffineTransformation(IAffineTransformation):
     """Base affine transformation"""
 
-    def compose(self, affine_transformation: IAffineTransformation) -> "IAffineTransformation":
+    def __matmul__(self, affine_transformation: IAffineTransformation) -> "IAffineTransformation":
         if isinstance(affine_transformation, IdentityAffineTransformation):
+            if self.n_input_dims != affine_transformation.n_output_dims:
+                raise ValueError("Transformation dimensionalities do not match")
             return self
+        if isinstance(self, IdentityAffineTransformation):
+            if self.n_input_dims != affine_transformation.n_output_dims:
+                raise ValueError("Transformation dimensionalities do not match")
+            return affine_transformation
         return AffineTransformation(
             compose_affine_transformation_matrices(
                 self.as_matrix(),
                 affine_transformation.as_matrix(),
             )
         )
+
+    def __add__(self, affine_transformation: IAffineTransformation) -> IAffineTransformation:
+        return AffineTransformation(self.as_matrix() + affine_transformation.as_matrix())
+
+    def __sub__(self, affine_transformation: IAffineTransformation) -> IAffineTransformation:
+        return AffineTransformation(self.as_matrix() - affine_transformation.as_matrix())
+
+    def __neg__(self) -> IAffineTransformation:
+        return AffineTransformation(-self.as_matrix())
 
 
 class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
@@ -65,8 +80,19 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
     ) -> "AffineTransformation":
         return AffineTransformation(tensors["transformation_matrix"])
 
-    def __call__(self, coordinates: Tensor) -> Tensor:
-        return _broadcast_and_transform_coordinates(coordinates, self._transformation_matrix)
+    def is_zero(self, n_input_dims: int, n_output_dims: int) -> Optional[bool]:
+        if self.n_input_dims != n_input_dims or self.n_output_dims != n_output_dims:
+            raise ValueError("Transformation dimensionalities do not match")
+        if self._transformation_matrix.device == torch_device("cpu"):
+            return is_zero_matrix(self._transformation_matrix)
+        return None
+
+    def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
+        return _broadcast_and_transform_values(
+            self._transformation_matrix,
+            values,
+            n_channel_dims=n_channel_dims,
+        )
 
     def invert(self) -> "AffineTransformation":
         """Invert the transformation"""
@@ -77,21 +103,26 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
     ) -> Tensor:
         return self._transformation_matrix
 
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        cpu_matrix = self.as_cpu_matrix()
-        if cpu_matrix is None:
-            if check_only_if_can_be_done_on_cpu:
-                return False
-            return _is_identity_matrix(self._transformation_matrix)
-        return _is_identity_matrix(cpu_matrix)
-
     def as_cpu_matrix(self) -> Optional[Tensor]:
         if self._transformation_matrix.device == torch_device("cpu"):
             return self._transformation_matrix
         return None
 
     @property
-    def n_dims(self) -> int:
+    def n_input_dims(self) -> int:
+        return (
+            self._transformation_matrix.size(
+                index_by_channel_dims(
+                    n_total_dims=self._transformation_matrix.ndim,
+                    channel_dim_index=1,
+                    n_channel_dims=2,
+                )
+            )
+            - 1
+        )
+
+    @property
+    def n_output_dims(self) -> int:
         return (
             self._transformation_matrix.size(
                 index_by_channel_dims(
@@ -120,17 +151,26 @@ class IdentityAffineTransformation(BaseAffineTransformation):
         self._dtype = get_default_dtype() if dtype is None else dtype
         self._device = torch_device("cpu") if device is None else device
 
-    def __call__(self, coordinates: Tensor) -> Tensor:
-        return coordinates
+    def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
+        if (
+            get_coordinates_affine_dimensionality(get_channels_shape(values.shape, n_channel_dims))
+            != self.n_input_dims
+        ):
+            raise ValueError(
+                "Coordinates have wrong dimensionality for the identity transformation"
+            )
+        return values
+
+    def is_zero(self, n_input_dims: int, n_output_dims: int) -> Literal[False]:
+        if self._n_dims != n_input_dims or self._n_dims != n_output_dims:
+            raise ValueError("Transformation dimensionalities do not match")
+        return False
 
     def invert(self) -> "IdentityAffineTransformation":
         """Invert the transformation"""
         return IdentityAffineTransformation(
             n_dims=self._n_dims, dtype=self._dtype, device=self._device
         )
-
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return True
 
     def as_matrix(
         self,
@@ -167,13 +207,125 @@ class IdentityAffineTransformation(BaseAffineTransformation):
         return self
 
     @property
-    def n_dims(self) -> int:
+    def n_input_dims(self) -> int:
+        return self._n_dims
+
+    @property
+    def n_output_dims(self) -> int:
         return self._n_dims
 
     def __repr__(self) -> str:
         return (
             f"IdentityAffineTransformation("
             f"n_dims={self._n_dims}, "
+            f"dtype={self._dtype}, "
+            f"device={self._device})"
+        )
+
+
+class ZeroAffineTransformation(BaseAffineTransformation):
+    """Zero transformation"""
+
+    def __init__(
+        self,
+        n_input_dims: int,
+        n_output_dims: Optional[int] = None,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> None:
+        self._n_input_dims = n_input_dims
+        self._n_output_dims = n_input_dims if n_output_dims is None else n_output_dims
+        self._dtype = get_default_dtype() if dtype is None else dtype
+        self._device = torch_device("cpu") if device is None else device
+
+    def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
+        if (
+            get_coordinates_affine_dimensionality(get_channels_shape(values.shape, n_channel_dims))
+            != self.n_input_dims
+        ):
+            raise ValueError("Coordinates have wrong dimensionality for the zero transformation")
+        if n_channel_dims == 1:
+            shape_modification_dim = index_by_channel_dims(
+                n_total_dims=len(values.shape), channel_dim_index=0, n_channel_dims=1
+            )
+        else:
+            shape_modification_dim = index_by_channel_dims(
+                n_total_dims=len(values.shape),
+                channel_dim_index=-2,
+                n_channel_dims=n_channel_dims,
+            )
+        target_shape = list(values.shape)
+        target_shape[shape_modification_dim] = self.n_output_dims
+        return zeros(target_shape, dtype=self._dtype, device=self._device)
+
+    def is_zero(self, n_input_dims: int, n_output_dims: int) -> Literal[True]:
+        if self._n_input_dims != n_input_dims or self._n_output_dims != n_output_dims:
+            raise ValueError("Transformation dimensionalities do not match")
+        return True
+
+    def invert(self) -> "IdentityAffineTransformation":
+        """Invert the transformation"""
+        raise RuntimeError("Zero transformation is not invertible")
+
+    def as_matrix(
+        self,
+    ) -> Tensor:
+        matrix = zeros(
+            self._n_input_dims + 1, self._n_output_dims + 1, device=self._device, dtype=self._dtype
+        )
+        matrix[-1, -1] = 1
+        return matrix
+
+    def as_cpu_matrix(self) -> Tensor:
+        matrix = zeros(
+            self._n_input_dims + 1,
+            self._n_output_dims + 1,
+            device=torch_device("cpu"),
+            dtype=self._dtype,
+        )
+        matrix[-1, -1] = 1
+        return matrix
+
+    @property
+    def dtype(
+        self,
+    ) -> torch_dtype:
+        return self._dtype
+
+    @property
+    def device(
+        self,
+    ) -> torch_device:
+        return self._device
+
+    def cast(
+        self,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> "ZeroAffineTransformation":
+        return ZeroAffineTransformation(
+            n_input_dims=self._n_input_dims,
+            n_output_dims=self._n_output_dims,
+            dtype=self._dtype if dtype is None else dtype,
+            device=self._device if device is None else device,
+        )
+
+    def detach(self) -> "ZeroAffineTransformation":
+        return self
+
+    @property
+    def n_input_dims(self) -> int:
+        return self._n_input_dims
+
+    @property
+    def n_output_dims(self) -> int:
+        return self._n_output_dims
+
+    def __repr__(self) -> str:
+        return (
+            f"ZeroAffineTransformation("
+            f"n_input_dims={self._n_input_dims}, "
+            f"n_output_dims={self._n_output_dims}, "
             f"dtype={self._dtype}, "
             f"device={self._device})"
         )
@@ -203,23 +355,29 @@ class CPUAffineTransformation(BaseAffineTransformation):
             raise ValueError("The implementation assumes a detached transformation matrix.")
         self._transformation_matrix_cpu = transformation_matrix_on_cpu
         self._device = torch_device("cpu") if device is None else device
+        if self._device != torch_device("cpu"):
+            self._transformation_matrix_target_device = (
+                self._transformation_matrix_cpu.pin_memory().to(
+                    device=self._device, non_blocking=True
+                )
+            )
+        else:
+            self._transformation_matrix_target_device = transformation_matrix_on_cpu
 
-    def __call__(self, coordinates: Tensor) -> Tensor:
-        if self.is_identity():
-            return coordinates
-        return _broadcast_and_transform_coordinates(coordinates, self.as_matrix())
+    def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
+        if (
+            get_coordinates_affine_dimensionality(get_channels_shape(values.shape, n_channel_dims))
+            != self.n_input_dims
+        ):
+            raise ValueError("Coordinates have wrong dimensionality")
+        if is_identity_matrix(self._transformation_matrix_cpu):
+            return values
+        return _broadcast_and_transform_values(self.as_matrix(), values)
 
-    def pin_memory_if_target_not_cpu(self) -> "CPUAffineTransformation":
-        """Pin memory of the cpu transformation matrices needed for producing
-        output of as_matrix on gpu"""
-        return CPUAffineTransformation(
-            (
-                self._transformation_matrix_cpu.pin_memory()
-                if self._device != torch_device("cpu")
-                else self._transformation_matrix_cpu
-            ),
-            device=self._device,
-        )
+    def is_zero(self, n_input_dims: int, n_output_dims: int) -> bool:
+        if self.n_input_dims != n_input_dims or self.n_output_dims != n_output_dims:
+            raise ValueError("Transformation dimensionalities do not match")
+        return is_zero_matrix(self._transformation_matrix_cpu)
 
     def as_matrix(
         self,
@@ -230,9 +388,6 @@ class CPUAffineTransformation(BaseAffineTransformation):
 
     def as_cpu_matrix(self) -> Tensor:
         return self._transformation_matrix_cpu
-
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return _is_identity_matrix(self._transformation_matrix_cpu)
 
     def invert(self) -> "CPUAffineTransformation":
         return _CPUAffineTransformationInverse(
@@ -245,7 +400,7 @@ class CPUAffineTransformation(BaseAffineTransformation):
     def detach(self) -> "CPUAffineTransformation":
         return self
 
-    def compose(self, affine_transformation: IAffineTransformation) -> IAffineTransformation:
+    def __matmul__(self, affine_transformation: IAffineTransformation) -> IAffineTransformation:
         if isinstance(affine_transformation, CPUAffineTransformation):
             return _CPUAffineTransformationComposition(
                 compsed_transformation_matrix_cpu=compose_affine_transformation_matrices(
@@ -254,7 +409,34 @@ class CPUAffineTransformation(BaseAffineTransformation):
                 left_transformation=self,
                 right_transformation=affine_transformation,
             )
-        return super().compose(affine_transformation)
+        return super().__matmul__(affine_transformation)
+
+    def __add__(self, affine_transformation: IAffineTransformation) -> IAffineTransformation:
+        if isinstance(affine_transformation, CPUAffineTransformation):
+            return _CPUAffineTransformationSum(
+                summed_transformation_matrix_cpu=self._transformation_matrix_cpu
+                + affine_transformation.as_cpu_matrix(),
+                left_transformation=self,
+                right_transformation=affine_transformation,
+            )
+        return super().__add__(affine_transformation)
+
+    def __sub__(self, affine_transformation: IAffineTransformation) -> IAffineTransformation:
+        if isinstance(affine_transformation, CPUAffineTransformation):
+            negated_affine_transformation = -affine_transformation
+            return _CPUAffineTransformationSum(
+                summed_transformation_matrix_cpu=self._transformation_matrix_cpu
+                + negated_affine_transformation.as_cpu_matrix(),
+                left_transformation=self,
+                right_transformation=negated_affine_transformation,
+            )
+        return super().__sub__(affine_transformation)
+
+    def __neg__(self) -> "_CPUAffineTransformationNegation":
+        return _CPUAffineTransformationNegation(
+            negated_transformation_matrix_cpu=-self._transformation_matrix_cpu,
+            negated_transformation=self,
+        )
 
     def reduce(self) -> "CPUAffineTransformation":
         """Reduce the transformation to non-lazy version"""
@@ -264,7 +446,20 @@ class CPUAffineTransformation(BaseAffineTransformation):
         )
 
     @property
-    def n_dims(self) -> int:
+    def n_input_dims(self) -> int:
+        return (
+            self._transformation_matrix_cpu.size(
+                index_by_channel_dims(
+                    n_total_dims=self._transformation_matrix_cpu.ndim,
+                    channel_dim_index=1,
+                    n_channel_dims=2,
+                )
+            )
+            - 1
+        )
+
+    @property
+    def n_output_dims(self) -> int:
         return (
             self._transformation_matrix_cpu.size(
                 index_by_channel_dims(
@@ -321,14 +516,6 @@ class _CPUAffineTransformationInverse(CPUAffineTransformation):
         )
         self._transformation_to_invert = transformation_to_invert
 
-    def pin_memory_if_target_not_cpu(self) -> "_CPUAffineTransformationInverse":
-        return _CPUAffineTransformationInverse(
-            inverted_transformation_matrix_cpu=self.as_cpu_matrix(),
-            transformation_to_invert=(
-                self._transformation_to_invert.pin_memory_if_target_not_cpu()
-            ),
-        )
-
     def cast(
         self,
         dtype: Optional[torch_dtype] = None,
@@ -370,13 +557,6 @@ class _CPUAffineTransformationComposition(CPUAffineTransformation):
         self._left_transformation = left_transformation
         self._right_transformation = right_transformation
 
-    def pin_memory_if_target_not_cpu(self) -> "_CPUAffineTransformationComposition":
-        return _CPUAffineTransformationComposition(
-            compsed_transformation_matrix_cpu=self.as_cpu_matrix(),
-            left_transformation=self._left_transformation.pin_memory_if_target_not_cpu(),
-            right_transformation=self._right_transformation.pin_memory_if_target_not_cpu(),
-        )
-
     def cast(
         self,
         dtype: Optional[torch_dtype] = None,
@@ -403,6 +583,84 @@ class _CPUAffineTransformationComposition(CPUAffineTransformation):
             f"compsed_transformation_matrix_cpu={self._transformation_matrix_cpu}, "
             f"left_transformation={self._left_transformation}, "
             f"right_transformation={self._right_transformation})"
+        )
+
+
+class _CPUAffineTransformationSum(CPUAffineTransformation):
+    def __init__(
+        self,
+        summed_transformation_matrix_cpu: Tensor,
+        left_transformation: CPUAffineTransformation,
+        right_transformation: CPUAffineTransformation,
+    ) -> None:
+        super().__init__(
+            summed_transformation_matrix_cpu,
+            device=left_transformation.device,
+        )
+        self._left_transformation = left_transformation
+        self._right_transformation = right_transformation
+
+    def cast(
+        self,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> "_CPUAffineTransformationSum":
+        return _CPUAffineTransformationSum(
+            summed_transformation_matrix_cpu=self._transformation_matrix_cpu.to(
+                dtype=self._transformation_matrix_cpu.dtype if dtype is None else dtype,
+            ),
+            left_transformation=self._left_transformation.cast(dtype=dtype, device=device),
+            right_transformation=self._right_transformation.cast(dtype=dtype, device=device),
+        )
+
+    def as_matrix(
+        self,
+    ) -> Tensor:
+        return self._left_transformation.as_matrix() + self._right_transformation.as_matrix()
+
+    def __repr__(self) -> str:
+        return (
+            f"_CPUAffineTransformationSum("
+            f"summed_transformation_matrix_cpu={self._transformation_matrix_cpu}, "
+            f"left_transformation={self._left_transformation}, "
+            f"right_transformation={self._right_transformation})"
+        )
+
+
+class _CPUAffineTransformationNegation(CPUAffineTransformation):
+    def __init__(
+        self,
+        negated_transformation_matrix_cpu: Tensor,
+        negated_transformation: CPUAffineTransformation,
+    ) -> None:
+        super().__init__(
+            negated_transformation_matrix_cpu,
+            device=negated_transformation.device,
+        )
+        self._negated_transformation = negated_transformation
+
+    def cast(
+        self,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> "_CPUAffineTransformationNegation":
+        return _CPUAffineTransformationNegation(
+            negated_transformation_matrix_cpu=self._transformation_matrix_cpu.to(
+                dtype=self._transformation_matrix_cpu.dtype if dtype is None else dtype,
+            ),
+            negated_transformation=self._negated_transformation.cast(dtype=dtype, device=device),
+        )
+
+    def as_matrix(
+        self,
+    ) -> Tensor:
+        return -self._negated_transformation.as_matrix()
+
+    def __repr__(self) -> str:
+        return (
+            f"_CPUAffineTransformationNegation("
+            f"negated_transformation_matrix_cpu={self._transformation_matrix_cpu}, "
+            f"negated_transformation={self._negated_transformation}"
         )
 
 
@@ -434,8 +692,34 @@ class ComposableAffine(BaseComposableMapping):
     def __repr__(self) -> str:
         return f"ComposableAffine(affine_transformation={self._affine_transformation})"
 
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return self._affine_transformation.is_identity(check_only_if_can_be_done_on_cpu)
+
+class ComposableVoxelGridAffine(BaseComposableMapping):
+    """Composable wrapper for affine transformations of voxel grid of masked tensors"""
+
+    def __init__(self, affine_transformation: IAffineTransformation) -> None:
+        self._affine_transformation = affine_transformation
+
+    def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
+        return masked_coordinates.add_grid(self._affine_transformation)
+
+    def _get_children(self) -> Mapping[str, ITensorLike]:
+        return {"affine_transformation": self._affine_transformation}
+
+    def _get_tensors(self) -> Mapping[str, Tensor]:
+        return {}
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "ComposableVoxelGridAffine":
+        if not isinstance(children["affine_transformation"], IAffineTransformation):
+            raise ValueError("Child of a composable affine must be an affine transformation")
+        return ComposableVoxelGridAffine(children["affine_transformation"])
+
+    def invert(self, **inversion_parameters) -> IComposableMapping:
+        return ComposableVoxelGridAffine(-self._affine_transformation)
+
+    def __repr__(self) -> str:
+        return f"ComposableAffine(affine_transformation={self._affine_transformation})"
 
 
 class NotAffineTransformationError(Exception):
@@ -507,8 +791,20 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
             "the traced mapping is not affine."
         )
 
+    def add_grid(self, affine_transformation: IAffineTransformation) -> IMaskedTensor:
+        raise NotAffineTransformationError(
+            "Affine tracer has no voxel grid! Usually this error means that "
+            "the traced mapping is not affine."
+        )
+
+    def displace(self, displacement: Tensor) -> IMaskedTensor:
+        raise NotAffineTransformationError(
+            "Affine tracer can not be displaced! Usually this error means that "
+            "the traced mapping is not affine."
+        )
+
     def apply_affine(self, affine_transformation: IAffineTransformation) -> "IMaskedTensor":
-        return _AffineTracer(affine_transformation.compose(self.affine_transformation))
+        return _AffineTracer(affine_transformation @ self.affine_transformation)
 
     def has_mask(self) -> bool:
         return False
@@ -544,10 +840,16 @@ class _AffineTracer(IMaskedTensor, BaseTensorLikeWrapper):
         return None
 
     def reduce(self) -> IMaskedTensor:
-        return _AffineTracer(IdentityAffineTransformation(self.affine_transformation.n_dims))
+        return _AffineTracer(IdentityAffineTransformation(self.affine_transformation.n_input_dims))
 
     def __repr__(self) -> str:
         return f"_AffineTracer(affine_transformation={self.affine_transformation})"
+
+    def modify(self, values: Tensor, mask: Optional[Tensor]) -> IMaskedTensor:
+        raise NotAffineTransformationError(
+            "Affine tracer has no values or mask! Usually this error means that "
+            "the traced mapping is not affine."
+        )
 
     def modify_values(self, values: Tensor) -> IMaskedTensor:
         raise NotAffineTransformationError(
@@ -578,32 +880,6 @@ def compose_affine_transformation_matrices(
     for transformation in transformations[1:]:
         composition = matmul(composition, move_channels_last(transformation, 2))
     return move_channels_first(composition, 2)
-
-
-def convert_to_homogenous_coordinates(coordinates: Tensor) -> Tensor:
-    """Converts the coordinates to homogenous coordinates
-
-    Args:
-        coordinates: Tensor with shape (batch_size, n_channels, *)
-        channels_first: Whether to have channels first, default True
-
-    Returns: Tensor with shape (batch_size, n_channels + 1, *)
-    """
-    coordinates = move_channels_last(coordinates, 1)
-    coordinates, batch_dimensions_shape = merge_batch_dimensions(coordinates, 1)
-    homogenous_coordinates = cat(
-        [
-            coordinates,
-            ones(1, device=coordinates.device, dtype=coordinates.dtype).expand(
-                coordinates.size(0), 1
-            ),
-        ],
-        dim=-1,
-    )
-    homogenous_coordinates = unmerge_batch_dimensions(
-        homogenous_coordinates, batch_dimensions_shape=batch_dimensions_shape, n_channel_dims=1
-    )
-    return move_channels_first(homogenous_coordinates, 1)
 
 
 @script
@@ -666,7 +942,30 @@ def embed_transformation(matrix: Tensor, target_shape: List[int]) -> Tensor:
     return move_channels_first(embedded_matrix, 2)
 
 
-@script
+def _convert_to_homogenous_coordinates(coordinates: Tensor, dim: int = -1) -> Tensor:
+    """Converts the coordinates to homogenous coordinates
+
+    Args:
+        coordinates: Tensor with shape
+            (dim_1, ..., dim_{dim}, ..., dim_{n_dims})
+
+    Returns: Tensor with shape
+        (dim_1, ..., dim_{dim + 1}, ..., dim_{n_dims})
+    """
+    if dim < 0:
+        dim = coordinates.ndim + dim
+    homogenous_coordinates = cat(
+        [
+            coordinates,
+            ones(1, device=coordinates.device, dtype=coordinates.dtype).expand(
+                *coordinates.shape[:dim], 1, *coordinates.shape[dim + 1 :]
+            ),
+        ],
+        dim=dim,
+    )
+    return homogenous_coordinates
+
+
 def generate_translation_matrix(translations: Tensor) -> Tensor:
     """Generator homogenous translation matrix with given translations
 
@@ -679,7 +978,7 @@ def generate_translation_matrix(translations: Tensor) -> Tensor:
     translations, batch_dimensions_shape = merge_batch_dimensions(translations, n_channel_dims=1)
     batch_size = translations.size(0)
     n_dims = translations.size(1)
-    homogenous_translation = convert_to_homogenous_coordinates(coordinates=translations)
+    homogenous_translation = _convert_to_homogenous_coordinates(translations, dim=-1)
     translation_matrix = cat(
         [
             cat(
@@ -715,25 +1014,20 @@ def generate_scale_matrix(
     return move_channels_first(scale_matrix, n_channel_dims=2)
 
 
-@channels_last({"coordinates": 1, "transformation_matrix": 2}, 1)
-@merged_batch_dimensions({"coordinates": 1, "transformation_matrix": 2}, 1)
-def _transform_coordinates(coordinates: Tensor, transformation_matrix: Tensor) -> Tensor:
-    transformed = matmul(
-        transformation_matrix, convert_to_homogenous_coordinates(coordinates)[..., None]
-    )[..., :-1, 0]
-    return transformed
-
-
-def _broadcast_and_transform_coordinates(
-    coordinates: Tensor, transformation_matrix: Tensor
-) -> Tensor:
-    coordinates, transformation_matrix = broadcast_tensors_around_channel_dims(
-        (coordinates, transformation_matrix), n_channel_dims=(1, 2)
+def is_zero_matrix(matrix: Tensor) -> bool:
+    """Return whether a matrix or batch of matrices is a zero matrix"""
+    return allclose(
+        matrix,
+        zeros(
+            1,
+            dtype=matrix.dtype,
+            device=matrix.device,
+        ),
     )
-    return _transform_coordinates(coordinates, transformation_matrix)
 
 
-def _is_identity_matrix(matrix: Tensor) -> bool:
+def is_identity_matrix(matrix: Tensor) -> bool:
+    """Return whether a matrix or batch of matrices is an identity"""
     if matrix.size(-2) != matrix.size(-1):
         return False
     first_channel_dim = index_by_channel_dims(
@@ -752,3 +1046,35 @@ def _is_identity_matrix(matrix: Tensor) -> bool:
         matrix,
         broadcasted_identity_matrix,
     )
+
+
+def get_coordinates_affine_dimensionality(channels_shape: Sequence[int]) -> int:
+    """Get the dimensionality of the affine transformation compatible with the coordinates"""
+    if len(channels_shape) == 1:
+        return channels_shape[0]
+    return channels_shape[-2]
+
+
+def _broadcast_and_transform_values(
+    transformation_matrix: Tensor, values: Tensor, n_channel_dims: int = 1
+) -> Tensor:
+    values, transformation_matrix = broadcast_tensors_around_channel_dims(
+        (values, transformation_matrix), n_channel_dims=(n_channel_dims, 2)
+    )
+    transformation_matrix = move_channels_last(transformation_matrix, 2)
+    if n_channel_dims > 2:
+        transformation_matrix = transformation_matrix[
+            (...,) + (None,) * (n_channel_dims - 2) + 2 * (slice(None),)
+        ]
+    values = move_channels_last(values, n_channel_dims)
+    if n_channel_dims == 1:
+        values = values[..., None]
+    transformed = matmul(
+        transformation_matrix,
+        _convert_to_homogenous_coordinates(values, dim=-2),
+    )[..., :-1, :]
+    if n_channel_dims == 1:
+        transformed = transformed[..., 0]
+    transformed = move_channels_first(transformed, n_channel_dims)
+
+    return transformed

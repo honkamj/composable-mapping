@@ -86,9 +86,6 @@ class GridVolume(BaseComposableMapping):
             "data": self._data,
         }
 
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return False
-
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "GridVolume":
@@ -111,7 +108,7 @@ class GridVolume(BaseComposableMapping):
         voxel_coordinates_generator: Callable[[], Tensor],
         coordinate_mask: Optional[Tensor],
         coordinates_as_slice: Optional[Tuple[Union["ellipsis", slice], ...]],
-    ) -> MaskedTensor:
+    ) -> IMaskedTensor:
         data, data_mask = self._data.generate(generate_missing_mask=False, cast_mask=False)
         if coordinates_as_slice is None:
             voxel_coordinates = voxel_coordinates_generator()
@@ -174,35 +171,22 @@ class _BaseGridDeformation(GridVolume):
         )
         self._data_format = data_format
 
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        # Note necessarily identity outside of the field of view even if
-        # the displacement field is zero
-        return False
-
     def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
-        if self._data_format == "displacement":
-            voxel_coordinates, coordinate_mask = masked_coordinates.generate(
-                generate_missing_mask=False, cast_mask=False
-            )
-
-            def voxel_coordinates_generator():
-                return voxel_coordinates
-
-        elif self._data_format == "coordinate":
-            voxel_coordinates_generator = masked_coordinates.generate_values
-            coordinate_mask = masked_coordinates.generate_mask(
-                generate_missing_mask=False, cast_mask=False
-            )
-        else:
-            raise ValueError(f"Invalid data format: {self._data_format}")
+        voxel_coordinates_generator = masked_coordinates.generate_values
+        coordinate_mask = masked_coordinates.generate_mask(
+            generate_missing_mask=False, cast_mask=False
+        )
         values = self._evaluate(
             voxel_coordinates_generator=voxel_coordinates_generator,
             coordinate_mask=coordinate_mask,
             coordinates_as_slice=masked_coordinates.as_slice(self._data.spatial_shape),
         )
         if self._data_format == "displacement":
-            values = values.modify_values(values=values.generate_values() + voxel_coordinates)
-        return values
+            displacement, mask = values.generate(generate_missing_mask=False, cast_mask=False)
+            return masked_coordinates.displace(displacement).modify_mask(mask)
+        if self._data_format == "coordinate":
+            return values
+        raise ValueError(f"Invalid data format: {self._data_format}")
 
     def __repr__(self) -> str:
         return (

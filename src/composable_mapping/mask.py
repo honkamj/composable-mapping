@@ -58,9 +58,6 @@ class RectangleMask(BaseComposableMapping):
     def __repr__(self) -> str:
         return f"RectangleMask(min_values={self._min_values}, max_values={self._max_values})"
 
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return False
-
 
 class ClearMask(BaseComposableMapping):
     """Clear mask"""
@@ -87,6 +84,3 @@ class ClearMask(BaseComposableMapping):
 
     def __repr__(self) -> str:
         return "ClearMask()"
-
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return False

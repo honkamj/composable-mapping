@@ -33,6 +33,3 @@ class ComposableIdentity(BaseComposableMapping):
 
     def __repr__(self) -> str:
         return "ComposableIdentity()"
-
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return True

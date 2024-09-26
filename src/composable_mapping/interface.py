@@ -52,8 +52,20 @@ class IAffineTransformation(ITensorLike):
     """Affine transformation"""
 
     @abstractmethod
-    def compose(self, affine_transformation: "IAffineTransformation") -> "IAffineTransformation":
+    def __matmul__(self, affine_transformation: "IAffineTransformation") -> "IAffineTransformation":
         """Compose with another affine transformation"""
+
+    @abstractmethod
+    def __add__(self, affine_transformation: "IAffineTransformation") -> "IAffineTransformation":
+        """Add another affine transformation"""
+
+    @abstractmethod
+    def __sub__(self, affine_transformation: "IAffineTransformation") -> "IAffineTransformation":
+        """Subtract another affine transformation"""
+
+    @abstractmethod
+    def __neg__(self) -> "IAffineTransformation":
+        """Negate the affine transformation"""
 
     @abstractmethod
     def as_matrix(
@@ -62,8 +74,8 @@ class IAffineTransformation(ITensorLike):
         """Return the mapping as matrix"""
 
     @abstractmethod
-    def __call__(self, coordinates: Tensor) -> Tensor:
-        """Evaluate the mapping at coordinates"""
+    def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
+        """Evaluate the mapping with values"""
 
     @abstractmethod
     def invert(self) -> "IAffineTransformation":
@@ -75,16 +87,23 @@ class IAffineTransformation(ITensorLike):
 
     @property
     @abstractmethod
-    def n_dims(self) -> int:
+    def n_input_dims(self) -> int:
         """Number of dimensions the transformation expects"""
 
+    @property
     @abstractmethod
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        """Return whether the transformation is identity
+    def n_output_dims(self) -> int:
+        """Number of dimensions the transformation outputs"""
+
+    @abstractmethod
+    def is_zero(self, n_input_dims: int, n_output_dims: int) -> Optional[bool]:
+        """Return whether the transformation is zero
+
+        Returns None if the check cannot be done on CPU
 
         Args:
-            check_only_if_can_be_done_on_cpu: Only returns True if the check can
-                be done on CPU (to avoid CPU-GPU synchronization).
+            n_input_dims: Number of dimensions the transformation is applied on
+            n_output_dims: Number of dimensions the transformation outputs
         """
 
 
@@ -159,10 +178,23 @@ class IMaskedTensor(ITensorLike):
     def apply_affine(self, affine_transformation: IAffineTransformation) -> "IMaskedTensor":
         """Apply affine mapping to the first channel dimension of the tensor"""
 
+    @abstractmethod
+    def add_grid(
+        self,
+        affine_transformation: IAffineTransformation,
+    ) -> "IMaskedTensor":
+        """Add affine transformation to the existing affine transformatoin on
+        the voxel grid of the tensor"""
+
     @property
     @abstractmethod
     def channels_shape(self) -> Sequence[int]:
         """Return shape of the channel dimensions"""
+
+    @property
+    @abstractmethod
+    def n_channel_dims(self) -> int:
+        """Return number of channel dimensions"""
 
     @property
     @abstractmethod
@@ -194,14 +226,30 @@ class IMaskedTensor(ITensorLike):
         """Return the masked tensor with the values explicitly stored"""
 
     @abstractmethod
+    def displace(self, displacement: Tensor) -> "IMaskedTensor":
+        """Return a masked tensor with the values displaced"""
+
+    @abstractmethod
     def modify_values(self, values: Tensor) -> "IMaskedTensor":
-        """Return a masked tensor with the values modified"""
+        """Return a masked tensor with the values modified
+
+        Assumes that the number of channel dimensions is the same as the
+        original tensor
+        """
 
     @abstractmethod
     def modify_mask(self, mask: Optional[Tensor]) -> "IMaskedTensor":
         """Return a masked tensor with the mask modified
 
         Setting mask to None is equivalent to clearing the mask
+        """
+
+    @abstractmethod
+    def modify(self, values: Tensor, mask: Optional[Tensor]) -> "IMaskedTensor":
+        """Return a masked tensor with values and mask modified
+
+        Assumes that the number of channel dimensions is the same as the
+        original tensor
         """
 
 
@@ -222,15 +270,6 @@ class IComposableMapping(ITensorLike):
 
         Args:
             inversion_parameters: Possible inversion parameters
-        """
-
-    @abstractmethod
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        """Return whether the transformation is easily identifiable as an identity
-
-        Args:
-            check_only_if_can_be_done_on_cpu: Only returns True if the check can
-                be done on CPU (to avoid CPU-GPU synchronization).
         """
 
 

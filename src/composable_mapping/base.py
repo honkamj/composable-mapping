@@ -120,8 +120,3 @@ class _Composition(BaseComposableMapping):
         return (
             f"_Composition(left_mapping={self._left_mapping}, right_mapping={self._right_mapping})"
         )
-
-    def is_identity(self, check_only_if_can_be_done_on_cpu: bool = True) -> bool:
-        return self._left_mapping.is_identity(
-            check_only_if_can_be_done_on_cpu
-        ) and self._right_mapping.is_identity(check_only_if_can_be_done_on_cpu)

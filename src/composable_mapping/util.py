@@ -13,11 +13,25 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    TypeVar,
     Union,
+    cast,
 )
 
 from torch import Tensor, broadcast_shapes, broadcast_to
 from torch.jit import script
+
+T = TypeVar("T")
+
+
+def optional_add(addable_1: Optional[T], addable_2: Optional[T]) -> Optional[T]:
+    """Optional add"""
+    if addable_1 is None:
+        return addable_2
+    if addable_2 is None:
+        return addable_1
+    added = addable_1 + addable_2  # type: ignore
+    return cast(T, added)
 
 
 @script
@@ -437,6 +451,12 @@ def get_other_than_channel_dims(n_total_dims: int, n_channel_dims: int) -> List[
         if dim not in channel_dims:
             dims.append(dim)
     return dims
+
+
+def get_channels_shape(shape: Sequence[int], n_channel_dims: int) -> Tuple[int, ...]:
+    """Returns shape of the channel dimensions"""
+    first_channel_dim = index_by_channel_dims(len(shape), 0, n_channel_dims)
+    return tuple(shape[first_channel_dim : first_channel_dim + n_channel_dims])
 
 
 def reduce_channel_shape_to_ones(shape: Sequence[int], n_channel_dims: int) -> Tuple[int, ...]:
