@@ -5,7 +5,7 @@ from typing import Iterator, Sequence
 
 from torch import Tensor
 
-from composable_mapping.util import broadcast_to_shape_around_channel_dims
+from composable_mapping.util import broadcast_to_in_parts_around_channel_dims
 
 
 class BroadcastShapeTestingUtil:
@@ -27,7 +27,7 @@ class BroadcastShapeTestingUtil:
         shape_iterator = chain(product(cls.BATCH_SHAPES, cls.SPATIAL_SHAPES), [(tuple(), tuple())])
         for batch_shape, spatial_shape in shape_iterator:
             reshaped_tensors = [
-                broadcast_to_shape_around_channel_dims(
+                broadcast_to_in_parts_around_channel_dims(
                     tensor, batch_shape + tuple(tensor.shape) + spatial_shape, tensor.ndim
                 )
                 for tensor in tensors

@@ -8,30 +8,23 @@ from matplotlib.pyplot import subplots  # type: ignore
 from numpy import ndarray
 from torch import Tensor
 
-from .affine import (
+from .affine_transformation import IAffineTransformation
+from .base import BaseTensorLikeWrapper
+from .composable_affine import (
     ComposableAffine,
     NotAffineTransformationError,
     as_affine_transformation,
 )
-from .base import BaseTensorLikeWrapper
 from .finite_difference import (
     estimate_spatial_derivatives,
     estimate_spatial_jacobian_matrices,
     update_coordinate_system_for_derivatives,
     update_coordinate_system_for_jacobian_matrices,
 )
-from .grid_mapping import (
-    InterpolationArgs,
-    create_deformation_from_voxel_data,
-    create_volume,
-)
-from .interface import (
-    IAffineTransformation,
-    IComposableMapping,
-    IMaskedTensor,
-    ITensorLike,
-)
-from .masked_tensor import MaskedTensor
+from .grid_mapping import InterpolationArgs, create_deformation, create_volume
+from .interface import IComposableMapping
+from .mappable_tensor import MappableTensor
+from .tensor_like import ITensorLike
 from .voxel_coordinate_system import (
     IVoxelCoordinateSystemContainer,
     VoxelCoordinateSystem,
@@ -60,20 +53,20 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
     def coordinate_system(self) -> VoxelCoordinateSystem:
         return self._coordinate_system
 
-    def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
+    def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
         return self.mapping(masked_coordinates)
 
-    def sample(self) -> IMaskedTensor:
+    def sample(self) -> MappableTensor:
         """Sample the mapping"""
         return self.sample_to(self)
 
     def sample_to(
         self,
         target: Union[
-            IMaskedTensor,
+            MappableTensor,
             IVoxelCoordinateSystemContainer,
         ],
-    ) -> IMaskedTensor:
+    ) -> MappableTensor:
         """Sample the mapping wtih respect to the target coordinates"""
         if isinstance(target, IVoxelCoordinateSystemContainer):
             target = target.coordinate_system.grid()
@@ -149,7 +142,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
         else:
             return NotImplemented
         return self.__class__(
-            mapping=self.mapping.compose(right_composable_mapping),
+            mapping=self.mapping @ right_composable_mapping,
             coordinate_system=coordinate_system,
         )
 
@@ -209,7 +202,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
         else:
             return NotImplemented
         return self.__class__(
-            mapping=left_composable_mapping.compose(self.mapping),
+            mapping=left_composable_mapping @ self.mapping,
             coordinate_system=self.coordinate_system,
         )
 
@@ -360,24 +353,18 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         target: IVoxelCoordinateSystemContainer,
         *,
         data_coordinates: str = "voxel",
-    ) -> IMaskedTensor:
+    ) -> MappableTensor:
         """Return the mapping as displacement field with respect to the
         coordinates of the target"""
         coordinate_system = target.coordinate_system
         data = self.sample_to(target)
         if data_coordinates == "world":
-            return data.modify_values(
-                data.generate_values() - coordinate_system.grid().generate_values()
-            )
+            return data - coordinate_system.grid()
         if data_coordinates == "voxel":
-            data_values, data_mask = data.generate(generate_missing_mask=False, cast_mask=False)
-            voxel_coordinates = coordinate_system.to_voxel_coordinates(data_values)
-            return MaskedTensor(
-                voxel_coordinates - coordinate_system.voxel_grid().generate_values(), mask=data_mask
-            )
+            return coordinate_system.to_voxel_coordinates(data) - coordinate_system.voxel_grid()
         raise ValueError(f"Invalid option for data coordinates: {data_coordinates}")
 
-    def sample_as_displacement_field(self, *, data_coordinates: str = "voxel") -> IMaskedTensor:
+    def sample_as_displacement_field(self, *, data_coordinates: str = "voxel") -> MappableTensor:
         """Return the mapping as displacement field"""
         return self.sample_to_as_displacement_field(self, data_coordinates=data_coordinates)
 
@@ -385,28 +372,18 @@ class SamplableDeformationMapping(BaseSamplableMapping):
         self,
         target: IVoxelCoordinateSystemContainer,
         interpolation_args: Optional[InterpolationArgs] = None,
-        *,
-        data_format: str = "displacement",
     ) -> "SamplableDeformationMapping":
         """Resample the mapping to target"""
         coordinate_system = target.coordinate_system
-        if data_format == "displacement":
-            data = self.sample_to_as_displacement_field(coordinate_system, data_coordinates="voxel")
-        elif data_format == "coordinate":
-            data_values_world, data_mask = self.sample_to(coordinate_system).generate(
-                generate_missing_mask=False, cast_mask=False
-            )
-            data = MaskedTensor(
-                coordinate_system.to_voxel_coordinates(data_values_world), data_mask
-            )
-        else:
-            raise ValueError(f"Invalid data_format option: {data_format}")
         return SamplableDeformationMapping(
-            mapping=create_deformation_from_voxel_data(
-                data=data,
+            mapping=create_deformation(
+                data=self.sample_to_as_displacement_field(
+                    coordinate_system, data_coordinates="voxel"
+                ),
                 interpolation_args=interpolation_args,
                 coordinate_system=coordinate_system,
-                data_format=data_format,
+                data_format="displacement",
+                data_coordinates="voxel",
             ),
             coordinate_system=coordinate_system,
         )
@@ -414,13 +391,9 @@ class SamplableDeformationMapping(BaseSamplableMapping):
     def resample(
         self,
         interpolation_args: Optional[InterpolationArgs] = None,
-        *,
-        data_format: str = "displacement",
     ) -> "SamplableDeformationMapping":
         """Resample the mapping"""
-        return self.resample_to(
-            self, interpolation_args=interpolation_args, data_format=data_format
-        )
+        return self.resample_to(self, interpolation_args=interpolation_args)
 
     @overload
     def as_affine(
@@ -435,7 +408,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
     ) -> Optional[IAffineTransformation]:
         """Return the mapping as affine transformation, if possible"""
         try:
-            return as_affine_transformation(self.mapping, n_dims=len(self.coordinate_system.shape))
+            return as_affine_transformation(self.mapping)
         except NotAffineTransformationError:
             if return_none_if_not_affine:
                 return None

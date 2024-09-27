@@ -5,7 +5,8 @@ from typing import Mapping
 from torch import Tensor
 
 from .base import BaseComposableMapping
-from .interface import IMaskedTensor, ITensorLike
+from .mappable_tensor import MappableTensor
+from .tensor_like import ITensorLike
 
 
 class ComposableIdentity(BaseComposableMapping):
@@ -22,7 +23,7 @@ class ComposableIdentity(BaseComposableMapping):
     ) -> "ComposableIdentity":
         return ComposableIdentity()
 
-    def __call__(self, masked_coordinates: IMaskedTensor) -> IMaskedTensor:
+    def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
         return masked_coordinates
 
     def invert(self, **_inversion_parameters) -> "ComposableIdentity":

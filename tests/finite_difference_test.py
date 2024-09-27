@@ -10,7 +10,7 @@ from composable_mapping.finite_difference import (
     estimate_spatial_jacobian_matrices_for_mapping,
 )
 from composable_mapping.mapping_factory import create_composable_identity
-from composable_mapping.util import broadcast_tensors_around_channel_dims
+from composable_mapping.util import broadcast_tensors_in_parts_around_channel_dims
 
 
 class FiniteDifferenceTests(TestCase):
@@ -25,7 +25,7 @@ class FiniteDifferenceTests(TestCase):
             central=True,
             other_dims="crop",
         )
-        matrices, identity = broadcast_tensors_around_channel_dims(
+        matrices, identity = broadcast_tensors_in_parts_around_channel_dims(
             (matrices, eye(3)), n_channel_dims=2
         )
         assert_close(matrices, identity)

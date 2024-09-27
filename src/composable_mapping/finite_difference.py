@@ -7,8 +7,7 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import tensor
 
-from .interface import IMaskedTensor
-from .masked_tensor import MaskedTensor, stack_channels
+from .mappable_tensor import MappableTensor, PlainTensor, stack_channels
 from .util import num_spatial_dims
 from .voxel_coordinate_system import ReferenceOption, VoxelCoordinateSystem
 
@@ -73,12 +72,12 @@ def update_coordinate_system_for_jacobian_matrices(
 
 
 def estimate_spatial_derivatives(
-    volume: IMaskedTensor,
+    volume: MappableTensor,
     spatial_dim: int,
     spacing: Optional[Union[Tensor, float, int]] = None,
     other_dims: Optional[str] = None,
     central: bool = False,
-) -> MaskedTensor:
+) -> MappableTensor:
     """Calculate spatial derivatives over a dimension estimated using finite differences
 
     Args:
@@ -182,14 +181,14 @@ def estimate_spatial_derivatives(
                     combined_mask = combined_mask & updated_mask[shifting_slice]
         derivatives = summed_derivatives / 2 ** (n_spatial_dims - 1)
         updated_mask = combined_mask
-    return MaskedTensor(derivatives, mask=updated_mask, n_channel_dims=n_channel_dims)
+    return PlainTensor(derivatives, mask=updated_mask, n_channel_dims=n_channel_dims)
 
 
 def estimate_spatial_jacobian_matrices(
-    volume: IMaskedTensor,
+    volume: MappableTensor,
     spacing: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
     central: bool = False,
-) -> MaskedTensor:
+) -> MappableTensor:
     """Calculate local Jacobian matrices of a volume estimated using finite differences
 
     Args:
@@ -220,7 +219,7 @@ def estimate_spatial_jacobian_matrices(
     return stack_channels(
         *(
             estimate_spatial_derivatives(
-                volume=MaskedTensor(data, mask, n_channel_dims=n_channel_dims),
+                volume=PlainTensor(data, mask, n_channel_dims=n_channel_dims),
                 spatial_dim=dim,
                 spacing=spacing[:, dim],
                 other_dims={False: "average", True: "crop"}[central],

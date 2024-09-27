@@ -9,22 +9,18 @@ from torch import dtype as torch_dtype
 from torch import eye, get_default_dtype, ones_like, tensor
 from torch.nn import Module
 
-from .affine import (
-    ComposableAffine,
+from .affine_transformation import (
     CPUAffineTransformation,
-    compose_affine_transformation_matrices,
-    embed_transformation,
+    compose_affine_matrices,
+    embed_matrix,
     generate_scale_matrix,
     generate_translation_matrix,
 )
-from .ceildiv import ceildiv
-from .interface import (
-    IAffineTransformation,
-    IComposableMapping,
-    IMaskedTensor,
-    ITensorLike,
-)
-from .masked_tensor import Grid, VoxelGrid
+from .composable_affine import ComposableAffine
+from .interface import IComposableMapping
+from .mappable_tensor import MappableTensor, VoxelGrid
+from .tensor_like import ITensorLike
+from .util import ceildiv
 
 
 class IVoxelCoordinateSystemContainer(ABC):
@@ -157,7 +153,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         if not transformation_matrix.is_floating_point():
             raise ValueError("Affine matrices should be floating point")
         affine_transformation = CPUAffineTransformation(transformation_matrix, device=device)
-        inverse_affine_transformation = affine_transformation.invert().reduce()
+        inverse_affine_transformation = affine_transformation.invert()
         self._from_voxel_coordinates, self._to_voxel_coordinates = (
             (inverse_affine_transformation, affine_transformation)
             if from_voxel_coordinates is None
@@ -238,7 +234,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         """Shape of the coordinate system grid"""
         return self._shape
 
-    def grid(self) -> IMaskedTensor:
+    def grid(self) -> MappableTensor:
         """Grid in the world coordinates"""
         self.enforce_type_conversion()
         return self.from_voxel_coordinates(
@@ -249,7 +245,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
             )
         )
 
-    def voxel_grid(self) -> IMaskedTensor:
+    def voxel_grid(self) -> MappableTensor:
         """Grid in the voxel coordinates"""
         self.enforce_type_conversion()
         return VoxelGrid(spatial_shape=self._shape, dtype=self.dtype, device=self.device)
@@ -292,11 +288,11 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         shift = shift.expand(*shift.shape[:-1], n_dims)
         shift_matrix = generate_translation_matrix(shift)
         if voxel:
-            updated_matrix = compose_affine_transformation_matrices(
+            updated_matrix = compose_affine_matrices(
                 shift_matrix, self._from_voxel_coordinates.as_cpu_matrix()
             )
         else:
-            updated_matrix = compose_affine_transformation_matrices(
+            updated_matrix = compose_affine_matrices(
                 self._from_voxel_coordinates.as_cpu_matrix(), shift_matrix
             )
         return VoxelCoordinateSystem(
@@ -478,10 +474,10 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
             -target_reference_in_voxel_coordinates
         )
         n_dims = original_voxel_size.size(-1)
-        downsampling_matrix = embed_transformation(
+        downsampling_matrix = embed_matrix(
             generate_scale_matrix(downsampling_factor), (n_dims + 1, n_dims + 1)
         )
-        reformatted_transformation = compose_affine_transformation_matrices(
+        reformatted_transformation = compose_affine_matrices(
             self._from_voxel_coordinates.as_cpu_matrix(),
             source_translation_matrix,
             downsampling_matrix,
@@ -659,9 +655,7 @@ def create_voxel(
         raise ValueError("Voxel size should be a floating point tensor")
     if voxel_size.ndim > 2:
         raise ValueError("Voxel size should be a vector or a batch of vectors")
-    initial_affine = embed_transformation(
-        generate_scale_matrix(voxel_size), (n_dims + 1, n_dims + 1)
-    )
+    initial_affine = embed_matrix(generate_scale_matrix(voxel_size), (n_dims + 1, n_dims + 1))
     return VoxelCoordinateSystem(
         from_voxel_coordinates=initial_affine,
         shape=shape,

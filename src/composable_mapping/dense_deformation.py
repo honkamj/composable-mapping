@@ -1,28 +1,23 @@
 """Functions for handling dense deformations"""
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from torch import Tensor
 from torch import all as torch_all
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import linspace, meshgrid, stack, tensor
+from torch import ge, gt, le, linspace, lt, meshgrid, stack, tensor
 from torch.jit import script
 from torch.nn.functional import grid_sample
 
-from .util import (
-    index_by_channel_dims,
-    move_channels_first,
-    move_channels_last,
-    num_spatial_dims,
-)
+from composable_mapping.util import move_channels_first, move_channels_last
 
 
 def _convert_between_coordinates(
     coordinates: Tensor, volume_shape: Optional[List[int]], to_voxel_coordinates: bool
 ) -> Tensor:
-    channel_dim = index_by_channel_dims(coordinates.ndim, channel_dim_index=0, n_channel_dims=1)
-    n_spatial_dims = num_spatial_dims(n_total_dims=coordinates.ndim, n_channel_dims=1)
+    channel_dim = 0 if coordinates.ndim == 1 else 1
+    n_spatial_dims = 0 if coordinates.ndim <= 2 else coordinates.ndim - 2
     n_dims = coordinates.size(channel_dim)
     inferred_volume_shape = coordinates.shape[-n_dims:] if volume_shape is None else volume_shape
     add_spatial_dims_view = (-1,) + n_spatial_dims * (1,)
@@ -168,7 +163,7 @@ def interpolate(
     permuted_volume = simplified_volume.permute(
         [0, 1] + list(range(simplified_volume.ndim - 1, 2 - 1, -1))
     )
-    permuted_grid = move_channels_last(normalized_grid, 1)
+    permuted_grid = normalized_grid.moveaxis(1, -1)
     permuted_volume, permuted_grid = _broadcast_batch_size(permuted_volume, permuted_grid)
     return grid_sample(
         input=permuted_volume,
@@ -201,11 +196,13 @@ def integrate_svf(
     return integrated
 
 
-@script
 def compute_fov_mask_based_on_bounds(
     coordinates: Tensor,
-    min_values: List[float],
-    max_values: List[float],
+    min_values: Sequence[float],
+    max_values: Sequence[float],
+    n_channel_dims: int = 1,
+    inclusive_min: bool = True,
+    inclusive_max: bool = True,
 ) -> Tensor:
     """Calculate mask at coordinates
 
@@ -216,7 +213,7 @@ def compute_fov_mask_based_on_bounds(
         max_values: Values above this are added to the mask
         dtype: Type of the generated mask
     """
-    coordinates = move_channels_last(coordinates.detach())
+    coordinates = move_channels_last(coordinates.detach(), n_channel_dims=n_channel_dims)
     min_values_tensor = tensor(min_values, dtype=coordinates.dtype)
     max_values_tensor = tensor(max_values, dtype=coordinates.dtype)
     if coordinates.device != torch_device("cpu"):
@@ -229,15 +226,21 @@ def compute_fov_mask_based_on_bounds(
     normalized_coordinates = (coordinates - min_values_tensor) / (
         max_values_tensor - min_values_tensor
     )
-    fov_mask = (normalized_coordinates >= 0) & (normalized_coordinates <= 1)
-    fov_mask = move_channels_first(torch_all(fov_mask, dim=-1, keepdim=True))
+    min_operator = ge if inclusive_min else gt
+    max_operator = le if inclusive_max else lt
+    fov_mask = min_operator(normalized_coordinates, 0) & max_operator(normalized_coordinates, 1)
+    fov_mask = move_channels_first(
+        torch_all(fov_mask, dim=-1, keepdim=True), n_channel_dims=n_channel_dims
+    )
     return fov_mask
 
 
-@script
+FOV_MASK_TOLERANCE = 1e-6
+
+
 def compute_fov_mask_at_voxel_coordinates(
     coordinates_at_voxel_coordinates: Tensor,
-    volume_shape: List[int],
+    volume_shape: Sequence[int],
 ) -> Tensor:
     """Calculate mask at coordinates
 
@@ -248,6 +251,6 @@ def compute_fov_mask_at_voxel_coordinates(
     """
     return compute_fov_mask_based_on_bounds(
         coordinates=coordinates_at_voxel_coordinates,
-        min_values=[0.0] * len(volume_shape),
-        max_values=[float(dim_size - 1) for dim_size in volume_shape],
+        min_values=[-FOV_MASK_TOLERANCE] * len(volume_shape),
+        max_values=[float(dim_size - 1) + FOV_MASK_TOLERANCE for dim_size in volume_shape],
     )

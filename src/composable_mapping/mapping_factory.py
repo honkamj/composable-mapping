@@ -4,17 +4,17 @@ from typing import Optional, Union, overload
 
 from torch import Tensor
 
-from .affine import AffineTransformation, ComposableAffine
+from .affine_transformation import AffineTransformation
+from .composable_affine import ComposableAffine
 from .grid_mapping import (
     InterpolationArgs,
-    create_deformation_from_voxel_data,
-    create_deformation_from_world_data,
+    create_deformation,
     create_volume,
     get_interpolation_args,
 )
 from .identity import ComposableIdentity
-from .interface import IComposableMapping, IMaskedTensor
-from .masked_tensor import MaskedTensor
+from .interface import IComposableMapping
+from .mappable_tensor import MappableTensor, PlainTensor
 from .samplable_mapping import SamplableDeformationMapping, SamplableVolumeMapping
 from .voxel_coordinate_system import (
     IVoxelCoordinateSystemContainer,
@@ -58,13 +58,13 @@ class BaseMappingFactory(IVoxelCoordinateSystemContainer):
         )
 
     def _handle_tensor_inputs(
-        self, data: Union[Tensor, IMaskedTensor], mask: Optional[Tensor], n_channel_dims: int = 1
-    ) -> IMaskedTensor:
-        if isinstance(data, IMaskedTensor):
+        self, data: Union[Tensor, MappableTensor], mask: Optional[Tensor], n_channel_dims: int = 1
+    ) -> MappableTensor:
+        if isinstance(data, MappableTensor):
             if mask is not None:
-                raise ValueError("Mask should not be provided when data is IMaskedTensor")
+                raise ValueError("Mask should not be provided when data is MappableTensor")
             return data
-        return MaskedTensor(data, mask, n_channel_dims=n_channel_dims)
+        return PlainTensor(data, mask, n_channel_dims=n_channel_dims)
 
 
 class SamplableMappingFactory(BaseMappingFactory):
@@ -73,7 +73,7 @@ class SamplableMappingFactory(BaseMappingFactory):
     @overload
     def create_volume(
         self,
-        data: IMaskedTensor,
+        data: MappableTensor,
     ) -> SamplableVolumeMapping: ...
 
     @overload
@@ -87,7 +87,7 @@ class SamplableMappingFactory(BaseMappingFactory):
 
     def create_volume(
         self,
-        data: Union[Tensor, IMaskedTensor],
+        data: Union[Tensor, MappableTensor],
         mask: Optional[Tensor] = None,
         *,
         n_channel_dims: int = 1,
@@ -106,7 +106,7 @@ class SamplableMappingFactory(BaseMappingFactory):
     @overload
     def create_deformation(
         self,
-        data: IMaskedTensor,
+        data: MappableTensor,
         *,
         data_format: str = ...,
         data_coordinates: str = ...,
@@ -124,26 +124,20 @@ class SamplableMappingFactory(BaseMappingFactory):
 
     def create_deformation(
         self,
-        data: Union[Tensor, IMaskedTensor],
+        data: Union[Tensor, MappableTensor],
         mask: Optional[Tensor] = None,
         *,
         data_format: str = "displacement",
         data_coordinates: str = "voxel",
     ) -> SamplableDeformationMapping:
         """Create samplable deformation mapping"""
-        data = self._handle_tensor_inputs(data, mask)
-        if data_coordinates == "voxel":
-            factory = create_deformation_from_voxel_data
-        elif data_coordinates == "world":
-            factory = create_deformation_from_world_data
-        else:
-            raise ValueError(f"Unsupported data coordinates: {data_coordinates}")
         return SamplableDeformationMapping(
-            mapping=factory(
-                data=data,
+            mapping=create_deformation(
+                data=self._handle_tensor_inputs(data, mask),
                 interpolation_args=self.interpolation_args,
                 coordinate_system=self.coordinate_system,
                 data_format=data_format,
+                data_coordinates=data_coordinates,
             ),
             coordinate_system=self.coordinate_system,
         )
@@ -173,7 +167,7 @@ class GridMappingFactory(BaseMappingFactory):
     @overload
     def create_volume(
         self,
-        data: IMaskedTensor,
+        data: MappableTensor,
     ) -> IComposableMapping: ...
 
     @overload
@@ -187,7 +181,7 @@ class GridMappingFactory(BaseMappingFactory):
 
     def create_volume(
         self,
-        data: Union[Tensor, IMaskedTensor],
+        data: Union[Tensor, MappableTensor],
         mask: Optional[Tensor] = None,
         *,
         n_channel_dims: int = 1,
@@ -203,7 +197,7 @@ class GridMappingFactory(BaseMappingFactory):
     @overload
     def create_deformation(
         self,
-        data: IMaskedTensor,
+        data: MappableTensor,
         *,
         data_format: str = ...,
         data_coordinates: str = ...,
@@ -221,23 +215,17 @@ class GridMappingFactory(BaseMappingFactory):
 
     def create_deformation(
         self,
-        data: Union[Tensor, IMaskedTensor],
+        data: Union[Tensor, MappableTensor],
         mask: Optional[Tensor] = None,
         *,
         data_format: str = "displacement",
         data_coordinates: str = "voxel",
     ) -> IComposableMapping:
         """Create deformation based on regular grid of samples"""
-        if data_coordinates == "voxel":
-            factory = create_deformation_from_voxel_data
-        elif data_coordinates == "world":
-            factory = create_deformation_from_world_data
-        else:
-            raise ValueError(f"Unsupported data format: {data_format}")
-        data = self._handle_tensor_inputs(data, mask)
-        return factory(
-            data=data,
+        return create_deformation(
+            data=self._handle_tensor_inputs(data, mask),
             interpolation_args=self.interpolation_args,
             coordinate_system=self.coordinate_system,
             data_format=data_format,
+            data_coordinates=data_coordinates,
         )

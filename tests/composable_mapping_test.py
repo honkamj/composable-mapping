@@ -6,7 +6,7 @@ from deformation_inversion_layer.interpolator import LinearInterpolator
 from torch import Tensor, matmul, tensor
 from torch.testing import assert_close
 
-from composable_mapping.affine import (
+from composable_mapping.affine_transformation import (
     AffineTransformation,
     CPUAffineTransformation,
     convert_to_homogenous_coordinates,
@@ -22,8 +22,8 @@ from composable_mapping.grid_mapping import (
     GridVolume,
     InterpolationArgs,
 )
+from composable_mapping.mappable_tensor import MaskedTensor, VoxelCoordinateGrid
 from composable_mapping.mapping_factory import GridComposableFactory
-from composable_mapping.masked_tensor import MaskedTensor, VoxelCoordinateGrid
 
 
 class _CountingInterpolator(LinearInterpolator):
