@@ -4,8 +4,7 @@ from typing import Optional, Union, overload
 
 from torch import Tensor
 
-from .affine_transformation import AffineTransformation
-from .composable_affine import ComposableAffine
+from .affine import Affine
 from .grid_mapping import (
     InterpolationArgs,
     create_deformation,
@@ -14,7 +13,7 @@ from .grid_mapping import (
 )
 from .identity import ComposableIdentity
 from .interface import IComposableMapping
-from .mappable_tensor import MappableTensor, PlainTensor
+from .mappable_tensor import AffineTransformation, MappableTensor, PlainTensor
 from .samplable_mapping import SamplableDeformationMapping, SamplableVolumeMapping
 from .voxel_coordinate_system import (
     IVoxelCoordinateSystemContainer,
@@ -24,7 +23,7 @@ from .voxel_coordinate_system import (
 
 def create_composable_affine(transformation_matrix: Tensor) -> IComposableMapping:
     """Create affine composable mapping"""
-    return ComposableAffine(AffineTransformation(transformation_matrix))
+    return Affine(AffineTransformation(transformation_matrix))
 
 
 def create_composable_identity() -> ComposableIdentity:

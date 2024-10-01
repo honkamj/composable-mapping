@@ -6,11 +6,6 @@ from deformation_inversion_layer.interpolator import LinearInterpolator
 from torch import Tensor, matmul, tensor
 from torch.testing import assert_close
 
-from composable_mapping.affine_transformation import (
-    AffineTransformation,
-    CPUAffineTransformation,
-    convert_to_homogenous_coordinates,
-)
 from composable_mapping.coordinate_system_factory import (
     create_centered_normalized,
     create_top_left_aligned,
@@ -23,6 +18,11 @@ from composable_mapping.grid_mapping import (
     InterpolationArgs,
 )
 from composable_mapping.mappable_tensor import MaskedTensor, VoxelCoordinateGrid
+from composable_mapping.mappable_tensor.affine_transformation import (
+    AffineTransformation,
+    HostAffineTransformation,
+    convert_to_homogenous_coordinates,
+)
 from composable_mapping.mapping_factory import GridComposableFactory
 
 
@@ -74,8 +74,8 @@ class ComposableMappingTests(TestCase):
         expected_inverse_output = matmul(
             matrix_1.inverse(), convert_to_homogenous_coordinates(input_vector)[..., None]
         )[..., :-1, 0]
-        cpu_composable_1 = CPUAffineTransformation(matrix_1)
-        cpu_composable_2 = CPUAffineTransformation(matrix_2)
+        cpu_composable_1 = HostAffineTransformation(matrix_1)
+        cpu_composable_2 = HostAffineTransformation(matrix_2)
         lazy_inverse_1 = cpu_composable_1.invert()
         assert_close(cpu_composable_2.compose(cpu_composable_1)(input_vector), expected_output)
         assert_close(cpu_composable_2(cpu_composable_1(input_vector)), expected_output)
@@ -94,7 +94,7 @@ class ComposableMappingTests(TestCase):
         expected_output = matmul(
             matmul(matrix_2, matrix_1), convert_to_homogenous_coordinates(input_vector)[..., None]
         )[..., :-1, 0]
-        cpu_composable_1 = CPUAffineTransformation(matrix_1)
+        cpu_composable_1 = HostAffineTransformation(matrix_1)
         transformation_2 = AffineTransformation(matrix_2)
         composition = transformation_2.compose(cpu_composable_1)
         assert_close(composition(input_vector), expected_output)
@@ -189,14 +189,14 @@ class ComposableMappingTests(TestCase):
         """Test that correct slices are generated"""
         voxel_grid_1 = VoxelCoordinateGrid(
             (10, 20),
-            affine_transformation=CPUAffineTransformation(
+            affine_transformation=HostAffineTransformation(
                 tensor([[1.0, 0.0, 2.0], [0.0, 1.0, 3.0], [0.0, 0.0, 1.0]])
             ),
         )
         self.assertEqual(voxel_grid_1.as_slice((30, 30)), (..., slice(2, 12, 1), slice(3, 23, 1)))
         voxel_grid_2 = VoxelCoordinateGrid(
             (10, 20),
-            affine_transformation=CPUAffineTransformation(
+            affine_transformation=HostAffineTransformation(
                 tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
             ),
         )

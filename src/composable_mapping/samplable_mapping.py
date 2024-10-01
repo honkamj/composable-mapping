@@ -8,13 +8,8 @@ from matplotlib.pyplot import subplots  # type: ignore
 from numpy import ndarray
 from torch import Tensor
 
-from .affine_transformation import IAffineTransformation
+from .affine import Affine, NotAffineTransformationError, as_affine_transformation
 from .base import BaseTensorLikeWrapper
-from .composable_affine import (
-    ComposableAffine,
-    NotAffineTransformationError,
-    as_affine_transformation,
-)
 from .finite_difference import (
     estimate_spatial_derivatives,
     estimate_spatial_jacobian_matrices,
@@ -23,7 +18,7 @@ from .finite_difference import (
 )
 from .grid_mapping import InterpolationArgs, create_deformation, create_volume
 from .interface import IComposableMapping
-from .mappable_tensor import MappableTensor
+from .mappable_tensor import IAffineTransformation, MappableTensor
 from .tensor_like import ITensorLike
 from .voxel_coordinate_system import (
     IVoxelCoordinateSystemContainer,
@@ -127,7 +122,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
                 f"Invalid option for target coordinate system: {target_coordinate_system}"
             )
         if isinstance(right_mapping, IAffineTransformation):
-            right_composable_mapping: IComposableMapping = ComposableAffine(right_mapping)
+            right_composable_mapping: IComposableMapping = Affine(right_mapping)
             coordinate_system = self.coordinate_system
         elif isinstance(right_mapping, IComposableMapping):
             right_composable_mapping = right_mapping
@@ -192,7 +187,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
                 f"Invalid option for target coordinate system: {target_coordinate_system}"
             )
         if isinstance(left_mapping, IAffineTransformation):
-            left_composable_mapping: IComposableMapping = ComposableAffine(left_mapping)
+            left_composable_mapping: IComposableMapping = Affine(left_mapping)
         elif isinstance(left_mapping, IComposableMapping):
             left_composable_mapping = left_mapping
         elif isinstance(left_mapping, SamplableVolumeMapping) or isinstance(

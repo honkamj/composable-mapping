@@ -1,43 +1,46 @@
 """Composable affine transformation"""
 
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Union
 
 from torch import Tensor
 
-from .affine_transformation import IAffineTransformation
 from .base import BaseComposableMapping
 from .interface import IComposableMapping
-from .mappable_tensor import MappableTensor
+from .mappable_tensor import AffineTransformation, IAffineTransformation, MappableTensor
 from .tensor_like import ITensorLike
 
 
-class ComposableAffine(BaseComposableMapping):
-    """Composable wrapper for affine transformations"""
+class Affine(BaseComposableMapping):
+    """Affine transformation composable with other composable mappings"""
 
-    def __init__(self, affine_transformation: IAffineTransformation) -> None:
-        self.affine_transformation = affine_transformation
+    def __init__(self, transformation: Union[Tensor, IAffineTransformation]) -> None:
+        self.transformation = (
+            AffineTransformation(transformation)
+            if isinstance(transformation, Tensor)
+            else transformation
+        )
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
-        return masked_coordinates.transform(self.affine_transformation)
+        return masked_coordinates.transform(self.transformation)
 
     def _get_children(self) -> Mapping[str, ITensorLike]:
-        return {"affine_transformation": self.affine_transformation}
+        return {"transformation": self.transformation}
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
-    ) -> "ComposableAffine":
-        if not isinstance(children["affine_transformation"], IAffineTransformation):
+    ) -> "Affine":
+        if not isinstance(children["transformation"], IAffineTransformation):
             raise ValueError("Child of a composable affine must be an affine transformation")
-        return ComposableAffine(children["affine_transformation"])
+        return Affine(children["transformation"])
 
     def invert(self, **inversion_parameters) -> IComposableMapping:
-        return ComposableAffine(self.affine_transformation.invert())
+        return Affine(self.transformation.invert())
 
     def __repr__(self) -> str:
-        return f"ComposableAffine(affine_transformation={self.affine_transformation})"
+        return f"Affine(transformation={self.transformation})"
 
 
 class NotAffineTransformationError(Exception):

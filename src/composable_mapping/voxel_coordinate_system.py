@@ -1,26 +1,33 @@
 """Voxel coordinate system"""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Sequence, Union, overload
+from typing import List, Optional, Sequence, Union, cast, overload
 
 from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import eye, get_default_dtype, ones_like, tensor
+from torch import empty, get_default_dtype, tensor
 from torch.nn import Module
 
-from .affine_transformation import (
-    CPUAffineTransformation,
-    compose_affine_matrices,
-    embed_matrix,
-    generate_scale_matrix,
-    generate_translation_matrix,
-)
-from .composable_affine import ComposableAffine
+from .affine import Affine
 from .interface import IComposableMapping
-from .mappable_tensor import MappableTensor, VoxelGrid
+from .mappable_tensor import (
+    HostAffineTransformationType,
+    HostDiagonalAffineTransformation,
+    MappableTensor,
+    VoxelGrid,
+)
 from .tensor_like import ITensorLike
-from .util import ceildiv
+from .util import (
+    broadcast_shapes_in_parts_splitted,
+    broadcast_tensors_in_parts,
+    broadcast_to_in_parts,
+    ceildiv,
+    get_channel_dims,
+    get_channels_shape,
+    get_spatial_shape,
+    move_channels_last,
+)
 
 
 class IVoxelCoordinateSystemContainer(ABC):
@@ -122,50 +129,62 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
     """Represents coordinate system between voxel and world coordinates
 
     Arguments:
+        to_voxel_coordinates: Affine transformation from world to voxel coordinates,
+            should be inverse of from_voxel_coordinates
         from_voxel_coordinates: Affine transformation from voxel to world coordinates,
-            the tensor should be on CPU
+            should be inverse of to_voxel_coordinates
         shape: Shape of the grid in the voxel coordinates
-        device: Device of the coordinate system
     """
 
     def __init__(
         self,
         shape: Sequence[int],
-        to_voxel_coordinates: Optional[Tensor] = None,
-        from_voxel_coordinates: Optional[Tensor] = None,
-        device: Optional[torch_device] = None,
-    ):
+        to_voxel_coordinates: Optional[HostAffineTransformationType] = None,
+        from_voxel_coordinates: Optional[HostAffineTransformationType] = None,
+    ) -> None:
         super().__init__()
-        if from_voxel_coordinates is None and to_voxel_coordinates is None:
-            from_voxel_coordinates = eye(len(shape) + 1, dtype=get_default_dtype(), device="cpu")
-        elif from_voxel_coordinates is not None and to_voxel_coordinates is not None:
-            raise ValueError(
-                "Only one of from_voxel_coordinates and to_voxel_coordinates should be given"
-            )
-        transformation_matrix = (
-            to_voxel_coordinates if from_voxel_coordinates is None else from_voxel_coordinates
-        )
-        assert transformation_matrix is not None
-        if transformation_matrix.ndim not in (2, 3):
-            raise ValueError(
-                "Only affine matrices (with potentially one batch dimension) are supported"
-            )
-        if not transformation_matrix.is_floating_point():
-            raise ValueError("Affine matrices should be floating point")
-        affine_transformation = CPUAffineTransformation(transformation_matrix, device=device)
-        inverse_affine_transformation = affine_transformation.invert()
+        if from_voxel_coordinates is None:
+            if to_voxel_coordinates is None:
+                raise ValueError(
+                    "Either from_voxel_coordinates or to_voxel_coordinates should be given"
+                )
+            from_voxel_coordinates = to_voxel_coordinates.invert()
+        elif to_voxel_coordinates is None:
+            to_voxel_coordinates = from_voxel_coordinates.invert()
         self._from_voxel_coordinates, self._to_voxel_coordinates = (
-            (inverse_affine_transformation, affine_transformation)
-            if from_voxel_coordinates is None
-            else (affine_transformation, inverse_affine_transformation)
+            from_voxel_coordinates,
+            to_voxel_coordinates,
         )
+        if (
+            get_channels_shape(self._from_voxel_coordinates.matrix_shape, n_channel_dims=2)
+            != (
+                len(shape) + 1,
+                len(shape) + 1,
+            )
+            or get_spatial_shape(self._from_voxel_coordinates.matrix_shape, n_channel_dims=2)
+            != tuple()
+        ):
+            raise ValueError("Invalid affine transformation for a coordinate system")
+        if (
+            get_channels_shape(self._to_voxel_coordinates.matrix_shape, n_channel_dims=2)
+            != (
+                len(shape) + 1,
+                len(shape) + 1,
+            )
+            or get_spatial_shape(self._to_voxel_coordinates.matrix_shape, n_channel_dims=2)
+            != tuple()
+        ):
+            raise ValueError("Invalid affine transformation for a coordinate system")
         self._shape = shape
         # Trick to make torch.nn.Module type conversion work automatically, we
         # use the empty indicator tensor to infer the device and dtype of the
         # coordinate system. Note that the actualy type conversion is done only
         # when the coordinate system is used (unless one calls
         # enforce_type_conversion())
-        self.register_buffer("_indicator", transformation_matrix.new_empty(0, device=device))
+        self.register_buffer(
+            "_indicator",
+            empty(0, device=to_voxel_coordinates.device, dtype=to_voxel_coordinates.dtype),
+        )
 
     def cast(
         self,
@@ -174,17 +193,21 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
     ) -> "VoxelCoordinateSystem":
         if dtype is None and device is None:
             return self
+        if dtype is None:
+            dtype = self.dtype
+        if device is None:
+            device = self.device
         return VoxelCoordinateSystem(
-            from_voxel_coordinates=self._from_voxel_coordinates.as_cpu_matrix().to(dtype=dtype),
+            to_voxel_coordinates=self._to_voxel_coordinates.cast(dtype=dtype, device=device),
+            from_voxel_coordinates=self._from_voxel_coordinates.cast(dtype=dtype, device=device),
             shape=self._shape,
-            device=self.device if device is None else device,
         )
 
     def detach(self) -> "VoxelCoordinateSystem":
         return VoxelCoordinateSystem(
-            from_voxel_coordinates=self._from_voxel_coordinates.as_cpu_matrix().detach(),
+            to_voxel_coordinates=self._to_voxel_coordinates.detach(),
+            from_voxel_coordinates=self._from_voxel_coordinates.detach(),
             shape=self._shape,
-            device=self.device,
         )
 
     @property
@@ -212,22 +235,22 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         ):
             self._from_voxel_coordinates = self._from_voxel_coordinates.cast(
                 dtype=self.dtype, device=self.device
-            ).pin_memory_if_target_not_cpu()
+            )
             self._to_voxel_coordinates = self._to_voxel_coordinates.cast(
                 dtype=self.dtype, device=self.device
-            ).pin_memory_if_target_not_cpu()
+            )
 
     @property
     def from_voxel_coordinates(self) -> IComposableMapping:
         """Mapping from voxel to world coordinates"""
         self.enforce_type_conversion()
-        return ComposableAffine(self._from_voxel_coordinates)
+        return Affine(self._from_voxel_coordinates)
 
     @property
     def to_voxel_coordinates(self) -> IComposableMapping:
         """Mapping from world to voxel coordinates"""
         self.enforce_type_conversion()
-        return ComposableAffine(self._to_voxel_coordinates)
+        return Affine(self._to_voxel_coordinates)
 
     @property
     def shape(self) -> Sequence[int]:
@@ -252,7 +275,12 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
 
     @staticmethod
     def _calculate_voxel_size(affine_matrix: Tensor) -> Tensor:
-        return affine_matrix[..., :-1, :-1].square().sum(dim=1).sqrt()
+        channel_dims = get_channel_dims(affine_matrix.ndim, n_channel_dims=2)
+        row_dim = channel_dims[0]
+        col_dim = channel_dims[1]
+        matrix = affine_matrix.narrow(row_dim, 0, affine_matrix.size(row_dim) - 1)
+        matrix = matrix.narrow(col_dim, 0, affine_matrix.size(col_dim) - 1)
+        return matrix.square().sum(dim=row_dim).sqrt()
 
     def grid_spacing_cpu(self) -> Tensor:
         """Get grid spacing as CPU tensor"""
@@ -267,13 +295,13 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
     def __repr__(self) -> str:
         return (
             "VoxelCoordinateSystem("
-            f"from_voxel_coordinates={self.from_voxel_coordinates}, "
-            f"shape={self.to_voxel_coordinates}, "
-            f"device={self.device})"
+            f"shape={self._shape}, "
+            f"to_voxel_coordinates={self._to_voxel_coordinates}, "
+            f"from_voxel_coordinates={self.from_voxel_coordinates})"
         )
 
     def _shift(
-        self, shift: Union[Sequence[Union[float, int]], float, int, Tensor], voxel: bool
+        self, shift: Union[Sequence[Number], Number, Tensor], voxel: bool
     ) -> "VoxelCoordinateSystem":
         """Shift the coordinate system in the voxel coordinates
 
@@ -281,28 +309,22 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
             shift: Shift in the voxel coordinates
         """
         if not isinstance(shift, Tensor):
-            shift = self._from_voxel_coordinates.as_cpu_matrix().new_tensor(shift)
-        if shift.ndim > 2:
-            raise ValueError("Shift should be a vector or a batch of vectors")
-        n_dims = len(self._shape)
-        shift = shift.expand(*shift.shape[:-1], n_dims)
-        shift_matrix = generate_translation_matrix(shift)
+            shift = tensor(shift, dtype=self.dtype, device=torch_device("cpu"))
+        shift = broadcast_to_in_parts(shift, channels_shape=(len(self._shape),), n_channel_dims=1)
+        shift_transformation = HostDiagonalAffineTransformation(
+            translation=shift, device=self.device
+        )
         if voxel:
-            updated_matrix = compose_affine_matrices(
-                shift_matrix, self._from_voxel_coordinates.as_cpu_matrix()
-            )
+            updated_transformation = shift_transformation @ self._from_voxel_coordinates
         else:
-            updated_matrix = compose_affine_matrices(
-                self._from_voxel_coordinates.as_cpu_matrix(), shift_matrix
-            )
+            updated_transformation = self._from_voxel_coordinates @ shift_transformation
         return VoxelCoordinateSystem(
-            from_voxel_coordinates=updated_matrix,
+            from_voxel_coordinates=updated_transformation,
             shape=self._shape,
-            device=self.device,
         )
 
     def shift_voxel(
-        self, shift: Union[Sequence[Union[float, int]], float, int, Tensor]
+        self, shift: Union[Sequence[Number], Number, Tensor]
     ) -> "VoxelCoordinateSystem":
         """Shift the coordinate system in the voxel coordinates
 
@@ -312,7 +334,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         return self._shift(shift, voxel=True)
 
     def shift_world(
-        self, shift: Union[Sequence[Union[float, int]], float, int, Tensor]
+        self, shift: Union[Sequence[Number], Number, Tensor]
     ) -> "VoxelCoordinateSystem":
         """Shift the coordinate system in the world coordinates
 
@@ -325,10 +347,8 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
     def reformat(
         self,
         *,
-        downsampling_factor: Optional[
-            Union[Sequence[Union[float, int]], float, int, Tensor]
-        ] = None,
-        upsampling_factor: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
+        downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
+        upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         shape: Optional[
             Union[
                 Sequence[Union[IReformattingShapeOption, int]],
@@ -339,18 +359,16 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         ] = None,
         reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, float, int]],
+                Sequence[Union[IReformattingReferenceOption, Number]],
                 IReformattingReferenceOption,
-                float,
-                int,
+                Number,
             ]
         ] = None,
         target_reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, float, int]],
+                Sequence[Union[IReformattingReferenceOption, Number]],
                 IReformattingReferenceOption,
-                float,
-                int,
+                Number,
             ]
         ] = None,
     ) -> "VoxelCoordinateSystem": ...
@@ -370,18 +388,16 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         ] = None,
         reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, float, int]],
+                Sequence[Union[IReformattingReferenceOption, Number]],
                 IReformattingReferenceOption,
-                float,
-                int,
+                Number,
             ]
         ] = None,
         target_reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, float, int]],
+                Sequence[Union[IReformattingReferenceOption, Number]],
                 IReformattingReferenceOption,
-                float,
-                int,
+                Number,
             ]
         ] = None,
     ) -> "VoxelCoordinateSystem": ...
@@ -389,11 +405,9 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
     def reformat(
         self,
         *,
-        downsampling_factor: Optional[
-            Union[Sequence[Union[float, int]], float, int, Tensor]
-        ] = None,
-        upsampling_factor: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
-        voxel_size: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
+        downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
+        upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
+        voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         shape: Optional[
             Union[
                 Sequence[Union[IReformattingShapeOption, int]],
@@ -404,18 +418,16 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         ] = None,
         reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, float, int]],
+                Sequence[Union[IReformattingReferenceOption, Number]],
                 IReformattingReferenceOption,
-                float,
-                int,
+                Number,
             ]
         ] = None,
         target_reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, float, int]],
+                Sequence[Union[IReformattingReferenceOption, Number]],
                 IReformattingReferenceOption,
-                float,
-                int,
+                Number,
             ]
         ] = None,
     ) -> "VoxelCoordinateSystem":
@@ -467,79 +479,82 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
         target_reference_in_voxel_coordinates = original_voxel_size.new_tensor(
             self._get_reference_in_voxel_coordinates(target_reference, target_shape)
         )
-        source_translation_matrix = generate_translation_matrix(
-            source_reference_in_voxel_coordinates
+        source_translation = HostDiagonalAffineTransformation(
+            translation=source_reference_in_voxel_coordinates, device=self.device
         )
-        target_translation_matrix = generate_translation_matrix(
-            -target_reference_in_voxel_coordinates
+        target_translation = HostDiagonalAffineTransformation(
+            translation=-target_reference_in_voxel_coordinates, device=self.device
         )
-        n_dims = original_voxel_size.size(-1)
-        downsampling_matrix = embed_matrix(
-            generate_scale_matrix(downsampling_factor), (n_dims + 1, n_dims + 1)
+        downsampling_translation = HostDiagonalAffineTransformation(
+            downsampling_factor, device=self.device
         )
-        reformatted_transformation = compose_affine_matrices(
-            self._from_voxel_coordinates.as_cpu_matrix(),
-            source_translation_matrix,
-            downsampling_matrix,
-            target_translation_matrix,
+        reformatted_transformation = (
+            self._from_voxel_coordinates
+            @ source_translation
+            @ downsampling_translation
+            @ target_translation
         )
 
         return VoxelCoordinateSystem(
             from_voxel_coordinates=reformatted_transformation,
             shape=target_shape,
-            device=self.device,
         )
 
     def _as_downsampling_factor(
         self,
         original_voxel_size: Tensor,
-        downsampling_factor: Optional[
-            Union[Sequence[Union[float, int]], float, int, Tensor]
-        ] = None,
-        upsampling_factor: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
-        voxel_size: Optional[Union[Sequence[Union[int, float]], float, int, Tensor]] = None,
+        downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
+        upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
+        voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
     ) -> Tensor:
         if voxel_size is not None:
             if not isinstance(voxel_size, Tensor):
                 voxel_size = original_voxel_size.new_tensor(voxel_size)
-            if not voxel_size.is_floating_point() or voxel_size.device != torch_device("cpu"):
-                raise ValueError("Voxel size should be a CPU floating point tensor")
+            voxel_size, original_voxel_size = broadcast_tensors_in_parts(
+                voxel_size, original_voxel_size
+            )
+            if get_spatial_shape(voxel_size.shape, n_channel_dims=1) != tuple():
+                raise ValueError(
+                    "Downsampling factors or upsampling factors should not have spatial dimensions"
+                )
             return voxel_size / original_voxel_size
         if downsampling_factor is not None:
             if not isinstance(downsampling_factor, Tensor):
                 downsampling_factor = original_voxel_size.new_tensor(downsampling_factor)
-            if (
-                not downsampling_factor.is_floating_point()
-                or downsampling_factor.device != torch_device("cpu")
-            ):
-                raise ValueError("Downsampling factor should be a CPU floating point tensor")
             processed_downsampling_factor = downsampling_factor
         else:
             processed_downsampling_factor = original_voxel_size.new_ones(1)
         if upsampling_factor is not None:
             if not isinstance(upsampling_factor, Tensor):
                 upsampling_factor = original_voxel_size.new_tensor(upsampling_factor)
-            if (
-                not upsampling_factor.is_floating_point()
-                or upsampling_factor.device != torch_device("cpu")
-            ):
-                raise ValueError("Upsampling factor should be a CPU floating point tensor")
             processed_upsampling_factor = 1 / upsampling_factor
         else:
             processed_upsampling_factor = original_voxel_size.new_ones(1)
-        return (
-            processed_downsampling_factor
-            * processed_upsampling_factor
-            * ones_like(original_voxel_size)
+        _batch_shape, channels_shape, spatial_shape = broadcast_shapes_in_parts_splitted(
+            processed_downsampling_factor.shape,
+            processed_upsampling_factor.shape,
+            original_voxel_size.shape,
         )
+        if spatial_shape != tuple():
+            raise ValueError(
+                "Downsampling factors or upsampling factors should not have spatial dimensions"
+            )
+        processed_downsampling_factor = broadcast_to_in_parts(
+            processed_downsampling_factor,
+            channels_shape=channels_shape,
+        )
+        processed_upsampling_factor = broadcast_to_in_parts(
+            processed_upsampling_factor,
+            channels_shape=channels_shape,
+        )
+        return processed_downsampling_factor * processed_upsampling_factor
 
     def _get_reference_in_voxel_coordinates(
         self,
         reference: Union[
-            Sequence[Union[IReformattingReferenceOption, float, int]],
+            Sequence[Union[IReformattingReferenceOption, Number]],
             IReformattingReferenceOption,
-            float,
-            int,
+            Number,
         ],
         shape: Sequence[int],
     ) -> List[float]:
@@ -566,9 +581,19 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
             if shape.is_floating_point() or shape.is_complex():
                 raise ValueError("Shape tensor should be an integer tensor")
             shape = shape.expand((len(self._shape),))
-            shape = shape.tolist()
-        if isinstance(shape, (int, IReformattingShapeOption)):
+            return shape.tolist()
+        if isinstance(shape, int):
+            return [shape] * len(self._shape)
+        if isinstance(shape, IReformattingShapeOption):
             shape = [shape] * len(self._shape)
+        else:
+            if len(shape) != len(self._shape):
+                raise ValueError("Invalid shape for reformatting")
+            if all(isinstance(dim_shape, int) for dim_shape in shape):
+                return cast(Sequence[int], shape)
+        downsampling_factor = move_channels_last(downsampling_factor).view(
+            -1, get_channels_shape(downsampling_factor.shape, n_channel_dims=1)[0]
+        )
         if downsampling_factor.ndim == 1:
             downsampling_factor = downsampling_factor.unsqueeze(0)
         output_shape: Optional[Sequence[int]] = None
@@ -607,7 +632,7 @@ class VoxelCoordinateSystem(Module, IVoxelCoordinateSystemContainer, ITensorLike
 
 def create_centered_normalized(
     shape: Sequence[int],
-    voxel_size: Union[Sequence[Union[float, int]], float, int, Tensor] = 1.0,
+    voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
     align_corners: bool = False,
     device: Optional[torch_device] = None,
 ) -> VoxelCoordinateSystem:
@@ -629,7 +654,7 @@ def create_centered_normalized(
 
 def create_centered(
     shape: Sequence[int],
-    voxel_size: Union[Sequence[Union[float, int]], float, int, Tensor] = 1.0,
+    voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
     device: Optional[torch_device] = None,
 ) -> VoxelCoordinateSystem:
     """Create centered coordinate system"""
@@ -640,24 +665,24 @@ def create_centered(
 
 def create_voxel(
     shape: Sequence[int],
-    voxel_size: Union[Sequence[Union[float, int]], float, int, Tensor] = 1.0,
+    voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
     device: Optional[torch_device] = None,
 ) -> VoxelCoordinateSystem:
     """Create voxel coordinate system"""
     n_dims = len(shape)
-    if isinstance(voxel_size, (float, int)):
-        voxel_size = [voxel_size] * n_dims
-    if not isinstance(voxel_size, Tensor):
-        voxel_size = tensor(voxel_size, dtype=get_default_dtype(), device="cpu")
-    if voxel_size.size(-1) != n_dims:
-        raise ValueError("Invalid voxel size for the coordinate system")
-    if not voxel_size.is_floating_point():
-        raise ValueError("Voxel size should be a floating point tensor")
-    if voxel_size.ndim > 2:
-        raise ValueError("Voxel size should be a vector or a batch of vectors")
-    initial_affine = embed_matrix(generate_scale_matrix(voxel_size), (n_dims + 1, n_dims + 1))
+    if voxel_size is not None:
+        if isinstance(voxel_size, (float, int)):
+            voxel_size = [voxel_size] * n_dims
+        if not isinstance(voxel_size, Tensor):
+            voxel_size = tensor(voxel_size, dtype=get_default_dtype(), device="cpu")
+        if get_channels_shape(voxel_size.shape, n_channel_dims=1)[0] != n_dims:
+            raise ValueError("Invalid voxel size for the coordinate system")
+        if not voxel_size.is_floating_point():
+            raise ValueError("Voxel size should be a floating point tensor")
+    initial_affine = HostDiagonalAffineTransformation(
+        diagonal=voxel_size, matrix_shape=(n_dims + 1, n_dims + 1), device=device
+    )
     return VoxelCoordinateSystem(
         from_voxel_coordinates=initial_affine,
         shape=shape,
-        device=device,
     )

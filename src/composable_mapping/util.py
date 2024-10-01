@@ -1,7 +1,7 @@
 """Utility functions"""
 
 from itertools import repeat
-from typing import Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
+from typing import Any, Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
 
 from torch import Tensor, broadcast_shapes
 
@@ -130,6 +130,43 @@ def broadcast_shapes_in_parts_splitted(
     else:
         broadcasted_spatial_shape = None
     return broadcasted_batch_shape, broadcasted_channel_shape, broadcasted_spatial_shape
+
+
+def broadcast_optional_shapes_in_parts_splitted(
+    *shapes: Optional[Sequence[int]],
+    n_channel_dims: Union[int, Iterable[int]] = 1,
+    broadcast_batch: bool = True,
+    broadcast_channels: bool = True,
+    broadcast_spatial: bool = True,
+) -> Tuple[Optional[Tuple[int, ...]], Optional[Tuple[int, ...]], Optional[Tuple[int, ...]]]:
+    """Broadcasts batch dimension, channel dimensions and spatial dimensions separately
+
+    Args:
+        shapes: Shapes to broadcast
+        n_channel_dims: Number of channel dims for each shape, if
+            integer is given, same number will be used for all shapes. Channel dimensions
+            are assumed to come after the batch dimension.
+    """
+    channel_dims_iterable = _n_channel_dims_to_iterable(n_channel_dims)
+    not_optional_shapes_and_n_channel_dims = [
+        (shape, individual_n_channel_dims)
+        for shape, individual_n_channel_dims in zip(shapes, channel_dims_iterable)
+        if shape is not None
+    ]
+    not_optional_shapes = [shape for shape, _ in not_optional_shapes_and_n_channel_dims]
+    n_channel_dims = [
+        individual_n_channel_dims
+        for _, individual_n_channel_dims in not_optional_shapes_and_n_channel_dims
+    ]
+    if not shapes:
+        return None, None, None
+    return broadcast_shapes_in_parts_splitted(
+        *not_optional_shapes,
+        n_channel_dims=n_channel_dims,
+        broadcast_batch=broadcast_batch,
+        broadcast_channels=broadcast_channels,
+        broadcast_spatial=broadcast_spatial,
+    )
 
 
 def broadcast_shapes_in_parts(
@@ -337,3 +374,14 @@ def combine_optional_masks(
             else:
                 combined_mask = combined_mask & mask
     return combined_mask
+
+
+class slice_dim:
+    """Apply slicing operation to a specific dimension"""
+
+    def __init__(self, item: Tensor, dim: int) -> None:
+        self.item = item
+        self.dim = dim if dim >= 0 else dim + item.ndim
+
+    def __getitem__(self, item: Any) -> Tensor:
+        return self.item[(slice(None),) * self.dim + (item,)]

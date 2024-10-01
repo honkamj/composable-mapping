@@ -96,6 +96,14 @@ class BaseTensorLikeWrapper(ITensorLike):
             return next(iter(self._get_children().values())).device
         return next(iter(tensors.values())).device
 
+    def to(
+        self: BaseTensorLikeWrapperT,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> BaseTensorLikeWrapperT:
+        """Alias for cast method following the torch convention"""
+        return self.cast(dtype=dtype, device=device)
+
     def cast(
         self: BaseTensorLikeWrapperT,
         dtype: Optional[torch_dtype] = None,
