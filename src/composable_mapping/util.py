@@ -1,7 +1,7 @@
 """Utility functions"""
 
 from itertools import repeat
-from typing import Any, Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
+from typing import Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
 
 from torch import Tensor, broadcast_shapes
 
@@ -239,11 +239,10 @@ def broadcast_to_in_parts(
     )
     if batch_shape is not None:
         if len(batch_shape) < len(initial_batch_shape):
-            initial_batch_shape = initial_batch_shape[-len(batch_shape) :]
-        else:
-            initial_batch_shape = (1,) * (
-                len(batch_shape) - len(initial_batch_shape)
-            ) + initial_batch_shape
+            raise RuntimeError("Cannot broadcast to smaller batch shape")
+        initial_batch_shape = (1,) * (
+            len(batch_shape) - len(initial_batch_shape)
+        ) + initial_batch_shape
         tensor = tensor.reshape(
             initial_batch_shape + initial_channels_shape + initial_spatial_shape
         )
@@ -251,11 +250,10 @@ def broadcast_to_in_parts(
         batch_shape = initial_batch_shape
     if channels_shape is not None:
         if len(channels_shape) < len(initial_channels_shape):
-            initial_channels_shape = initial_channels_shape[-len(channels_shape) :]
-        else:
-            initial_channels_shape = (1,) * (
-                len(channels_shape) - len(initial_channels_shape)
-            ) + initial_channels_shape
+            raise RuntimeError("Cannot broadcast to smaller channel shape")
+        initial_channels_shape = (1,) * (
+            len(channels_shape) - len(initial_channels_shape)
+        ) + initial_channels_shape
         tensor = tensor.reshape(
             initial_batch_shape + initial_channels_shape + initial_spatial_shape
         )
@@ -263,11 +261,10 @@ def broadcast_to_in_parts(
         channels_shape = initial_channels_shape
     if spatial_shape is not None:
         if len(spatial_shape) < len(initial_spatial_shape):
-            initial_spatial_shape = initial_spatial_shape[-len(spatial_shape) :]
-        else:
-            initial_spatial_shape = (1,) * (
-                len(spatial_shape) - len(initial_spatial_shape)
-            ) + initial_spatial_shape
+            raise RuntimeError("Cannot broadcast to smaller spatial shape")
+        initial_spatial_shape = (1,) * (
+            len(spatial_shape) - len(initial_spatial_shape)
+        ) + initial_spatial_shape
         tensor = tensor.reshape(
             initial_batch_shape + initial_channels_shape + initial_spatial_shape
         )
@@ -374,14 +371,3 @@ def combine_optional_masks(
             else:
                 combined_mask = combined_mask & mask
     return combined_mask
-
-
-class slice_dim:
-    """Apply slicing operation to a specific dimension"""
-
-    def __init__(self, item: Tensor, dim: int) -> None:
-        self.item = item
-        self.dim = dim if dim >= 0 else dim + item.ndim
-
-    def __getitem__(self, item: Any) -> Tensor:
-        return self.item[(slice(None),) * self.dim + (item,)]

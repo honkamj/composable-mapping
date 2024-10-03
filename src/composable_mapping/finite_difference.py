@@ -7,9 +7,9 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import tensor
 
+from .coordinate_system import CoordinateSystem, ReferenceOption
 from .mappable_tensor import MappableTensor, PlainTensor, stack_channels
 from .util import num_spatial_dims
-from .voxel_coordinate_system import ReferenceOption, VoxelCoordinateSystem
 
 _OTHER_DIMS_TO_SHIFT = {
     "crop": 1,
@@ -36,11 +36,11 @@ _CENTRAL_TO_SHAPE_DIFFERENCE = {
 
 
 def update_coordinate_system_for_derivatives(
-    coordinate_system: VoxelCoordinateSystem,
+    coordinate_system: CoordinateSystem,
     spatial_dim: int,
     other_dims: Optional[str],
     central: bool,
-) -> VoxelCoordinateSystem:
+) -> CoordinateSystem:
     """Update coordinate system to match the shape of the derivatives"""
     shifts = tuple(
         _OTHER_DIMS_TO_SHIFT[other_dims] if dim != spatial_dim else _CENTRAL_TO_SHIFT[central]
@@ -61,9 +61,9 @@ def update_coordinate_system_for_derivatives(
 
 
 def update_coordinate_system_for_jacobian_matrices(
-    coordinate_system: VoxelCoordinateSystem,
+    coordinate_system: CoordinateSystem,
     central: bool,
-) -> VoxelCoordinateSystem:
+) -> CoordinateSystem:
     """Update coordinate system to match the shape of the Jacobian matrices"""
     target_shape = tuple(
         (dim_size + _CENTRAL_TO_SHAPE_DIFFERENCE[central]) for dim_size in coordinate_system.shape
@@ -130,9 +130,9 @@ def estimate_spatial_derivatives(
     if spacing is None:
         spacing = 1.0
     if isinstance(spacing, float) or isinstance(spacing, int):
-        spacing = tensor(spacing, dtype=data.dtype)
-        if data.device != torch_device("cpu"):
-            spacing = spacing.pin_memory().to(data.device, non_blocking=True)
+        spacing = tensor(spacing, dtype=data.dtype).to(
+            data.device, non_blocking=data.device != torch_device("cpu")
+        )
     spacing = spacing.expand((batch_size,))[(...,) + (None,) * (data.ndim - 1)]
     n_spatial_dims = num_spatial_dims(data.ndim, n_channel_dims)
     if other_dims == "crop":

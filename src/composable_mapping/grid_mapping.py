@@ -11,13 +11,13 @@ from deformation_inversion_layer import (
 from torch import Tensor
 
 from .base import BaseComposableMapping
+from .coordinate_system import CoordinateSystem
 from .dense_deformation import compute_fov_mask_at_voxel_coordinates
 from .interface import IComposableMapping, IInterpolator
 from .interpolator import LinearInterpolator
 from .mappable_tensor import MappableTensor, PlainTensor
 from .tensor_like import ITensorLike
 from .util import combine_optional_masks
-from .voxel_coordinate_system import VoxelCoordinateSystem
 
 
 class InterpolationArgs:
@@ -260,7 +260,7 @@ class _GridDeformationInverse(GridVolume):
 
 def create_volume(
     data: MappableTensor,
-    coordinate_system: VoxelCoordinateSystem,
+    coordinate_system: CoordinateSystem,
     interpolation_args: Optional[InterpolationArgs] = None,
 ) -> IComposableMapping:
     """Create volume based on grid samples"""
@@ -273,7 +273,7 @@ def create_volume(
 
 def create_deformation(
     data: MappableTensor,
-    coordinate_system: VoxelCoordinateSystem,
+    coordinate_system: CoordinateSystem,
     interpolation_args: Optional[InterpolationArgs] = None,
     *,
     data_format: str = "displacement",

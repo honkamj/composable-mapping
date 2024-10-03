@@ -55,9 +55,18 @@ class MappableTensor(BaseTensorLikeWrapper):
         self._displacements = displacements
         self._mask = mask
         self._n_channel_dims = n_channel_dims
-        self._affine_transformation_on_displacements: Optional[IAffineTransformation] = (
-            affine_transformation_on_displacements
-        )
+        if displacements is None and affine_transformation_on_displacements is not None:
+            raise ValueError("Affine transformation on displacements requires displacements")
+        if displacements is not None and affine_transformation_on_displacements is None:
+            self._affine_transformation_on_displacements: Optional[IAffineTransformation] = (
+                IdentityAffineTransformation(
+                    get_channels_shape(displacements.shape, n_channel_dims=n_channel_dims)[-1],
+                    dtype=displacements.dtype,
+                    device=displacements.device,
+                )
+            )
+        else:
+            self._affine_transformation_on_displacements = affine_transformation_on_displacements
         self._affine_transformation_on_voxel_grid: Optional[IAffineTransformation] = (
             affine_transformation_on_voxel_grid
         )
@@ -131,7 +140,7 @@ class MappableTensor(BaseTensorLikeWrapper):
             values_shape = self._displacements.shape
             if self._affine_transformation_on_displacements is not None:
                 values_shape = self._affine_transformation_on_displacements.get_output_shape(
-                    values_shape
+                    values_shape, n_channel_dims=self._n_channel_dims
                 )
         if voxel_grid_shape is not None and values_shape is not None:
             return broadcast_shapes_in_parts_to_single_shape(
@@ -197,7 +206,9 @@ class MappableTensor(BaseTensorLikeWrapper):
         displacements = self._displacements
         if displacements is not None:
             if self._affine_transformation_on_displacements is not None:
-                displacements = self._affine_transformation_on_displacements(displacements)
+                displacements = self._affine_transformation_on_displacements(
+                    displacements, n_channel_dims=self._n_channel_dims
+                )
             displacements = broadcast_to_in_parts(
                 displacements,
                 batch_shape=batch_shape,
@@ -342,7 +353,9 @@ class MappableTensor(BaseTensorLikeWrapper):
                 transformed_self_displacements = (
                     self_displacements
                     if self._affine_transformation_on_displacements is None
-                    else self._affine_transformation_on_displacements(self_displacements)
+                    else self._affine_transformation_on_displacements(
+                        self_displacements, n_channel_dims=self.n_channel_dims
+                    )
                 )
                 transformed_other_displacements = (
                     other_displacements
@@ -399,13 +412,13 @@ class MappableTensor(BaseTensorLikeWrapper):
         """Negate the mappable tensor"""
         return MappableTensor(
             spatial_shape=self._spatial_shape,
-            displacements=(None if self._displacements is None else -self._displacements),
+            displacements=self._displacements,
             mask=None if self._mask is None else self._mask,
             n_channel_dims=self._n_channel_dims,
             affine_transformation_on_displacements=(
                 None
                 if self._affine_transformation_on_displacements is None
-                else self._affine_transformation_on_displacements
+                else -self._affine_transformation_on_displacements
             ),
             affine_transformation_on_voxel_grid=(
                 None
@@ -428,7 +441,7 @@ class MappableTensor(BaseTensorLikeWrapper):
         """Reduce the grid to slice on target shape, if possible"""
         if self._displacements is not None or self._affine_transformation_on_voxel_grid is None:
             return None
-        transformation_matrix = self._affine_transformation_on_voxel_grid.as_cpu_matrix()
+        transformation_matrix = self._affine_transformation_on_voxel_grid.as_host_matrix()
         if transformation_matrix is None:
             return None
         transformation_matrix = transformation_matrix.squeeze(

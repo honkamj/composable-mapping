@@ -10,6 +10,7 @@ from torch import Tensor
 
 from .affine import Affine, NotAffineTransformationError, as_affine_transformation
 from .base import BaseTensorLikeWrapper
+from .coordinate_system import CoordinateSystem, ICoordinateSystemContainer
 from .finite_difference import (
     estimate_spatial_derivatives,
     estimate_spatial_jacobian_matrices,
@@ -20,15 +21,11 @@ from .grid_mapping import InterpolationArgs, create_deformation, create_volume
 from .interface import IComposableMapping
 from .mappable_tensor import IAffineTransformation, MappableTensor
 from .tensor_like import ITensorLike
-from .voxel_coordinate_system import (
-    IVoxelCoordinateSystemContainer,
-    VoxelCoordinateSystem,
-)
 
 BaseSamplableMappingT = TypeVar("BaseSamplableMappingT", bound="BaseSamplableMapping")
 
 
-class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContainer):
+class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
     """Base implementation for composable mappings bundled together with a coordinate system
 
     Arguments:
@@ -39,13 +36,13 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
     def __init__(
         self,
         mapping: IComposableMapping,
-        coordinate_system: VoxelCoordinateSystem,
+        coordinate_system: CoordinateSystem,
     ):
         self.mapping = mapping
         self._coordinate_system = coordinate_system
 
     @property
-    def coordinate_system(self) -> VoxelCoordinateSystem:
+    def coordinate_system(self) -> CoordinateSystem:
         return self._coordinate_system
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
@@ -59,11 +56,11 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
         self,
         target: Union[
             MappableTensor,
-            IVoxelCoordinateSystemContainer,
+            ICoordinateSystemContainer,
         ],
     ) -> MappableTensor:
         """Sample the mapping wtih respect to the target coordinates"""
-        if isinstance(target, IVoxelCoordinateSystemContainer):
+        if isinstance(target, ICoordinateSystemContainer):
             target = target.coordinate_system.grid()
         return self.mapping(target)
 
@@ -83,7 +80,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
     def _simplified_modified_copy(
         self: BaseSamplableMappingT,
         mapping: IComposableMapping,
-        coordinate_system: VoxelCoordinateSystem,
+        coordinate_system: CoordinateSystem,
     ) -> BaseSamplableMappingT:
         return self.__class__(mapping=mapping, coordinate_system=coordinate_system)
 
@@ -93,7 +90,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
         children: Mapping[str, ITensorLike],
     ) -> BaseSamplableMappingT:
         if not isinstance(children["mapping"], IComposableMapping) or not isinstance(
-            children["coordinate_system"], VoxelCoordinateSystem
+            children["coordinate_system"], CoordinateSystem
         ):
             raise ValueError("Invalid children for samplable mapping")
         return self.__class__(
@@ -218,7 +215,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
 
     def estimate_spatial_derivatives_to(
         self,
-        target: IVoxelCoordinateSystemContainer,
+        target: ICoordinateSystemContainer,
         spatial_dim: int,
         *,
         other_dims: Optional[str] = None,
@@ -287,7 +284,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, IVoxelCoordinateSystemContaine
 
     def estimate_spatial_jacobian_matrices_to(
         self,
-        target: IVoxelCoordinateSystemContainer,
+        target: ICoordinateSystemContainer,
         *,
         central: bool = False,
         interpolation_args: Optional[InterpolationArgs] = None,
@@ -345,7 +342,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 
     def sample_to_as_displacement_field(
         self,
-        target: IVoxelCoordinateSystemContainer,
+        target: ICoordinateSystemContainer,
         *,
         data_coordinates: str = "voxel",
     ) -> MappableTensor:
@@ -365,7 +362,7 @@ class SamplableDeformationMapping(BaseSamplableMapping):
 
     def resample_to(
         self,
-        target: IVoxelCoordinateSystemContainer,
+        target: ICoordinateSystemContainer,
         interpolation_args: Optional[InterpolationArgs] = None,
     ) -> "SamplableDeformationMapping":
         """Resample the mapping to target"""
@@ -500,7 +497,7 @@ class SamplableVolumeMapping(BaseSamplableMapping):
 
     def resample_to(
         self,
-        target: IVoxelCoordinateSystemContainer,
+        target: ICoordinateSystemContainer,
         interpolation_args: Optional[InterpolationArgs] = None,
     ) -> "SamplableVolumeMapping":
         """Resample the mapping"""

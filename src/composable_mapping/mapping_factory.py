@@ -5,6 +5,7 @@ from typing import Optional, Union, overload
 from torch import Tensor
 
 from .affine import Affine
+from .coordinate_system import CoordinateSystem, ICoordinateSystemContainer
 from .grid_mapping import (
     InterpolationArgs,
     create_deformation,
@@ -15,10 +16,6 @@ from .identity import ComposableIdentity
 from .interface import IComposableMapping
 from .mappable_tensor import AffineTransformation, MappableTensor, PlainTensor
 from .samplable_mapping import SamplableDeformationMapping, SamplableVolumeMapping
-from .voxel_coordinate_system import (
-    IVoxelCoordinateSystemContainer,
-    VoxelCoordinateSystem,
-)
 
 
 def create_composable_affine(transformation_matrix: Tensor) -> IComposableMapping:
@@ -31,23 +28,23 @@ def create_composable_identity() -> ComposableIdentity:
     return ComposableIdentity()
 
 
-class BaseMappingFactory(IVoxelCoordinateSystemContainer):
+class BaseMappingFactory(ICoordinateSystemContainer):
     """Base class for composable mapping factories
 
-    Implements IVoxelCoordinateSystemFactory interface for it to be usable as an
+    Implements ICoordinateSystemFactory interface for it to be usable as an
     argument for resampling operations.
     """
 
     def __init__(
         self,
-        coordinate_system: VoxelCoordinateSystem,
+        coordinate_system: CoordinateSystem,
         interpolation_args: Optional[InterpolationArgs] = None,
     ) -> None:
         self._coordinate_system = coordinate_system
         self.interpolation_args = get_interpolation_args(interpolation_args)
 
     @property
-    def coordinate_system(self) -> VoxelCoordinateSystem:
+    def coordinate_system(self) -> CoordinateSystem:
         return self._coordinate_system
 
     def __repr__(self) -> str:
