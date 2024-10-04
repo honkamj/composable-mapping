@@ -1,23 +1,51 @@
 """Composable affine transformation"""
 
-from typing import Mapping, Optional, Union
+from typing import Mapping, Optional, Sequence
 
 from torch import Tensor
+from torch import device as torch_device
+from torch import dtype as torch_dtype
 
 from .base import BaseComposableMapping
 from .interface import IComposableMapping
-from .mappable_tensor import AffineTransformation, IAffineTransformation, MappableTensor
+from .mappable_tensor import (
+    AffineTransformation,
+    DiagonalAffineTransformation,
+    IAffineTransformation,
+    MappableTensor,
+)
 from .tensor_like import ITensorLike
 
 
 class Affine(BaseComposableMapping):
-    """Affine transformation composable with other composable mappings"""
+    """Affine transformation"""
 
-    def __init__(self, transformation: Union[Tensor, IAffineTransformation]) -> None:
-        self.transformation = (
-            AffineTransformation(transformation)
-            if isinstance(transformation, Tensor)
-            else transformation
+    def __init__(self, transformation: IAffineTransformation) -> None:
+        self.transformation = transformation
+
+    @classmethod
+    def from_matrix(cls, matrix: Tensor) -> "Affine":
+        """Create affine mapping from matrix"""
+        return cls(AffineTransformation(matrix))
+
+    @classmethod
+    def from_diagonal_and_translation(
+        cls,
+        diagonal: Optional[Tensor] = None,
+        translation: Optional[Tensor] = None,
+        matrix_shape: Optional[Sequence[int]] = None,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> "Affine":
+        """Create affine mapping from diagonal and translation"""
+        return cls(
+            DiagonalAffineTransformation(
+                diagonal=diagonal,
+                translation=translation,
+                matrix_shape=matrix_shape,
+                dtype=dtype,
+                device=device,
+            )
         )
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:

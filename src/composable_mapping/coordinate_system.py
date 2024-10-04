@@ -1,7 +1,7 @@
 """Voxel coordinate system"""
 
 from abc import ABC, abstractmethod
-from typing import List, Mapping, Optional, Sequence, Union, cast, overload
+from typing import List, Mapping, Optional, Sequence, Tuple, Union, cast, overload
 
 from torch import Tensor
 from torch import device as torch_device
@@ -144,7 +144,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         from_voxel_coordinates: Optional[IHostAffineTransformation] = None,
     ) -> None:
         super().__init__()
-        self._shape = shape
+        self._shape = tuple(shape)
         if from_voxel_coordinates is None:
             if to_voxel_coordinates is None:
                 raise ValueError(
@@ -351,7 +351,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         return Affine(self._to_voxel_coordinates)
 
     @property
-    def shape(self) -> Sequence[int]:
+    def shape(self) -> Tuple[int, ...]:
         """Shape of the coordinate system grid"""
         return self._shape
 
@@ -606,6 +606,8 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         if voxel_size is not None:
             if not isinstance(voxel_size, Tensor):
                 voxel_size = original_voxel_size.new_tensor(voxel_size)
+            if voxel_size.ndim == 0:
+                voxel_size = voxel_size.unsqueeze(0)
             voxel_size, original_voxel_size = broadcast_tensors_in_parts(
                 voxel_size, original_voxel_size
             )
@@ -617,12 +619,16 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         if downsampling_factor is not None:
             if not isinstance(downsampling_factor, Tensor):
                 downsampling_factor = original_voxel_size.new_tensor(downsampling_factor)
+            if downsampling_factor.ndim == 0:
+                downsampling_factor = downsampling_factor.unsqueeze(0)
             processed_downsampling_factor = downsampling_factor
         else:
             processed_downsampling_factor = original_voxel_size.new_ones(1)
         if upsampling_factor is not None:
             if not isinstance(upsampling_factor, Tensor):
                 upsampling_factor = original_voxel_size.new_tensor(upsampling_factor)
+            if upsampling_factor.ndim == 0:
+                upsampling_factor = upsampling_factor.unsqueeze(0)
             processed_upsampling_factor = 1 / upsampling_factor
         else:
             processed_upsampling_factor = original_voxel_size.new_ones(1)

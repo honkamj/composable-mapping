@@ -1,6 +1,7 @@
 """Interfaces for composable mapping"""
 
 from abc import ABC, abstractmethod
+from typing import Optional, Sequence
 
 from torch import Tensor
 
@@ -32,16 +33,29 @@ class IInterpolator(ABC):
     """Interpolates values on regular grid in voxel coordinates"""
 
     @abstractmethod
-    def __call__(self, volume: Tensor, coordinates: Tensor) -> Tensor:
+    def __call__(self, volume: MappableTensor, coordinates: MappableTensor) -> MappableTensor:
         """Interpolate
 
         Args:
-            volume: Volume to be interpolated with shape
-                (batch_size, *channel_dims, dim_1, ..., dim_{n_dims}). Dimension
-                order is the same as the coordinate order of the coordinates
-            coordinates: Interpolation coordinates with shape
-                (batch_size, n_dims, *target_shape)
+            volume: Volume to be interpolated
+            coordinates: Interpolation coordinates
 
         Returns:
-            Interpolated volume with shape (batch_size, *channel_dims, *target_shape)
+            Interpolated volume
         """
+
+    @abstractmethod
+    def interpolate_values(
+        self, volume: Tensor, voxel_coordinates: Tensor, n_channel_dims: int = 1
+    ) -> Tensor:
+        """Interpolate values"""
+
+    @abstractmethod
+    def interpolate_mask(
+        self,
+        mask: Optional[Tensor],
+        voxel_coordinates: Tensor,
+        spatial_shape: Optional[Sequence[int]] = None,
+        n_channel_dims: int = 1,
+    ) -> Optional[Tensor]:
+        """Interpolate mask"""

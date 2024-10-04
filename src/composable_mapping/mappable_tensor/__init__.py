@@ -4,6 +4,8 @@ from typing import List
 
 from .affine_transformation import (
     AffineTransformation,
+    DiagonalAffineMatrixDefinition,
+    DiagonalAffineTransformation,
     HostAffineTransformation,
     HostDiagonalAffineTransformation,
     IAffineTransformation,
