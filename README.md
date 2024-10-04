@@ -13,7 +13,7 @@ Install using pip by running the command
 ## Requirements
 
 - `Python 3.8+`
-- `PyTorch 1.10+`
+- `PyTorch 2.0+`
 
 ## Documentation
 
@@ -25,7 +25,7 @@ For SITReg implementation, see repository [SITReg](https://github.com/honkamj/SI
 
 ## Publication
 
-If you use composable mapping, or other parts of the repository, please cite (see [bibtex](citations.bib)):
+If you use composable mapping, please cite (see [bibtex](citations.bib)):
 
 - **SITReg: Multi-resolution architecture for symmetric, inverse consistent, and topology preserving image registration using deformation inversion layers**  
 [Joel Honkamaa](https://github.com/honkamj), Pekka Marttinen  
@@ -33,4 +33,4 @@ If you use composable mapping, or other parts of the repository, please cite (se
 
 ## License
 
-Composable mapping and SITReg are released under the MIT license.
+Composable mapping is released under the MIT license.
