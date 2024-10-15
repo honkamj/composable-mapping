@@ -24,27 +24,10 @@ def optional_add(addable_1: Optional[T], addable_2: Optional[T]) -> Optional[T]:
     return cast(T, added)
 
 
-def get_channel_dims(
-    n_total_dims: int, n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
-) -> Tuple[int, ...]:
+def get_channel_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
     """Returns indices for channel dimensions"""
-    if n_channel_dims is None and n_spatial_dims is None:
-        raise RuntimeError("Either n_channel_dims or n_spatial_dims must be given")
     if n_total_dims < 1:
         raise RuntimeError("Invalid number of total dimensions")
-    if n_spatial_dims is not None:
-        if n_spatial_dims == 0:
-            if n_total_dims > 1:
-                raise RuntimeError("Can not infer channel dimensions")
-            infererred_n_channel_dims = 1
-        else:
-            infererred_n_channel_dims = n_total_dims - n_spatial_dims - 1
-        if n_channel_dims is not None and n_channel_dims != infererred_n_channel_dims:
-            raise RuntimeError(
-                "Inconsistent inputs (n_channel_dims and n_spatial_dims do not match)"
-            )
-        n_channel_dims = infererred_n_channel_dims
-    assert n_channel_dims is not None
     if n_total_dims < n_channel_dims:
         raise RuntimeError(
             "Number of channel dimensions can not be larger than total number of dimensions"
@@ -57,23 +40,23 @@ def get_channel_dims(
 
 
 def get_spatial_dims(
-    n_total_dims: int, n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
+    n_total_dims: int,
+    n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
     """Returns indices for spatial dimensions"""
-    last_channel_dim = get_channel_dims(n_total_dims, n_channel_dims, n_spatial_dims)[-1]
+    last_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[-1]
     return tuple(range(last_channel_dim + 1, n_total_dims))
 
 
-def get_batch_dims(
-    n_total_dims: int, n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
-) -> Tuple[int, ...]:
+def get_batch_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
     """Returns indices for batch dimensions"""
-    first_channel_dim = get_channel_dims(n_total_dims, n_channel_dims, n_spatial_dims)[0]
+    first_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[0]
     return tuple(range(first_channel_dim))
 
 
 def move_channels_first(
-    tensor: Tensor, n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
+    tensor: Tensor,
+    n_channel_dims: int = 1,
 ) -> Tensor:
     """Move channel dimensions first
 
@@ -83,16 +66,14 @@ def move_channels_first(
 
     Returns: Tensor with shape (batch_size, channel_1, ..., channel_{n_channel_dims}, *)
     """
-    channel_dims = get_channel_dims(tensor.ndim, n_channel_dims, n_spatial_dims)
+    channel_dims = get_channel_dims(tensor.ndim, n_channel_dims)
     return tensor.moveaxis(
         tuple(range(-len(channel_dims), 0)),
         channel_dims,
     )
 
 
-def move_channels_last(
-    tensor: Tensor, n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
-) -> Tensor:
+def move_channels_last(tensor: Tensor, n_channel_dims: int = 1) -> Tensor:
     """Move channel dimensions last
 
     Args:
@@ -101,25 +82,22 @@ def move_channels_last(
 
     Returns: Tensor with shape (batch_size, *, channel_1, ..., channel_{n_channel_dims})
     """
-    channel_dims = get_channel_dims(tensor.ndim, n_channel_dims, n_spatial_dims)
+    channel_dims = get_channel_dims(tensor.ndim, n_channel_dims)
     return tensor.moveaxis(
         channel_dims,
         list(range(-len(channel_dims), 0)),
     )
 
 
-def _n_dims_to_iterable(
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]]
-) -> Iterable[Optional[int]]:
-    if n_channel_dims is None or isinstance(n_channel_dims, int):
+def _n_dims_to_iterable(n_channel_dims: Union[int, Iterable[int]]) -> Iterable[int]:
+    if isinstance(n_channel_dims, int):
         return repeat(n_channel_dims)
     return n_channel_dims
 
 
 def broadcast_shapes_in_parts_splitted(
     *shapes: Sequence[int],
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
     broadcast_batch: bool = True,
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
@@ -133,12 +111,9 @@ def broadcast_shapes_in_parts_splitted(
             are assumed to come after the batch dimension.
     """
     channel_dims_iterable = _n_dims_to_iterable(n_channel_dims)
-    spatial_dims_iterable = _n_dims_to_iterable(n_spatial_dims)
     splitted_shapes = [
-        split_shape(shape, individual_n_channel_dims, individual_n_spatial_dims)
-        for shape, individual_n_channel_dims, individual_n_spatial_dims in zip(
-            shapes, channel_dims_iterable, spatial_dims_iterable
-        )
+        split_shape(shape, individual_n_channel_dims)
+        for shape, individual_n_channel_dims in zip(shapes, channel_dims_iterable)
     ]
     if broadcast_batch:
         broadcasted_batch_shape: Optional[Tuple[int, ...]] = broadcast_shapes(
@@ -163,34 +138,25 @@ def broadcast_shapes_in_parts_splitted(
 
 def _select_optional_shapes(
     *shapes: Optional[Sequence[int]],
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-) -> Tuple[Sequence[Sequence[int]], Sequence[Optional[int]], Sequence[Optional[int]]]:
+    n_channel_dims: Union[int, Iterable[int]] = 1,
+) -> Tuple[Sequence[Sequence[int]], Sequence[int]]:
     channel_dims_iterable = _n_dims_to_iterable(n_channel_dims)
-    spatial_dims_iterable = _n_dims_to_iterable(n_spatial_dims)
     not_optional_shapes_and_n_channel_dims = [
-        (shape, individual_n_channel_dims, individual_n_spatial_dims)
-        for shape, individual_n_channel_dims, individual_n_spatial_dims in zip(
-            shapes, channel_dims_iterable, spatial_dims_iterable
-        )
+        (shape, individual_n_channel_dims)
+        for shape, individual_n_channel_dims in zip(shapes, channel_dims_iterable)
         if shape is not None
     ]
-    not_optional_shapes = [shape for shape, _, _ in not_optional_shapes_and_n_channel_dims]
+    not_optional_shapes = [shape for shape, _ in not_optional_shapes_and_n_channel_dims]
     n_channel_dims = [
         individual_n_channel_dims
-        for _, individual_n_channel_dims, _ in not_optional_shapes_and_n_channel_dims
+        for _, individual_n_channel_dims in not_optional_shapes_and_n_channel_dims
     ]
-    n_spatial_dims = [
-        individual_n_spatial_dims
-        for _, _, individual_n_spatial_dims in not_optional_shapes_and_n_channel_dims
-    ]
-    return not_optional_shapes, n_channel_dims, n_spatial_dims
+    return not_optional_shapes, n_channel_dims
 
 
 def broadcast_optional_shapes_in_parts_splitted(
     *shapes: Optional[Sequence[int]],
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
     broadcast_batch: bool = True,
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
@@ -203,15 +169,14 @@ def broadcast_optional_shapes_in_parts_splitted(
             integer is given, same number will be used for all shapes. Channel dimensions
             are assumed to come after the batch dimension.
     """
-    not_optional_shapes, n_channel_dims, n_spatial_dims = _select_optional_shapes(
-        *shapes, n_channel_dims=n_channel_dims, n_spatial_dims=n_spatial_dims
+    not_optional_shapes, n_channel_dims = _select_optional_shapes(
+        *shapes, n_channel_dims=n_channel_dims
     )
     if not not_optional_shapes:
         return None, None, None
     return broadcast_shapes_in_parts_splitted(
         *not_optional_shapes,
         n_channel_dims=n_channel_dims,
-        n_spatial_dims=n_spatial_dims,
         broadcast_batch=broadcast_batch,
         broadcast_channels=broadcast_channels,
         broadcast_spatial=broadcast_spatial,
@@ -220,8 +185,7 @@ def broadcast_optional_shapes_in_parts_splitted(
 
 def broadcast_shapes_in_parts(
     *shapes: Sequence[int],
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
     broadcast_batch: bool = True,
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
@@ -230,17 +194,14 @@ def broadcast_shapes_in_parts(
     batch_shape, channel_shape, spatial_shape = broadcast_shapes_in_parts_splitted(
         *shapes,
         n_channel_dims=n_channel_dims,
-        n_spatial_dims=n_spatial_dims,
         broadcast_batch=broadcast_batch,
         broadcast_channels=broadcast_channels,
         broadcast_spatial=broadcast_spatial,
     )
     output_shapes = []
-    for shape, individual_n_channel_dims, individual_n_spatial_dims in zip(
-        shapes, _n_dims_to_iterable(n_channel_dims), _n_dims_to_iterable(n_spatial_dims)
-    ):
+    for shape, individual_n_channel_dims in zip(shapes, _n_dims_to_iterable(n_channel_dims)):
         target_batch_shape, target_channel_shape, target_spatial_shape = split_shape(
-            shape, individual_n_channel_dims, individual_n_spatial_dims
+            shape, individual_n_channel_dims
         )
         if batch_shape is not None:
             target_batch_shape = batch_shape
@@ -254,8 +215,7 @@ def broadcast_shapes_in_parts(
 
 def broadcast_shapes_in_parts_to_single_shape(
     *shapes: Sequence[int],
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
     broadcast_batch: bool = True,
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
@@ -268,7 +228,6 @@ def broadcast_shapes_in_parts_to_single_shape(
     broadcasted_shapes = broadcast_shapes_in_parts(
         *shapes,
         n_channel_dims=n_channel_dims,
-        n_spatial_dims=n_spatial_dims,
         broadcast_batch=broadcast_batch,
         broadcast_channels=broadcast_channels,
         broadcast_spatial=broadcast_spatial,
@@ -280,8 +239,7 @@ def broadcast_shapes_in_parts_to_single_shape(
 
 def broadcast_optional_shapes_in_parts_to_single_shape(
     *shapes: Optional[Sequence[int]],
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
     broadcast_batch: bool = True,
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
@@ -291,13 +249,12 @@ def broadcast_optional_shapes_in_parts_to_single_shape(
     Raises:
         RuntimeError: If the shapes do not broadcast to the same shape
     """
-    not_optional_shapes, n_channel_dims, n_spatial_dims = _select_optional_shapes(
-        *shapes, n_channel_dims=n_channel_dims, n_spatial_dims=n_spatial_dims
+    not_optional_shapes, n_channel_dims = _select_optional_shapes(
+        *shapes, n_channel_dims=n_channel_dims
     )
     broadcasted_shapes = broadcast_shapes_in_parts(
         *not_optional_shapes,
         n_channel_dims=n_channel_dims,
-        n_spatial_dims=n_spatial_dims,
         broadcast_batch=broadcast_batch,
         broadcast_channels=broadcast_channels,
         broadcast_spatial=broadcast_spatial,
@@ -312,13 +269,12 @@ def broadcast_to_in_parts(
     batch_shape: Optional[Sequence[int]] = None,
     channels_shape: Optional[Sequence[int]] = None,
     spatial_shape: Optional[Sequence[int]] = None,
-    n_channel_dims: Optional[int] = None,
-    n_spatial_dims: Optional[int] = None,
+    n_channel_dims: int = 1,
 ) -> Tensor:
     """Broadcasts tensor to given shapes, if None, the part of the shape is not
     broadcasted"""
     initial_batch_shape, initial_channels_shape, initial_spatial_shape = split_shape(
-        tensor.shape, n_channel_dims=n_channel_dims, n_spatial_dims=n_spatial_dims
+        tensor.shape, n_channel_dims=n_channel_dims
     )
     if batch_shape is not None:
         if len(batch_shape) < len(initial_batch_shape):
@@ -361,8 +317,7 @@ def broadcast_tensors_in_parts(
     broadcast_batch: bool = True,
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
-    n_channel_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[Optional[int]]]] = None,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
 ) -> Tuple[Tensor, ...]:
     """Broadcasts tensors spatially"""
     shapes = [tensor.shape for tensor in tensors]
@@ -370,7 +325,6 @@ def broadcast_tensors_in_parts(
         broadcast_shapes_in_parts_splitted(
             *shapes,
             n_channel_dims=n_channel_dims,
-            n_spatial_dims=n_spatial_dims,
             broadcast_batch=broadcast_batch,
             broadcast_channels=broadcast_channels,
             broadcast_spatial=broadcast_spatial,
@@ -383,19 +337,19 @@ def broadcast_tensors_in_parts(
             channels_shape=broadcasted_channel_shape,
             spatial_shape=broadcasted_spatial_shape,
             n_channel_dims=individual_n_channel_dims,
-            n_spatial_dims=individual_n_spatial_dims,
         )
-        for tensor, individual_n_channel_dims, individual_n_spatial_dims in zip(
-            tensors, _n_dims_to_iterable(n_channel_dims), _n_dims_to_iterable(n_spatial_dims)
+        for tensor, individual_n_channel_dims in zip(
+            tensors,
+            _n_dims_to_iterable(n_channel_dims),
         )
     )
 
 
 def split_shape(
-    shape: Sequence[int], n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
+    shape: Sequence[int], n_channel_dims: int = 1
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]:
     """Splits shape into batch, channel and spatial dimensions"""
-    channel_dims = get_channel_dims(len(shape), n_channel_dims, n_spatial_dims)
+    channel_dims = get_channel_dims(len(shape), n_channel_dims)
     n_channel_dims = len(channel_dims)
     first_channel_dim = channel_dims[0]
     return (
@@ -405,68 +359,66 @@ def split_shape(
     )
 
 
-def get_channels_shape(
-    shape: Sequence[int], n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
-) -> Tuple[int, ...]:
+def get_channels_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
     """Returns shape of the channel dimensions"""
-    channel_dims = get_channel_dims(len(shape), n_channel_dims, n_spatial_dims)
+    channel_dims = get_channel_dims(len(shape), n_channel_dims)
     n_channel_dims = len(channel_dims)
     first_channel_dim = channel_dims[0]
     return tuple(shape[first_channel_dim : first_channel_dim + n_channel_dims])
 
 
 def get_spatial_shape(
-    shape: Sequence[int], n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
+    shape: Sequence[int],
+    n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
     """Returns shape of the spatial dimensions"""
-    last_channel_dim = get_channel_dims(len(shape), n_channel_dims, n_spatial_dims)[-1]
+    last_channel_dim = get_channel_dims(len(shape), n_channel_dims)[-1]
     return tuple(shape[last_channel_dim + 1 :])
 
 
-def get_batch_shape(
-    shape: Sequence[int], n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
-) -> Tuple[int, ...]:
+def get_batch_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
     """Returns size of the batch dimensions"""
-    first_channel_dim = get_channel_dims(len(shape), n_channel_dims, n_spatial_dims)[0]
+    first_channel_dim = get_channel_dims(len(shape), n_channel_dims)[0]
     return tuple(shape[:first_channel_dim])
 
 
 def has_spatial_dims(
-    shape: Sequence[int], n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
+    shape: Sequence[int],
+    n_channel_dims: int = 1,
 ) -> bool:
     """Check if shape has spatial dimensions"""
-    return bool(get_spatial_shape(shape, n_channel_dims, n_spatial_dims))
+    return bool(get_spatial_shape(shape, n_channel_dims))
 
 
 def reduce_channel_shape_to_ones(
-    shape: Sequence[int], n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
+    shape: Sequence[int],
+    n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
     """Reduces channel shape to ones
 
     E.g. (3, 5, 4, 4) with n_channel_dims = 1 returns
     (3, 1, 4, 4)
     """
-    batch_shape, channel_shape, spatial_shape = split_shape(shape, n_channel_dims, n_spatial_dims)
+    batch_shape, channel_shape, spatial_shape = split_shape(shape, n_channel_dims)
     return batch_shape + tuple(1 for _ in channel_shape) + spatial_shape
 
 
 def num_spatial_dims(
-    n_total_dims: int, n_channel_dims: Optional[int] = None, n_spatial_dims: Optional[int] = None
+    n_total_dims: int,
+    n_channel_dims: int = 1,
 ) -> int:
     """Returns number of spatial dimensions"""
-    return len(get_spatial_dims(n_total_dims, n_channel_dims, n_spatial_dims))
+    return len(get_spatial_dims(n_total_dims, n_channel_dims))
 
 
 def combine_optional_masks(
     *masks: Optional[Tensor],
-    n_channel_dims: Optional[Union[int, Iterable[int]]] = None,
-    n_spatial_dims: Optional[Union[int, Iterable[int]]] = None,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
 ) -> Optional[Tensor]:
     """Combine optional masks"""
     broadcasted_masks = broadcast_tensors_in_parts(
         *(mask for mask in masks if mask is not None),
         n_channel_dims=n_channel_dims,
-        n_spatial_dims=n_spatial_dims,
     )
     combined_mask: Optional[Tensor] = None
     for mask in broadcasted_masks:
