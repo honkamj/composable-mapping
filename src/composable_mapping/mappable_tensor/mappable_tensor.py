@@ -12,13 +12,11 @@ from torch import get_default_dtype
 from torch import int32 as torch_int32
 from torch import ones
 from torch import round as torch_round
-from torch import tensor, zeros
+from torch import tensor
 
-from composable_mapping.dense_deformation import generate_voxel_coordinate_grid
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
-    broadcast_shapes_in_parts_splitted,
-    broadcast_shapes_in_parts_to_single_shape,
+    broadcast_optional_shapes_in_parts_to_single_shape,
     broadcast_tensors_in_parts,
     broadcast_to_in_parts,
     combine_optional_masks,
@@ -27,11 +25,12 @@ from composable_mapping.util import (
     get_spatial_dims,
     get_spatial_shape,
     optional_add,
-    reduce_channel_shape_to_ones,
+    reduce_channels_shape_to_ones,
     split_shape,
 )
 
 from .affine_transformation import IAffineTransformation, IdentityAffineTransformation
+from .grid import Grid
 
 REDUCE_TO_SLICE_TOLERANCE = 1e-5
 
@@ -44,31 +43,56 @@ class MappableTensor(BaseTensorLikeWrapper):
 
     def __init__(
         self,
-        spatial_shape: Sequence[int],
         displacements: Optional[Tensor] = None,
         mask: Optional[Tensor] = None,
         n_channel_dims: int = 1,
-        affine_transformation_on_displacements: Optional[IAffineTransformation] = None,
-        affine_transformation_on_voxel_grid: Optional[IAffineTransformation] = None,
+        affine_transformation: Optional[IAffineTransformation] = None,
+        grid: Optional[Grid] = None,
     ) -> None:
-        self._spatial_shape = tuple(spatial_shape)
+        if mask is not None:
+            mask_channels_shape = get_channels_shape(mask.shape, n_channel_dims)
+            if mask_channels_shape != (1,) * n_channel_dims:
+                raise ValueError("Mask must dimension with size 1 in all channel dimensions")
         self._displacements = displacements
         self._mask = mask
         self._n_channel_dims = n_channel_dims
-        if displacements is None and affine_transformation_on_displacements is not None:
-            raise ValueError("Affine transformation on displacements requires displacements")
-        if displacements is not None and affine_transformation_on_displacements is None:
-            self._affine_transformation_on_displacements: Optional[IAffineTransformation] = (
-                IdentityAffineTransformation(
-                    get_channels_shape(displacements.shape, n_channel_dims=n_channel_dims)[-1],
-                    dtype=displacements.dtype,
-                    device=displacements.device,
-                )
+        self._affine_transformation = (
+            IdentityAffineTransformation(
+                get_channels_shape(displacements.shape, n_channel_dims=n_channel_dims)[-1],
+                dtype=displacements.dtype,
+                device=displacements.device,
             )
-        else:
-            self._affine_transformation_on_displacements = affine_transformation_on_displacements
-        self._affine_transformation_on_voxel_grid: Optional[IAffineTransformation] = (
-            affine_transformation_on_voxel_grid
+            if affine_transformation is None and displacements is not None
+            else affine_transformation
+        )
+        self._grid = grid
+        self._shape = self._infer_shape()
+
+    @property
+    def _transformed_displacements_shape(self) -> Optional[Tuple[int, ...]]:
+        displacements_shape: Optional[Tuple[int, ...]] = (
+            None if self._displacements is None else self._displacements.shape
+        )
+        if self._affine_transformation is not None:
+            if displacements_shape is None:
+                raise ValueError("Affine transformation may be set only if displacements is set")
+            displacements_shape = self._affine_transformation.get_output_shape(
+                displacements_shape, n_channel_dims=self._n_channel_dims
+            )
+        return displacements_shape
+
+    def _infer_shape(
+        self,
+    ) -> Tuple[int, ...]:
+        if self._displacements is None and self._n_channel_dims != 1:
+            raise ValueError("When no displacements is set, n_channel_dims must be 1")
+        if self._displacements is None and self._grid is None:
+            raise ValueError("Either displacements, or grid must be set.")
+        displacements_shape = self._transformed_displacements_shape
+        return broadcast_optional_shapes_in_parts_to_single_shape(
+            displacements_shape,
+            None if self._mask is None else self._mask.shape,
+            None if self._grid is None else self._grid.shape,
         )
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
@@ -81,86 +105,57 @@ class MappableTensor(BaseTensorLikeWrapper):
 
     def _get_children(self) -> Mapping[str, ITensorLike]:
         children: Dict[str, ITensorLike] = {}
-        if self._affine_transformation_on_displacements is not None:
-            children["affine_transformation_on_displacements"] = (
-                self._affine_transformation_on_displacements
-            )
-        if self._affine_transformation_on_voxel_grid is not None:
-            children["affine_transformation_on_voxel_grid"] = (
-                self._affine_transformation_on_voxel_grid
-            )
+        if self._affine_transformation is not None:
+            children["affine_transformation"] = self._affine_transformation
+        if self._grid is not None:
+            children["grid"] = self._grid
         return children
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "MappableTensor":
-        if "affine_transformation_on_displacements" in children:
-            if not isinstance(
-                children["affine_transformation_on_displacements"], IAffineTransformation
-            ):
+        if "affine_transformation" in children:
+            if not isinstance(children["affine_transformation"], IAffineTransformation):
                 raise ValueError("Invalid children for mappable tensor")
-            affine_transformation_on_displacements: Optional[IAffineTransformation] = children[
-                "affine_transformation_on_displacements"
+            affine_transformation: Optional[IAffineTransformation] = children[
+                "affine_transformation"
             ]
 
         else:
-            affine_transformation_on_displacements = None
-        if "affine_transformation_on_voxel_grid" in children:
-            if not isinstance(
-                children["affine_transformation_on_voxel_grid"], IAffineTransformation
-            ):
+            affine_transformation = None
+        if "grid" in children:
+            if not isinstance(children["grid"], Grid):
                 raise ValueError("Invalid children for mappable tensor")
-            affine_transformation_on_voxel_grid: Optional[IAffineTransformation] = children[
-                "affine_transformation_on_voxel_grid"
-            ]
+            grid: Optional[Grid] = children["grid"]
         else:
-            affine_transformation_on_voxel_grid = None
+            grid = None
         return MappableTensor(
-            spatial_shape=self._spatial_shape,
             displacements=tensors.get("displacements", self._displacements),
             mask=tensors.get("mask", self._mask),
             n_channel_dims=self._n_channel_dims,
-            affine_transformation_on_displacements=affine_transformation_on_displacements,
-            affine_transformation_on_voxel_grid=affine_transformation_on_voxel_grid,
+            affine_transformation=affine_transformation,
+            grid=grid,
         )
 
     @property
     def shape(self) -> Tuple[int, ...]:
         """Shape of the tensor"""
-        if self._affine_transformation_on_voxel_grid is None:
-            voxel_grid_shape: Optional[Tuple[int, ...]] = None
-        else:
-            voxel_grid_shape = (1, len(self.spatial_shape)) + tuple(self._spatial_shape)
-            voxel_grid_shape = self._affine_transformation_on_voxel_grid.get_output_shape(
-                (1, len(self.spatial_shape)) + tuple(self._spatial_shape)
-            )
-        if self._displacements is None:
-            values_shape: Optional[Tuple[int, ...]] = None
-        else:
-            values_shape = self._displacements.shape
-            if self._affine_transformation_on_displacements is not None:
-                values_shape = self._affine_transformation_on_displacements.get_output_shape(
-                    values_shape, n_channel_dims=self._n_channel_dims
-                )
-        if voxel_grid_shape is not None and values_shape is not None:
-            return broadcast_shapes_in_parts_to_single_shape(
-                values_shape, voxel_grid_shape, n_channel_dims=(self._n_channel_dims, 1)
-            )
-        if values_shape is not None:
-            return values_shape
-        if voxel_grid_shape is not None:
-            return voxel_grid_shape
-        raise ValueError("Either displacements or affine transformation on voxel grid must be set")
+        return self._shape
 
     @property
     def spatial_shape(self) -> Tuple[int, ...]:
         """Shape of the spatial dimensions"""
-        return self._spatial_shape
+        return get_spatial_shape(self.shape, self._n_channel_dims)
 
     @property
     def channels_shape(self) -> Tuple[int, ...]:
         """Shape of the channel dimensions"""
         return get_channels_shape(self.shape, self._n_channel_dims)
+
+    @property
+    def mask_shape(self) -> Tuple[int, ...]:
+        """Shape of the mask"""
+        return reduce_channels_shape_to_ones(self.shape, self._n_channel_dims)
 
     @property
     def n_channel_dims(self) -> int:
@@ -205,8 +200,8 @@ class MappableTensor(BaseTensorLikeWrapper):
         )
         displacements = self._displacements
         if displacements is not None:
-            if self._affine_transformation_on_displacements is not None:
-                displacements = self._affine_transformation_on_displacements(
+            if self._affine_transformation is not None:
+                displacements = self._affine_transformation(
                     displacements, n_channel_dims=self._n_channel_dims
                 )
             displacements = broadcast_to_in_parts(
@@ -216,26 +211,17 @@ class MappableTensor(BaseTensorLikeWrapper):
                 spatial_shape=spatial_shape,
                 n_channel_dims=self._n_channel_dims,
             )
-        if (
-            self._affine_transformation_on_voxel_grid is None
-            or self._affine_transformation_on_voxel_grid.is_zero()
-        ):
-            grid: Optional[Tensor] = None
-        else:
-            voxel_grid = generate_voxel_coordinate_grid(
-                self.spatial_shape, device=self.device, dtype=self.dtype
-            )
-            grid = self._affine_transformation_on_voxel_grid(voxel_grid, n_channel_dims=1)
+        if self._grid is not None:
             grid = broadcast_to_in_parts(
-                grid,
+                self._grid.generate(),
                 batch_shape=batch_shape,
                 channels_shape=channels_shape,
                 spatial_shape=spatial_shape,
-                n_channel_dims=1,
             )
+        else:
+            grid = None
         values = optional_add(displacements, grid)
-        if values is None:
-            return zeros(self.shape, dtype=self.dtype, device=self.device)
+        assert values is not None
         return values
 
     @overload
@@ -265,10 +251,19 @@ class MappableTensor(BaseTensorLikeWrapper):
         """
         target_dtype = self.dtype if cast_mask else torch_bool
         if self._mask is not None:
-            return self._mask.to(target_dtype)
+            batch_shape, channels_shape, spatial_shape = split_shape(
+                self.mask_shape, n_channel_dims=self._n_channel_dims
+            )
+            return broadcast_to_in_parts(
+                self._mask.to(target_dtype),
+                batch_shape=batch_shape,
+                channels_shape=channels_shape,
+                spatial_shape=spatial_shape,
+                n_channel_dims=self._n_channel_dims,
+            )
         return (
             ones(
-                reduce_channel_shape_to_ones(self.shape, self._n_channel_dims),
+                self.mask_shape,
                 device=self.device,
                 dtype=target_dtype,
             )
@@ -280,128 +275,112 @@ class MappableTensor(BaseTensorLikeWrapper):
     def displacements(self) -> Optional[Tensor]:
         """Displacements contained by the mappable tensor
 
-        These might not be broadcasted to the full shape of the tensor
+        These might not be broadcasted to the final shape of the tensor
         """
         return self._displacements
 
     @property
-    def affine_transformation_on_displacements(self) -> Optional[IAffineTransformation]:
+    def affine_transformation(self) -> Optional[IAffineTransformation]:
         """Affine transformation on displacements, if available"""
-        return self._affine_transformation_on_displacements
+        return self._affine_transformation
 
     @property
-    def affine_transformation_on_voxel_grid(self) -> Optional[IAffineTransformation]:
-        """Affine transformation on voxel grid, if available"""
-        return self._affine_transformation_on_voxel_grid
+    def grid(self) -> Optional[Grid]:
+        """Grid, if available"""
+        return self._grid
 
     def transform(self, affine_transformation: IAffineTransformation) -> "MappableTensor":
         """Apply affine mapping to the last channel dimension of the tensor
 
         The affine transformation is not evaluated immidiately, only the composition is stored.
         """
-        if self._displacements is None:
-            affine_transformation_on_displacements = None
-        elif self._affine_transformation_on_displacements is None:
-            affine_transformation_on_displacements = affine_transformation
+        n_affine_transformation_input_channels = affine_transformation.channels_shape[1] - 1
+        if self.channels_shape[-1] != n_affine_transformation_input_channels:
+            raise RuntimeError("Affine transformation must have matching input channels")
+        if self._grid is None:
+            grid: Optional[Grid] = None
+        else:
+            if not self._grid.is_transformable(affine_transformation):
+                return MappableTensor(
+                    displacements=self.generate_values(),
+                    mask=self._mask,
+                    n_channel_dims=self._n_channel_dims,
+                    affine_transformation=affine_transformation,
+                    grid=None,
+                )
+            grid = Grid(
+                spatial_shape=self._grid.spatial_shape,
+                affine_transformation=affine_transformation
+                @ broadcast_affine_to_n_input_channels(
+                    self._grid.affine_transformation,
+                    n_input_channels=n_affine_transformation_input_channels,
+                ),
+            )
+        if self._affine_transformation is None:
+            affine_transformation_on_displacements: Optional[IAffineTransformation] = None
         else:
             affine_transformation_on_displacements = (
-                affine_transformation @ self._affine_transformation_on_displacements
-            )
-        if self._affine_transformation_on_voxel_grid is None:
-            affine_transformation_on_voxel_grid = None
-        else:
-            affine_transformation_on_voxel_grid = (
-                affine_transformation @ self._affine_transformation_on_voxel_grid
+                affine_transformation
+                @ broadcast_affine_to_n_input_channels(
+                    self._affine_transformation,
+                    n_input_channels=n_affine_transformation_input_channels,
+                )
             )
         return MappableTensor(
-            spatial_shape=self._spatial_shape,
-            displacements=(None if self._displacements is None else self._displacements),
-            mask=None if self._mask is None else self._mask,
+            displacements=self._displacements,
+            mask=self._mask,
             n_channel_dims=self._n_channel_dims,
-            affine_transformation_on_displacements=affine_transformation_on_displacements,
-            affine_transformation_on_voxel_grid=affine_transformation_on_voxel_grid,
+            affine_transformation=affine_transformation_on_displacements,
+            grid=grid,
         )
 
     def __add__(self, other: "MappableTensor") -> "MappableTensor":
         """Sum two mappable tensors"""
-        self_mask = self.generate_mask(generate_missing_mask=False, cast_mask=False)
-        other_mask = other.generate_mask(generate_missing_mask=False, cast_mask=False)
-        if self_mask is not None and other_mask is not None:
-            self_mask, other_mask = broadcast_tensors_in_parts(
-                self_mask,
-                other_mask,
+        mask = combine_optional_masks(
+            self.generate_mask(generate_missing_mask=False, cast_mask=False),
+            other.generate_mask(generate_missing_mask=False, cast_mask=False),
+            n_channel_dims=(self.n_channel_dims, other.n_channel_dims),
+        )
+        n_channel_dims = max(self.n_channel_dims, other.n_channel_dims)
+        if self.grid is not None and other.grid is not None:
+            if not Grid.are_addable(self.grid, other.grid):
+                self_values, other_values = broadcast_tensors_in_parts(
+                    self.generate_values(),
+                    other.generate_values(),
+                    n_channel_dims=(self.n_channel_dims, other.n_channel_dims),
+                )
+                return PlainTensor(
+                    values=self_values + other_values, mask=mask, n_channel_dims=n_channel_dims
+                )
+            grid: Optional[Grid] = self.grid + other.grid
+        elif self.grid is not None:
+            grid = self.grid
+        else:
+            grid = other.grid
+
+        if self.displacements is None:
+            displacements = other.displacements
+            affine_transformation = other.affine_transformation
+        elif other.displacements is None:
+            displacements = self.displacements
+            affine_transformation = self.affine_transformation
+        else:
+            assert (
+                self.affine_transformation is not None and other.affine_transformation is not None
+            )
+            self_displacements, other_displacements = broadcast_tensors_in_parts(
+                self.affine_transformation(self.displacements),
+                other.affine_transformation(other.displacements),
                 n_channel_dims=(self.n_channel_dims, other.n_channel_dims),
             )
-        mask = combine_optional_masks([self_mask, other_mask])
-
-        self_displacements = self._displacements
-        other_displacements = other.displacements
-
-        if self_displacements is None:
-            displacements = other_displacements
-            affine_transformation_on_displacements = other.affine_transformation_on_displacements
-            output_spatial_shape = other.spatial_shape
-            n_channel_dims = other.n_channel_dims
-        elif other_displacements is None:
-            displacements = self_displacements
-            affine_transformation_on_displacements = self._affine_transformation_on_displacements
-            output_spatial_shape = self.spatial_shape
-            n_channel_dims = self.n_channel_dims
-        else:
-            affine_transformation_on_displacements = None
-            if self.spatial_shape == other.spatial_shape:
-                transformed_self_displacements = (
-                    self_displacements
-                    if self._affine_transformation_on_displacements is None
-                    else self._affine_transformation_on_displacements(
-                        self_displacements, n_channel_dims=self.n_channel_dims
-                    )
-                )
-                transformed_other_displacements = (
-                    other_displacements
-                    if other.affine_transformation_on_displacements is None
-                    else other.affine_transformation_on_displacements(other_displacements)
-                )
-            else:
-                transformed_self_displacements = self.generate_values()
-                transformed_other_displacements = other.generate_values()
-            batch_shape, channels_shape, spatial_shape = broadcast_shapes_in_parts_splitted(
-                transformed_self_displacements.shape,
-                transformed_other_displacements.shape,
-                n_channel_dims=(self.n_channel_dims, other.n_channel_dims),
-            )
-            assert channels_shape is not None and spatial_shape is not None
-            output_spatial_shape = spatial_shape
-            n_channel_dims = len(channels_shape)
-            transformed_self_displacements = broadcast_to_in_parts(
-                transformed_self_displacements,
-                batch_shape=batch_shape,
-                channels_shape=channels_shape,
-                spatial_shape=spatial_shape,
-            )
-            transformed_other_displacements = broadcast_to_in_parts(
-                transformed_other_displacements,
-                batch_shape=batch_shape,
-                channels_shape=channels_shape,
-                spatial_shape=spatial_shape,
-            )
-            displacements = transformed_self_displacements + transformed_other_displacements
-
-        if self.spatial_shape == other.spatial_shape:
-            affine_transformation_on_voxel_grid = optional_add(
-                self.affine_transformation_on_voxel_grid,
-                other.affine_transformation_on_voxel_grid,
-            )
-        else:
-            affine_transformation_on_voxel_grid = None
+            displacements = self_displacements + other_displacements
 
         return MappableTensor(
-            spatial_shape=output_spatial_shape,
             displacements=displacements,
             mask=mask,
             n_channel_dims=n_channel_dims,
-            affine_transformation_on_voxel_grid=affine_transformation_on_voxel_grid,
-            affine_transformation_on_displacements=affine_transformation_on_displacements,
+            affine_transformation=affine_transformation,
+            grid=grid,
         )
 
     def __sub__(self, other: "MappableTensor") -> "MappableTensor":
@@ -411,20 +390,13 @@ class MappableTensor(BaseTensorLikeWrapper):
     def __neg__(self) -> "MappableTensor":
         """Negate the mappable tensor"""
         return MappableTensor(
-            spatial_shape=self._spatial_shape,
             displacements=self._displacements,
             mask=None if self._mask is None else self._mask,
             n_channel_dims=self._n_channel_dims,
-            affine_transformation_on_displacements=(
-                None
-                if self._affine_transformation_on_displacements is None
-                else -self._affine_transformation_on_displacements
+            affine_transformation=(
+                None if self._affine_transformation is None else -self._affine_transformation
             ),
-            affine_transformation_on_voxel_grid=(
-                None
-                if self._affine_transformation_on_voxel_grid is None
-                else -self._affine_transformation_on_voxel_grid
-            ),
+            grid=(None if self._grid is None else -self._grid),
         )
 
     def has_mask(self) -> bool:
@@ -439,9 +411,9 @@ class MappableTensor(BaseTensorLikeWrapper):
         self, target_shape: Sequence[int]
     ) -> Optional[Tuple[Union["ellipsis", slice], ...]]:
         """Reduce the grid to slice on target shape, if possible"""
-        if self._displacements is not None or self._affine_transformation_on_voxel_grid is None:
+        if self._displacements is not None or self._affine_transformation is None:
             return None
-        transformation_matrix = self._affine_transformation_on_voxel_grid.as_host_matrix()
+        transformation_matrix = self._affine_transformation.as_host_matrix()
         if transformation_matrix is None:
             return None
         transformation_matrix = transformation_matrix.squeeze(
@@ -483,54 +455,48 @@ class MappableTensor(BaseTensorLikeWrapper):
             n_channel_dims=self._n_channel_dims,
         )
 
-    def modify_values(self, values: Tensor) -> "MappableTensor":
+    def modify_values(
+        self, values: Tensor, n_channel_dims: Optional[int] = None
+    ) -> "MappableTensor":
         """Modify values of the tensor"""
+        if n_channel_dims is None:
+            n_channel_dims = self.n_channel_dims
+        mask = self._mask
+        if mask is not None:
+            batch_shape, _, spatial_shape = split_shape(mask.shape)
+            mask = mask.broadcast_to(batch_shape + (1,) * n_channel_dims + spatial_shape)
         return MappableTensor(
-            spatial_shape=self._spatial_shape,
             displacements=values,
-            mask=self._mask,
-            n_channel_dims=self._n_channel_dims,
-            affine_transformation_on_displacements=None,
-            affine_transformation_on_voxel_grid=None,
+            mask=mask,
+            n_channel_dims=n_channel_dims,
+            affine_transformation=None,
+            grid=None,
         )
 
     def mask_and(self, mask: Optional[Tensor]) -> "MappableTensor":
         """Combine mask with logical and"""
         return self.modify_mask(
-            combine_optional_masks([self._mask, mask], n_channel_dims=self._n_channel_dims)
+            combine_optional_masks(self._mask, mask, n_channel_dims=self._n_channel_dims)
         )
 
     def modify_mask(self, mask: Optional[Tensor]) -> "MappableTensor":
         """Modify mask of the tensor"""
         return MappableTensor(
-            spatial_shape=self._spatial_shape,
             displacements=self._displacements,
             mask=mask,
             n_channel_dims=self._n_channel_dims,
-            affine_transformation_on_displacements=self._affine_transformation_on_displacements,
-            affine_transformation_on_voxel_grid=self._affine_transformation_on_voxel_grid,
-        )
-
-    def modify(self, values: Tensor, mask: Optional[Tensor]) -> "MappableTensor":
-        """Modify values and mask of the tensor"""
-        return MappableTensor(
-            spatial_shape=self._spatial_shape,
-            displacements=values,
-            mask=mask,
-            n_channel_dims=self._n_channel_dims,
-            affine_transformation_on_displacements=None,
-            affine_transformation_on_voxel_grid=None,
+            affine_transformation=self._affine_transformation,
+            grid=self._grid,
         )
 
     def __repr__(self) -> str:
         return (
-            f"MappableTensor(spatial_shape={self._spatial_shape}, "
-            f"dtype={self.dtype}, device={self.device}, "
+            f"MappableTensor("
             f"displacements={self._displacements}, mask={self._mask}, "
             f"n_channel_dims={self._n_channel_dims}, "
-            f"affine_transformation_on_displacements="
-            f"{self._affine_transformation_on_displacements}, "
-            f"affine_transformation_on_voxel_grid={self._affine_transformation_on_voxel_grid})"
+            f"affine_transformation="
+            f"{self._affine_transformation}, "
+            f"grid={self._grid})"
         )
 
 
@@ -550,10 +516,16 @@ class PlainTensor(MappableTensor):
         n_channel_dims: int = 1,
     ) -> None:
         super().__init__(
-            spatial_shape=get_spatial_shape(values.shape, n_channel_dims),
             displacements=values,
             mask=mask,
             n_channel_dims=n_channel_dims,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            "PlainTensor(values="
+            f"{self._displacements}, mask={self._mask}, "
+            f"n_channel_dims={self._n_channel_dims})"
         )
 
 
@@ -575,10 +547,12 @@ class VoxelGrid(MappableTensor):
         dtype = get_default_dtype() if dtype is None else dtype
         device = torch_device("cpu") if device is None else device
         super().__init__(
-            spatial_shape=spatial_shape,
             mask=mask,
             n_channel_dims=1,
-            affine_transformation_on_voxel_grid=IdentityAffineTransformation(
-                len(spatial_shape), dtype=dtype, device=device
+            grid=Grid(
+                spatial_shape=spatial_shape,
+                affine_transformation=IdentityAffineTransformation(
+                    len(spatial_shape), dtype=dtype, device=device
+                ),
             ),
         )

@@ -12,7 +12,6 @@ from deformation_inversion_layer import (
 from torch import Tensor
 
 from .base import BaseComposableMapping
-from .coordinate_system import CoordinateSystem
 from .interface import IComposableMapping, IInterpolator
 from .interpolator import LinearInterpolator
 from .mappable_tensor import MappableTensor, PlainTensor
@@ -126,8 +125,9 @@ class VoxelGridDeformation(VoxelGridVolume):
         fixed_point_inversion_arguments = inversion_parameters.get(
             "fixed_point_inversion_arguments", {}
         )
+        default_interpolator = partial(self._interpolator.interpolate_values)
         deformation_inversion_arguments = DeformationInversionArguments(
-            interpolator=partial(self._interpolator.interpolate_values, n_channel_dims=1),
+            interpolator=fixed_point_inversion_arguments.get("interpolator", default_interpolator),
             forward_solver=fixed_point_inversion_arguments.get("forward_solver"),
             backward_solver=fixed_point_inversion_arguments.get("backward_solver"),
             forward_dtype=fixed_point_inversion_arguments.get("forward_dtype"),
@@ -177,7 +177,7 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
         masked_coordinates: MappableTensor,
     ) -> MappableTensor:
         coordinates_as_slice = masked_coordinates.as_slice(self._data.spatial_shape)
-        data, data_mask = self._data.generate(generate_missing_mask=False, cast_mask=False)
+        data, data_mask = self._data.generate(generate_missing_mask=True, cast_mask=False)
         voxel_coordinates = masked_coordinates.generate_values()
         inverted_values = fixed_point_invert_deformation(
             displacement_field=data,
@@ -188,8 +188,6 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
         mask = self._interpolator.interpolate_mask(
             mask=data_mask,
             voxel_coordinates=voxel_coordinates,
-            spatial_shape=self._data.spatial_shape,
-            n_channel_dims=self._data.n_channel_dims,
         )
         return PlainTensor(inverted_values, mask) + masked_coordinates
 

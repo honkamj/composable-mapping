@@ -48,6 +48,20 @@ def get_spatial_dims(
     return tuple(range(last_channel_dim + 1, n_total_dims))
 
 
+def get_n_channel_dims(n_total_dims: int, n_spatial_dims: int) -> int:
+    """Returns number of channel dimensions"""
+    if n_spatial_dims < 0:
+        raise RuntimeError("Invalid number of spatial dimensions")
+    if n_spatial_dims == 0:
+        if n_total_dims == 1:
+            return 1
+        raise RuntimeError("Can not infer number of channel dimensions")
+    n_channel_dims = n_total_dims - n_spatial_dims - 1
+    if n_channel_dims < 1:
+        raise RuntimeError("Invalid n_total_dims for given n_spatial_dims")
+    return n_channel_dims
+
+
 def get_batch_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
     """Returns indices for batch dimensions"""
     first_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[0]
@@ -345,6 +359,43 @@ def broadcast_tensors_in_parts(
     )
 
 
+def broadcast_optional_tensors_in_parts(
+    *tensors: Optional[Tensor],
+    broadcast_batch: bool = True,
+    broadcast_channels: bool = True,
+    broadcast_spatial: bool = True,
+    n_channel_dims: Union[int, Iterable[int]] = 1,
+) -> Tuple[Optional[Tensor], ...]:
+    """Broadcasts tensors spatially"""
+    shapes = [None if tensor is None else tensor.shape for tensor in tensors]
+    broadcasted_batch_shape, broadcasted_channel_shape, broadcasted_spatial_shape = (
+        broadcast_optional_shapes_in_parts_splitted(
+            *shapes,
+            n_channel_dims=n_channel_dims,
+            broadcast_batch=broadcast_batch,
+            broadcast_channels=broadcast_channels,
+            broadcast_spatial=broadcast_spatial,
+        )
+    )
+    return tuple(
+        (
+            None
+            if tensor is None
+            else broadcast_to_in_parts(
+                tensor,
+                batch_shape=broadcasted_batch_shape,
+                channels_shape=broadcasted_channel_shape,
+                spatial_shape=broadcasted_spatial_shape,
+                n_channel_dims=individual_n_channel_dims,
+            )
+        )
+        for tensor, individual_n_channel_dims in zip(
+            tensors,
+            _n_dims_to_iterable(n_channel_dims),
+        )
+    )
+
+
 def split_shape(
     shape: Sequence[int], n_channel_dims: int = 1
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]:
@@ -390,7 +441,7 @@ def has_spatial_dims(
     return bool(get_spatial_shape(shape, n_channel_dims))
 
 
-def reduce_channel_shape_to_ones(
+def reduce_channels_shape_to_ones(
     shape: Sequence[int],
     n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
@@ -433,3 +484,12 @@ def combine_optional_masks(
 def avg_pool_nd_function(n_dims: int):
     """Return any dimensional average pooling function"""
     return getattr(torch.nn.functional, f"avg_pool{n_dims}d")
+
+
+def is_broadcastable(shape_1: Sequence[int], shape_2: Sequence[int]) -> bool:
+    """Check if two shapes are broadcastable"""
+    try:
+        broadcast_shapes(shape_1, shape_2)
+    except RuntimeError:
+        return False
+    return True

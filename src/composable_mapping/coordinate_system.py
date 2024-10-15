@@ -158,21 +158,21 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             "to_voxel_coordinates": to_voxel_coordinates,
         }
         if (
-            get_channels_shape(from_voxel_coordinates.matrix_shape, n_channel_dims=2)
+            get_channels_shape(from_voxel_coordinates.shape, n_channel_dims=2)
             != (
                 len(shape) + 1,
                 len(shape) + 1,
             )
-            or get_spatial_shape(from_voxel_coordinates.matrix_shape, n_channel_dims=2) != tuple()
+            or get_spatial_shape(from_voxel_coordinates.shape, n_channel_dims=2) != tuple()
         ):
             raise ValueError("Invalid affine transformation for a coordinate system")
         if (
-            get_channels_shape(to_voxel_coordinates.matrix_shape, n_channel_dims=2)
+            get_channels_shape(to_voxel_coordinates.shape, n_channel_dims=2)
             != (
                 len(shape) + 1,
                 len(shape) + 1,
             )
-            or get_spatial_shape(to_voxel_coordinates.matrix_shape, n_channel_dims=2) != tuple()
+            or get_spatial_shape(to_voxel_coordinates.shape, n_channel_dims=2) != tuple()
         ):
             raise ValueError("Invalid affine transformation for a coordinate system")
         # Trick to make torch.nn.Module type conversion work automatically, we

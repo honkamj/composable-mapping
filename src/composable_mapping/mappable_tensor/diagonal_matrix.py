@@ -149,15 +149,13 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
         return self._translation
 
     @property
-    def matrix_shape(self) -> Sequence[int]:
+    def shape(self) -> Sequence[int]:
         """Get the matrix shape"""
         return self._broadcasted_shape
 
     def as_matrix(self) -> Tensor:
         """Generate the diagonal affine matrix"""
-        batch_shape, channels_shape, spatial_shape = split_shape(
-            self.matrix_shape, n_channel_dims=2
-        )
+        batch_shape, channels_shape, spatial_shape = split_shape(self.shape, n_channel_dims=2)
         matrix = generate_scale_matrix(self.generate_diagonal())
         matrix = broadcast_to_in_parts(
             matrix,
@@ -182,9 +180,7 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
 
     def generate_diagonal(self) -> Tensor:
         """Generate the diagonal"""
-        batch_shape, channels_shape, spatial_shape = split_shape(
-            self.matrix_shape, n_channel_dims=2
-        )
+        batch_shape, channels_shape, spatial_shape = split_shape(self.shape, n_channel_dims=2)
         if self._diagonal is None:
             diagonal_length = min(channels_shape[0] - 1, channels_shape[1] - 1)
             diagonal = ones(
@@ -203,9 +199,7 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
 
     def generate_translation(self) -> Tensor:
         """Generate the translation"""
-        batch_shape, channels_shape, spatial_shape = split_shape(
-            self.matrix_shape, n_channel_dims=2
-        )
+        batch_shape, channels_shape, spatial_shape = split_shape(self.shape, n_channel_dims=2)
         if self._translation is None:
             translation = ones(
                 channels_shape[0] - 1,
@@ -320,7 +314,7 @@ def transform_values_with_diagonal_affine_matrix(
     n_channel_dims: int = 1,
 ) -> Tensor:
     """Transform values with affine matrix"""
-    affine_channels_shape = get_channels_shape(matrix_definition.matrix_shape, n_channel_dims=2)
+    affine_channels_shape = get_channels_shape(matrix_definition.shape, n_channel_dims=2)
     n_input_dims, n_output_dims = (affine_channels_shape[1] - 1, affine_channels_shape[0] - 1)
     if get_channels_shape(values.shape, n_channel_dims=n_channel_dims)[-1] != n_input_dims:
         raise ValueError("The diagonal matrix does not match the number of dimensions.")
@@ -348,7 +342,7 @@ def invert_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> DiagonalAffineMatrixDefinition:
     """Transform values with affine matrix"""
-    affine_channels_shape = get_channels_shape(matrix_definition.matrix_shape, n_channel_dims=2)
+    affine_channels_shape = get_channels_shape(matrix_definition.shape, n_channel_dims=2)
     if affine_channels_shape[0] != affine_channels_shape[1]:
         raise ValueError("The diagonal matrix must be square.")
     if matrix_definition.diagonal is None:
@@ -367,7 +361,7 @@ def invert_diagonal_affine_matrix(
     return DiagonalAffineMatrixDefinition(
         diagonal,
         translation,
-        matrix_definition.matrix_shape,
+        matrix_definition.shape,
         dtype=matrix_definition.dtype,
         device=matrix_definition.device,
     )
@@ -377,7 +371,7 @@ def negate_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> DiagonalAffineMatrixDefinition:
     """Transform values with affine matrix"""
-    affine_channels_shape = get_channels_shape(matrix_definition.matrix_shape, n_channel_dims=2)
+    affine_channels_shape = get_channels_shape(matrix_definition.shape, n_channel_dims=2)
     if matrix_definition.translation is not None:
         translation: Optional[Tensor] = -matrix_definition.translation
     else:
@@ -392,7 +386,7 @@ def negate_diagonal_affine_matrix(
     return DiagonalAffineMatrixDefinition(
         diagonal,
         translation,
-        matrix_shape=matrix_definition.matrix_shape,
+        matrix_shape=matrix_definition.shape,
         dtype=matrix_definition.dtype,
         device=matrix_definition.device,
     )
@@ -452,10 +446,10 @@ def compose_diagonal_affine_matrices(
 ) -> DiagonalAffineMatrixDefinition:
     """Compose two diagonal affine matrices"""
     batch_shape_1, channels_shape_1, spatial_shape_1 = split_shape(
-        matrix_definition_1.matrix_shape, n_channel_dims=2
+        matrix_definition_1.shape, n_channel_dims=2
     )
     batch_shape_2, channels_shape_2, spatial_shape_2 = split_shape(
-        matrix_definition_2.matrix_shape, n_channel_dims=2
+        matrix_definition_2.shape, n_channel_dims=2
     )
     diagonal_length_1 = min(channels_shape_1[0] - 1, channels_shape_1[1] - 1)
     diagonal_length_2 = min(channels_shape_2[0] - 1, channels_shape_2[1] - 1)
@@ -531,10 +525,10 @@ def add_diagonal_affine_matrices(
 ) -> DiagonalAffineMatrixDefinition:
     """Add two diagonal affine matrices"""
     matrix_shape = broadcast_shapes_in_parts_to_single_shape(
-        matrix_definition_1.matrix_shape, matrix_definition_2.matrix_shape, n_channel_dims=2
+        matrix_definition_1.shape, matrix_definition_2.shape, n_channel_dims=2
     )
-    if get_channels_shape(matrix_definition_1.matrix_shape, n_channel_dims=2) != get_channels_shape(
-        matrix_definition_2.matrix_shape, n_channel_dims=2
+    if get_channels_shape(matrix_definition_1.shape, n_channel_dims=2) != get_channels_shape(
+        matrix_definition_2.shape, n_channel_dims=2
     ):
         raise ValueError("The matrices are not compatible.")
 

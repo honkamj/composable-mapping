@@ -1,7 +1,6 @@
 """Interfaces for composable mapping"""
 
 from abc import ABC, abstractmethod
-from typing import Optional, Sequence
 
 from torch import Tensor
 
@@ -46,16 +45,16 @@ class IInterpolator(ABC):
 
     @abstractmethod
     def interpolate_values(
-        self, volume: Tensor, voxel_coordinates: Tensor, n_channel_dims: int = 1
+        self,
+        volume: Tensor,
+        voxel_coordinates: Tensor,
     ) -> Tensor:
         """Interpolate values"""
 
     @abstractmethod
     def interpolate_mask(
         self,
-        mask: Optional[Tensor],
+        mask: Tensor,
         voxel_coordinates: Tensor,
-        spatial_shape: Optional[Sequence[int]] = None,
-        n_channel_dims: int = 1,
-    ) -> Optional[Tensor]:
+    ) -> Tensor:
         """Interpolate mask"""

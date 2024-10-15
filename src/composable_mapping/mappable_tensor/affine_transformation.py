@@ -15,7 +15,11 @@ from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
     broadcast_shapes_in_parts,
     broadcast_to_in_parts,
+    get_batch_shape,
     get_channel_dims,
+    get_channels_shape,
+    get_spatial_shape,
+    is_broadcastable,
     split_shape,
 )
 
@@ -99,7 +103,7 @@ class IAffineTransformation(ITensorLike):
     ) -> Tuple[int, ...]:
         """Return the shape of the output tensor given the input shape
 
-        Raises an error if the transformation is not compatible with the input shape
+        Raises: RuntimeError if the transformation is not compatible with the input shape
         """
 
     @abstractmethod
@@ -115,8 +119,32 @@ class IAffineTransformation(ITensorLike):
 
     @property
     @abstractmethod
-    def matrix_shape(self) -> Sequence[int]:
-        """Return shape of the transformation matrix"""
+    def shape(self) -> Sequence[int]:
+        """Return shape of the transformation when represented as affine
+        transformation matrix"""
+
+    @property
+    @abstractmethod
+    def batch_shape(self) -> Tuple[int, ...]:
+        """Return the shape of the batch dimensions"""
+
+    @property
+    @abstractmethod
+    def channels_shape(self) -> Tuple[int, ...]:
+        """Return the shape of the channel dimensions"""
+
+    @property
+    @abstractmethod
+    def spatial_shape(self) -> Tuple[int, ...]:
+        """Return the shape of the spatial dimensions"""
+
+    @abstractmethod
+    def is_composable(self, affine_transformation: "IAffineTransformation") -> bool:
+        """Return whether the transformation is composable with the other transformation"""
+
+    @abstractmethod
+    def is_addable(self, affine_transformation: "IAffineTransformation") -> bool:
+        """Return whether the transformation is addable with the other transformation"""
 
 
 class IHostAffineTransformation(IAffineTransformation):
@@ -180,27 +208,56 @@ class BaseAffineTransformation(IAffineTransformation):
     """Base affine transformation"""
 
     @property
-    @abstractmethod
-    def matrix_shape(self) -> Sequence[int]:
-        """Return shape of the transformation matrix"""
+    def batch_shape(self) -> Tuple[int, ...]:
+        """Return the shape of the batch dimensions"""
+        return get_batch_shape(self.shape, n_channel_dims=2)
+
+    @property
+    def channels_shape(self) -> Tuple[int, ...]:
+        """Return the shape of the channel dimensions"""
+        return get_channels_shape(self.shape, n_channel_dims=2)
+
+    @property
+    def spatial_shape(self) -> Tuple[int, ...]:
+        """Return the shape of the spatial dimensions"""
+        return get_spatial_shape(self.shape, n_channel_dims=2)
+
+    def is_composable(self, affine_transformation: "IAffineTransformation") -> bool:
+        return (
+            is_broadcastable(affine_transformation.batch_shape, self.batch_shape)
+            and is_broadcastable(affine_transformation.spatial_shape, self.spatial_shape)
+            and self.channels_shape[1] == affine_transformation.channels_shape[0]
+        )
+
+    def is_addable(self, affine_transformation: "IAffineTransformation") -> bool:
+        return (
+            is_broadcastable(affine_transformation.batch_shape, self.batch_shape)
+            and is_broadcastable(affine_transformation.spatial_shape, self.spatial_shape)
+            and self.channels_shape == affine_transformation.channels_shape
+        )
 
     def get_output_shape(
         self, input_shape: Sequence[int], n_channel_dims: int = 1
     ) -> Tuple[int, ...]:
-        broadcasted_input_shape, _broadcasted_matrix_shape = broadcast_shapes_in_parts(
-            input_shape,
-            self.matrix_shape,
-            n_channel_dims=(n_channel_dims, 2),
-            broadcast_channels=False,
-        )
-        matrix_channel_dims = get_channel_dims(len(self.matrix_shape), n_channel_dims=2)
-        n_matrix_input_channels = self.matrix_shape[matrix_channel_dims[1]] - 1
+        try:
+            broadcasted_input_shape, _broadcasted_matrix_shape = broadcast_shapes_in_parts(
+                input_shape,
+                self.shape,
+                n_channel_dims=(n_channel_dims, 2),
+                broadcast_channels=False,
+            )
+        except RuntimeError as broadcasting_error:
+            raise RuntimeError(
+                "Input shape does not match the transformation matrix"
+            ) from broadcasting_error
+        matrix_channel_dims = get_channel_dims(len(self.shape), n_channel_dims=2)
+        n_matrix_input_channels = self.shape[matrix_channel_dims[1]] - 1
         last_input_channel_index = get_channel_dims(
             len(input_shape), n_channel_dims=n_channel_dims
         )[-1]
         if input_shape[last_input_channel_index] != n_matrix_input_channels:
-            raise ValueError("Input shape does not match the transformation matrix")
-        n_output_channels = self.matrix_shape[matrix_channel_dims[0]] - 1
+            raise RuntimeError("Input shape does not match the transformation matrix")
+        n_output_channels = self.shape[matrix_channel_dims[0]] - 1
         modified_input_shape = list(broadcasted_input_shape)
         modified_input_shape[last_input_channel_index] = n_output_channels
         return tuple(modified_input_shape)
@@ -293,7 +350,7 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
         self._transformation_matrix = transformation_matrix
 
     @property
-    def matrix_shape(self) -> Sequence[int]:
+    def shape(self) -> Sequence[int]:
         return self._transformation_matrix.shape
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
@@ -543,8 +600,8 @@ class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTran
         return DiagonalAffineTransformation.from_definition(children["matrix_definition"])
 
     @property
-    def matrix_shape(self) -> Sequence[int]:
-        return self._matrix_definition.matrix_shape
+    def shape(self) -> Sequence[int]:
+        return self._matrix_definition.shape
 
     def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
         return transform_values_with_diagonal_affine_matrix(

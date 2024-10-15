@@ -28,7 +28,10 @@ def generate_voxel_coordinate_grid(
 
 
 def interpolate(
-    volume: Tensor, grid: Tensor, mode: str = "bilinear", padding_mode: str = "border"
+    volume: Tensor,
+    grid: Tensor,
+    mode: str = "bilinear",
+    padding_mode: str = "border",
 ) -> Tensor:
     """Interpolates in voxel coordinates
 
@@ -87,27 +90,6 @@ def compute_fov_mask_based_on_bounds(
         torch_all(fov_mask, dim=-1, keepdim=True), n_channel_dims=n_channel_dims
     )
     return fov_mask
-
-
-FOV_MASK_TOLERANCE = 1e-5
-
-
-def compute_fov_mask_at_voxel_coordinates(
-    coordinates_at_voxel_coordinates: Tensor,
-    volume_shape: Sequence[int],
-) -> Tensor:
-    """Calculate mask at coordinates
-
-    Args:
-        coordinates_at_voxel_coordinates: Tensor with shape ([batch_size, ]n_dims, *target_shape)
-        volume_shape: Shape of the volume
-        dtype: Type of the generated mask
-    """
-    return compute_fov_mask_based_on_bounds(
-        coordinates=coordinates_at_voxel_coordinates,
-        min_values=[-FOV_MASK_TOLERANCE] * len(volume_shape),
-        max_values=[float(dim_size - 1) + FOV_MASK_TOLERANCE for dim_size in volume_shape],
-    )
 
 
 @script
@@ -175,14 +157,19 @@ def _interpolate(volume: Tensor, grid: Tensor, mode: str, padding_mode: str) -> 
     if grid.ndim == 1:
         grid = grid[None]
     n_dims = grid.size(1)
+    if volume.ndim < n_dims + 2:
+        raise ValueError(
+            "Volume must have batch dimension, at least one channel dimension, "
+            "and spatial dimensions"
+        )
     channel_shape = volume.shape[1:-n_dims]
-    volume_shape = volume.shape[-n_dims:]
+    volume_spatial_shape = volume.shape[-n_dims:]
     target_shape = grid.shape[2:]
     dim_matched_grid = _match_grid_shape_to_dims(grid)
     normalized_grid: Tensor = _convert_voxel_to_normalized_coordinates(
-        dim_matched_grid, list(volume_shape)
+        dim_matched_grid, list(volume_spatial_shape)
     )
-    simplified_volume = volume.view((volume.size(0), -1) + volume_shape)
+    simplified_volume = volume.view((volume.size(0), -1) + volume_spatial_shape)
     permuted_volume = simplified_volume.permute(
         [0, 1] + list(range(simplified_volume.ndim - 1, 2 - 1, -1))
     )
