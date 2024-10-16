@@ -61,20 +61,24 @@ class _BaseInterpolator(IInterpolator):
                 data,
                 coordinate_values,
             )
-            mask = volume.generate_mask(
+            interpolated_mask = volume.generate_mask(
                 generate_missing_mask=self._mask_extrapolated_regions_for_empty_volume_mask,
                 cast_mask=False,
             )
-            if mask is not None:
-                mask = self.interpolate_mask(
-                    mask,
+            if interpolated_mask is not None:
+                interpolated_mask = self.interpolate_mask(
+                    interpolated_mask,
                     coordinate_values,
                 )
         else:
+            data_mask = volume.generate_mask(
+                generate_missing_mask=False,
+                cast_mask=False,
+            )
             values = data[coordinates_as_slice]
-            mask = mask[coordinates_as_slice] if mask is not None else None
+            interpolated_mask = data_mask[coordinates_as_slice] if data_mask is not None else None
         mask = combine_optional_masks(
-            mask, coordinates_mask, n_channel_dims=(volume.n_channel_dims, 1)
+            interpolated_mask, coordinates_mask, n_channel_dims=(volume.n_channel_dims, 1)
         )
         return PlainTensor(values, mask, n_channel_dims=len(volume.channels_shape))
 

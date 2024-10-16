@@ -413,10 +413,10 @@ class MappableTensor(BaseTensorLikeWrapper):
     def as_slice(
         self, target_shape: Sequence[int]
     ) -> Optional[Tuple[Union["ellipsis", slice], ...]]:
-        """Reduce the grid to slice on target shape, if possible"""
-        if self._displacements is not None or self._affine_transformation is None:
+        """Reduce the tensor to slice on target shape, if possible"""
+        if self._grid is None or self._displacements is not None:
             return None
-        transformation_matrix = self._affine_transformation.as_host_matrix()
+        transformation_matrix = self._grid.affine_transformation.as_host_matrix()
         if transformation_matrix is None:
             return None
         transformation_matrix = transformation_matrix.squeeze(
