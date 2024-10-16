@@ -113,10 +113,13 @@ class IAffineTransformation(ITensorLike):
         """Return whether the transformation is zero
 
         Returns None if the check cannot be done on CPU
+        """
 
-        Args:
-            n_input_dims: Number of dimensions the transformation is applied on
-            n_output_dims: Number of dimensions the transformation outputs
+    @abstractmethod
+    def is_identity(self) -> Optional[bool]:
+        """Return whether the transformation is identity matrix
+
+        Returns None if the check cannot be done on CPU
         """
 
     @property
@@ -312,6 +315,14 @@ class BaseAffineTransformation(IAffineTransformation):
     def __matmul__(self, affine_transformation: IAffineTransformation) -> "IAffineTransformation":
         if not isinstance(affine_transformation, IAffineTransformation):
             return NotImplemented
+        if self.is_identity():
+            if not self.is_composable(affine_transformation):
+                raise RuntimeError("Transformation is not composable with the other transformation")
+            return affine_transformation
+        if affine_transformation.is_identity():
+            if not affine_transformation.is_composable(self):
+                raise RuntimeError("Transformation is not composable with the other transformation")
+            return self
         self_host_matrix = self.as_host_matrix()
         target_host_matrix = affine_transformation.as_host_matrix()
         if self_host_matrix is not None and target_host_matrix is not None:
@@ -369,6 +380,12 @@ class BaseAffineTransformation(IAffineTransformation):
         host_matrix = self.as_host_matrix()
         if host_matrix is not None:
             return is_zero_matrix(host_matrix)
+        return None
+
+    def is_identity(self) -> Optional[bool]:
+        host_matrix = self.as_host_matrix()
+        if host_matrix is not None:
+            return is_identity_matrix(host_matrix)
         return None
 
     def as_diagonal(self) -> Optional[DiagonalAffineMatrixDefinition]:
@@ -805,6 +822,10 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
         return HostDiagonalAffineTransformation.from_definition(
             invert_diagonal_affine_matrix(self._matrix_definition), device=self.device
         )
+
+    def is_identity(self) -> bool:
+        host_diagonal_matrix = self.as_host_diagonal()
+        return is_identity_diagonal_affine_matrix(host_diagonal_matrix)
 
     def is_zero(self) -> bool:
         host_diagonal_matrix = self.as_host_diagonal()
