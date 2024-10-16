@@ -6,6 +6,10 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 
+from composable_mapping.mappable_tensor.affine_transformation import (
+    IdentityAffineTransformation,
+)
+
 from .base import BaseComposableMapping
 from .interface import IComposableMapping
 from .mappable_tensor import (
@@ -25,7 +29,7 @@ class Affine(BaseComposableMapping):
 
     @classmethod
     def from_matrix(cls, matrix: Tensor) -> "Affine":
-        """Create affine mapping from matrix"""
+        """Create affine mapping from an affine transformation matrix"""
         return cls(AffineTransformation(matrix))
 
     @classmethod
@@ -47,6 +51,13 @@ class Affine(BaseComposableMapping):
                 device=device,
             )
         )
+
+    @classmethod
+    def identity(
+        cls, n_dims: int, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
+    ) -> "Affine":
+        """Create identity affine transformation"""
+        return cls(IdentityAffineTransformation(n_dims, dtype=dtype, device=device))
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
         return masked_coordinates.transform(self.transformation)
@@ -92,17 +103,8 @@ def as_affine_transformation(
 
 
 class _AffineTracer(MappableTensor):
-    """Can be used to trace affine component of a composable mapping"""
-
+    # pylint: disable=super-init-not-called
     def __init__(self, affine_transformation: Optional[IAffineTransformation] = None) -> None:
-        super().__init__(
-            spatial_shape=tuple(),
-            displacements=None,
-            mask=None,
-            n_channel_dims=1,
-            affine_transformation_on_displacements=None,
-            affine_transformation_on_voxel_grid=None,
-        )
         self.traced_affine: Optional[IAffineTransformation] = affine_transformation
 
     def transform(self, affine_transformation: IAffineTransformation) -> MappableTensor:

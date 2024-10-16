@@ -417,7 +417,9 @@ def is_zero_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> bool:
     """Return whether a diagonal matrix is a zero matrix"""
-    if matrix_definition.diagonal is not None:
+    if matrix_definition.diagonal is None:
+        return False
+    else:
         if not allclose(
             matrix_definition.diagonal,
             zeros(

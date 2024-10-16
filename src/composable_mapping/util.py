@@ -486,10 +486,20 @@ def avg_pool_nd_function(n_dims: int):
     return getattr(torch.nn.functional, f"avg_pool{n_dims}d")
 
 
-def is_broadcastable(shape_1: Sequence[int], shape_2: Sequence[int]) -> bool:
+def are_broadcastable(shape_1: Sequence[int], shape_2: Sequence[int]) -> bool:
     """Check if two shapes are broadcastable"""
     try:
         broadcast_shapes(shape_1, shape_2)
     except RuntimeError:
+        return False
+    return True
+
+
+def is_broadcastable_to(source_shape: Sequence[int], target_shape: Sequence[int]) -> bool:
+    """Check if source shape is broadcastable to target shape"""
+    if len(target_shape) < len(source_shape) or any(
+        dim_size_1 != dim_size_2 and dim_size_1 != 1 and dim_size_2 != 1
+        for dim_size_1, dim_size_2 in zip(source_shape[::-1], target_shape[::-1])
+    ):
         return False
     return True

@@ -16,11 +16,8 @@ def concatenate_channels(
 
     Args:
         masked_tensors: Masked tensors to concatenate
-        combine_mask: Combine masks of the masked tensors by multiplying,
-            otherwise the mask of the first tensor is used.
         channel_index: Index of the channel dimension starting from the first
-            channel dimension (second dimension of the tensor if batch dimension
-            is present)
+            channel dimension
     """
     if not all(
         masked_tensor.n_channel_dims == masked_tensors[0].n_channel_dims
@@ -39,7 +36,7 @@ def concatenate_channels(
     mask: Optional[Tensor] = None
     for masked_tensor in masked_tensors:
         update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
-        mask = combine_optional_masks([mask, update_mask])
+        mask = combine_optional_masks(mask, update_mask, n_channel_dims=n_channel_dims)
     return PlainTensor(
         values=values,
         mask=mask,
@@ -52,11 +49,8 @@ def stack_channels(*masked_tensors: MappableTensor, channel_index: int = 0) -> "
 
     Args:
         masked_tensors: Masked tensors to concatenate
-        combine_mask: Combine masks of the masked tensors by multiplying,
-            otherwise the mask of the first tensor is used.
         channel_index: Index of the channel dimension over which to stack
-            starting from the first channel dimension (second dimension of the
-            tensor if batch dimension is present)
+            starting from the first channel dimension
     """
     if not all(
         masked_tensor.n_channel_dims == masked_tensors[0].n_channel_dims
@@ -78,7 +72,7 @@ def stack_channels(*masked_tensors: MappableTensor, channel_index: int = 0) -> "
         update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
         if update_mask is not None:
             update_mask = update_mask.unsqueeze(dim=stacking_dim)
-            mask = combine_optional_masks([mask, update_mask])
+            mask = combine_optional_masks(mask, update_mask, n_channel_dims=n_channel_dims + 1)
     return PlainTensor(
         values=values,
         mask=mask,

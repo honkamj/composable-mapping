@@ -3,23 +3,24 @@
 from abc import abstractmethod
 from typing import Mapping, Optional, Sequence, Tuple, Union, overload
 
-from torch import Tensor
+from torch import Tensor, broadcast_shapes
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import zeros
+from torch import ones, zeros
 
 from composable_mapping.mappable_tensor.diagonal_matrix import (
     DiagonalAffineMatrixDefinition,
 )
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
+    are_broadcastable,
     broadcast_shapes_in_parts,
     broadcast_to_in_parts,
     get_batch_shape,
     get_channel_dims,
     get_channels_shape,
     get_spatial_shape,
-    is_broadcastable,
+    is_broadcastable_to,
     split_shape,
 )
 
@@ -36,6 +37,7 @@ from .diagonal_matrix import (
 from .matrix import (
     add_affine_matrices,
     compose_affine_matrices,
+    embed_matrix,
     invert_matrix,
     is_identity_matrix,
     is_zero_matrix,
@@ -146,6 +148,14 @@ class IAffineTransformation(ITensorLike):
     def is_addable(self, affine_transformation: "IAffineTransformation") -> bool:
         """Return whether the transformation is addable with the other transformation"""
 
+    @abstractmethod
+    def broadcast_to_n_output_channels(
+        self,
+        n_output_channels: int,
+    ) -> "IAffineTransformation":
+        """Modify the transformation to output n_output_channels channels such that the output
+        would equal broadcasting the original output to have n_output_channels channels."""
+
 
 class IHostAffineTransformation(IAffineTransformation):
     """Host affine transformation"""
@@ -224,16 +234,45 @@ class BaseAffineTransformation(IAffineTransformation):
 
     def is_composable(self, affine_transformation: "IAffineTransformation") -> bool:
         return (
-            is_broadcastable(affine_transformation.batch_shape, self.batch_shape)
-            and is_broadcastable(affine_transformation.spatial_shape, self.spatial_shape)
+            are_broadcastable(affine_transformation.batch_shape, self.batch_shape)
+            and are_broadcastable(affine_transformation.spatial_shape, self.spatial_shape)
             and self.channels_shape[1] == affine_transformation.channels_shape[0]
         )
 
     def is_addable(self, affine_transformation: "IAffineTransformation") -> bool:
         return (
-            is_broadcastable(affine_transformation.batch_shape, self.batch_shape)
-            and is_broadcastable(affine_transformation.spatial_shape, self.spatial_shape)
+            are_broadcastable(affine_transformation.batch_shape, self.batch_shape)
+            and are_broadcastable(affine_transformation.spatial_shape, self.spatial_shape)
             and self.channels_shape == affine_transformation.channels_shape
+        )
+
+    def broadcast_to_n_output_channels(
+        self,
+        n_output_channels: int,
+    ) -> IAffineTransformation:
+        n_previous_output_channels = self.channels_shape[0] - 1
+        if not is_broadcastable_to((n_previous_output_channels,), (n_output_channels,)):
+            raise RuntimeError("Cannot broadcast to the given number of output channels")
+        target_n_output_channels = broadcast_shapes(
+            (n_previous_output_channels,), (n_output_channels,)
+        )[0]
+        if target_n_output_channels == n_output_channels:
+            return self
+        assert n_previous_output_channels == 1
+        return (
+            HostAffineTransformation(
+                transformation_matrix_on_host=embed_matrix(
+                    ones(
+                        target_n_output_channels,
+                        1,
+                        dtype=self.dtype,
+                        device=torch_device("cpu"),
+                    ),
+                    target_shape=(n_output_channels + 1, 2),
+                ),
+                device=self.device,
+            )
+            @ self
         )
 
     def get_output_shape(
@@ -418,10 +457,10 @@ class HostAffineTransformation(AffineTransformation, IHostAffineTransformation):
             return values
         if self.is_zero():
             return zeros(
-                self.get_output_shape(values.shape, n_channel_dims),
+                1,
                 device=self._device,
                 dtype=values.dtype,
-            )
+            ).expand(self.get_output_shape(values.shape, n_channel_dims))
         return super().__call__(values, n_channel_dims)
 
     def as_matrix(
