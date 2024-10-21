@@ -46,10 +46,10 @@ class IInterpolator(ABC):
     @abstractmethod
     def interpolate_values(
         self,
-        volume: Tensor,
+        values: Tensor,
         voxel_coordinates: Tensor,
     ) -> Tensor:
-        """Interpolate values"""
+        """Interpolate values as tensor"""
 
     @abstractmethod
     def interpolate_mask(
@@ -57,4 +57,4 @@ class IInterpolator(ABC):
         mask: Tensor,
         voxel_coordinates: Tensor,
     ) -> Tensor:
-        """Interpolate mask"""
+        """Interpolate mask as tensor"""

@@ -284,9 +284,9 @@ def transform_values_with_affine_matrix(
         ]
     values = move_channels_last(values, n_channel_dims)
     transformed = matmul(
-        transformation_matrix,
+        transformation_matrix[..., :-1, :],
         convert_to_homogenous_coordinates(values, dim=-1)[..., None],
-    )[..., :-1, 0]
+    )[..., 0]
     transformed = move_channels_first(transformed, n_channel_dims)
 
     return transformed

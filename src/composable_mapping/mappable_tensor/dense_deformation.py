@@ -70,7 +70,7 @@ def compute_fov_mask_based_on_bounds(
         dtype: Type of the generated mask
     """
     coordinates = move_channels_last(coordinates.detach(), n_channel_dims=n_channel_dims)
-    non_blocking = coordinates.device != torch_device("cpu")
+    non_blocking = coordinates.device.type != "cpu"
     min_values_tensor = tensor(min_values, dtype=coordinates.dtype).to(
         device=coordinates.device, non_blocking=non_blocking
     )
@@ -125,7 +125,7 @@ def _convert_voxel_to_normalized_coordinates(
             dtype=coordinates.dtype,
         )
         .view(add_spatial_dims_view)
-        .to(device=coordinates.device, non_blocking=coordinates.device != torch_device("cpu"))
+        .to(device=coordinates.device, non_blocking=coordinates.device.type != "cpu")
     )
     return coordinates / (volume_shape_tensor - 1) * 2 - 1
 

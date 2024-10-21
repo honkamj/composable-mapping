@@ -3,9 +3,7 @@
 from itertools import product
 from typing import Optional, Sequence, Union
 
-from torch import Tensor
-from torch import device as torch_device
-from torch import tensor
+from torch import Tensor, tensor
 
 from .coordinate_system import CoordinateSystem, ReferenceOption
 from .mappable_tensor import MappableTensor, PlainTensor, stack_channels
@@ -131,7 +129,7 @@ def estimate_spatial_derivatives(
         spacing = 1.0
     if isinstance(spacing, float) or isinstance(spacing, int):
         spacing = tensor(spacing, dtype=data.dtype).to(
-            data.device, non_blocking=data.device != torch_device("cpu")
+            data.device, non_blocking=data.device.type != "cpu"
         )
     spacing = spacing.expand((batch_size,))[(...,) + (None,) * (data.ndim - 1)]
     n_spatial_dims = num_spatial_dims(data.ndim, n_channel_dims)

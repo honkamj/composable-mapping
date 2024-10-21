@@ -459,7 +459,7 @@ class HostAffineTransformation(AffineTransformation, IHostAffineTransformation):
         transformation_matrix_on_host: Tensor,
         device: Optional[torch_device] = None,
     ) -> None:
-        if transformation_matrix_on_host.device != torch_device("cpu"):
+        if transformation_matrix_on_host.device.type != "cpu":
             raise ValueError("Please give the matrix on CPU")
         if transformation_matrix_on_host.requires_grad:
             raise ValueError("The implementation assumes a detached transformation matrix.")
@@ -768,11 +768,7 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
     def as_matrix(
         self,
     ) -> Tensor:
-        matrix = (
-            super()
-            .as_matrix()
-            .to(device=self.device, non_blocking=self.device != torch_device("cpu"))
-        )
+        matrix = super().as_matrix().to(device=self.device, non_blocking=self.device.type != "cpu")
         return matrix
 
     def as_host_matrix(self) -> Tensor:
@@ -780,9 +776,9 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
 
     def as_diagonal(self) -> DiagonalAffineMatrixDefinition:
         matrix_definition = super().as_diagonal()
-        if self._target_device != torch_device("cpu"):
+        if self._target_device.type != "cpu":
             matrix_definition = matrix_definition.cast(
-                device=self._target_device, non_blocking=self.device != torch_device("cpu")
+                device=self._target_device, non_blocking=self.device.type != "cpu"
             )
         return matrix_definition
 

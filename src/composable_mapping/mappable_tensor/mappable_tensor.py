@@ -21,6 +21,7 @@ from composable_mapping.util import (
     broadcast_to_in_parts,
     combine_optional_masks,
     get_batch_dims,
+    get_batch_shape,
     get_channels_shape,
     get_spatial_dims,
     get_spatial_shape,
@@ -153,6 +154,11 @@ class MappableTensor(BaseTensorLikeWrapper):
     def channels_shape(self) -> Tuple[int, ...]:
         """Shape of the channel dimensions"""
         return get_channels_shape(self.shape, self._n_channel_dims)
+
+    @property
+    def batch_shape(self) -> Tuple[int, ...]:
+        """Shape of the batch dimension"""
+        return get_batch_shape(self.shape, self._n_channel_dims)
 
     @property
     def mask_shape(self) -> Tuple[int, ...]:

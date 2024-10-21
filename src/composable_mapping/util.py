@@ -1,10 +1,11 @@
 """Utility functions"""
 
 from itertools import repeat
-from typing import Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
+from typing import Callable, Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
 
 import torch.nn
 from torch import Tensor, broadcast_shapes
+from torch.nn.functional import pad
 
 T = TypeVar("T")
 
@@ -72,7 +73,7 @@ def move_channels_first(
     tensor: Tensor,
     n_channel_dims: int = 1,
 ) -> Tensor:
-    """Move channel dimensions first
+    """Move channel dimensions back from being the last dimensions
 
     Args:
         tensor: Tensor with shape (batch_size, *, channel_1, ..., channel_{n_channel_dims})
@@ -481,9 +482,14 @@ def combine_optional_masks(
     return combined_mask
 
 
-def avg_pool_nd_function(n_dims: int):
+def avg_pool_nd_function(n_dims: int) -> Callable[..., Tensor]:
     """Return any dimensional average pooling function"""
     return getattr(torch.nn.functional, f"avg_pool{n_dims}d")
+
+
+def conv_nd_function(n_dims: int) -> Callable[..., Tensor]:
+    """Return any dimensional convolution function"""
+    return getattr(torch.nn.functional, f"conv{n_dims}d")
 
 
 def are_broadcastable(shape_1: Sequence[int], shape_2: Sequence[int]) -> bool:
@@ -504,3 +510,128 @@ def is_broadcastable_to(source_shape: Sequence[int], target_shape: Sequence[int]
     ):
         return False
     return True
+
+
+class NDSpatialSlice:
+    """Multi-dimensional slice for spatial dimensions"""
+
+    def __init__(self, start: Sequence[int], step: Sequence[int], steps: Sequence[int]) -> None:
+        if len(start) != len(step) or len(start) != len(steps):
+            raise ValueError("Start, step and steps must have the same length")
+        self.start = start
+        self.step = step
+        self.steps = steps
+
+    @property
+    def n_dims(self) -> int:
+        """Return number of dimensions"""
+        return len(self.start)
+
+    def apply_slice(
+        self, volume: Tensor, paddings: Sequence[Tuple[int, int]] = tuple(), n_channel_dims: int = 1
+    ) -> Tensor:
+        """Return slice tuple"""
+        spatial_dims = get_spatial_dims(volume.ndim, n_channel_dims)
+        spatial_shape = get_spatial_shape(volume.shape, n_channel_dims)
+        if len(paddings) != self.n_dims:
+            raise ValueError("Number of paddings must match number of dimensions")
+        if len(spatial_dims) != self.n_dims:
+            raise ValueError("Number of spatial dims must match number of dimensions")
+
+        flipped_spatial_dims = []
+        slices = []
+        for start, step, steps, spatial_dim, spatial_dim_size, (padding_start, _padding_end) in zip(
+            self.start, self.step, self.steps, spatial_dims, spatial_shape, paddings
+        ):
+            start = start + padding_start
+            if step < 0:
+                flipped_spatial_dims.append(spatial_dim)
+                start = spatial_dim_size - start - 1
+                step = -step
+            slices.append(slice(start, start + steps * step, step))
+        if flipped_spatial_dims:
+            volume = volume.flip(flipped_spatial_dims)
+        sliced_volume = volume[(...,) + tuple(slices)]
+        if flipped_spatial_dims:
+            sliced_volume = sliced_volume.flip(flipped_spatial_dims)
+        return sliced_volume
+
+    def obtain_paddings(self, shape: Sequence[int]) -> Tuple[Tuple[int, int], ...]:
+        """Obtain paddings and crops for the slice to just fit inside a volume"""
+        if len(shape) != self.n_dims:
+            raise ValueError("Shape must have the same number of dimensions as the slice")
+        ending_points = (
+            start + step * steps for start, step, steps in zip(self.start, self.step, self.steps)
+        )
+        return tuple(
+            (
+                -min(start, ending_point),
+                -min(dim_size - start - 1, dim_size - ending_point - 1),
+            )
+            for start, ending_point, dim_size in zip(self.start, ending_points, shape)
+        )
+
+    @staticmethod
+    def obtain_joint_padding_from_slices(
+        slices: Sequence["NDSpatialSlice"], shape: Sequence[int]
+    ) -> Tuple[Tuple[int, int], ...]:
+        """Obtain paddings containing all the slices"""
+        if any(slice_.n_dims != slices[0].n_dims for slice_ in slices):
+            raise ValueError("All slices must have the same number of dimensions")
+        if slices[0].n_dims != len(shape):
+            raise ValueError("Shape must have the same number of dimensions as the slices")
+        paddings = [slice_.obtain_paddings(shape) for slice_ in slices]
+        combined_paddings = []
+        for dim_paddings in zip(*paddings):
+            start_padding = max(start for start, _ in dim_paddings)
+            end_padding = max(end for _, end in dim_paddings)
+            combined_paddings.append((start_padding, end_padding))
+        return tuple(combined_paddings)
+
+
+def crop_and_then_pad_spatial(
+    tensor: Tensor,
+    pads_or_crops: Sequence[Tuple[int, int]],
+    mode: str = "constant",
+    value: Optional[float] = 0.0,
+    n_channel_dims: int = 1,
+) -> Tensor:
+    """Pad spatial dimensions starting from the first spatial dimension"""
+    n_spatial_dims = num_spatial_dims(tensor.ndim, n_channel_dims)
+    spatial_shape = get_spatial_shape(tensor.shape, n_channel_dims)
+    if len(pads_or_crops) != n_spatial_dims:
+        raise ValueError("Number of paddings must match number of spatial dimensions")
+    if all(padding == (0, 0) for padding in pads_or_crops):
+        return tensor
+    crops = []
+    for (padding_start, padding_end), spatial_dim_size in zip(pads_or_crops, spatial_shape):
+        if padding_start >= 0:
+            crop_start = None
+        else:
+            crop_start = min(-padding_start, spatial_dim_size)
+        if padding_end >= 0:
+            crop_end = None
+        else:
+            crop_end = -min(-padding_end, spatial_dim_size)
+        crops.append(slice(crop_start, crop_end))
+    torch_paddings = []
+    for (padding_start, padding_end), spatial_dim_size in reversed(
+        list(zip(pads_or_crops, spatial_shape))
+    ):
+        output_dim_size = spatial_dim_size + padding_start + padding_end
+        if output_dim_size < 0:
+            raise ValueError("Too much cropping")
+        if padding_start >= 0:
+            torch_paddings.append(min(padding_start, output_dim_size))
+        else:
+            torch_paddings.append(0)
+        if padding_end >= 0:
+            torch_paddings.append(min(padding_end, output_dim_size))
+        else:
+            torch_paddings.append(0)
+    return pad(
+        tensor[(...,) + tuple(crops)],
+        torch_paddings,
+        mode=mode,
+        value=value,
+    )
