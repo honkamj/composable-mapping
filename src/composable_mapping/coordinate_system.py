@@ -186,7 +186,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     @classmethod
     def centered_normalized(
         cls,
-        shape: Sequence[int],
+        spatial_shape: Sequence[int],
         voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
         align_corners: bool = False,
         dtype: Optional[torch_dtype] = None,
@@ -198,15 +198,15 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         cube from -1 to 1 in each dimension. The grid is centered in the cube.
 
         Args:
-            shape: Shape of the grid
+            spatial_shape: Shape of the grid
             voxel_size: Voxel size of the grid
             align_corners: Whether to fit the grid into the cube by full voxels or
                 by voxel centers (see similar option in torch.nn.functional.grid_sample)
             device: Device of the coordinate system
         """
-        centered = cls.centered(shape, voxel_size, dtype=dtype, device=device)
+        centered = cls.centered(spatial_shape, voxel_size, dtype=dtype, device=device)
         voxel_size = centered.grid_spacing_cpu()
-        shape_tensor = voxel_size.new_tensor(shape)
+        shape_tensor = voxel_size.new_tensor(spatial_shape)
         if align_corners:
             shape_tensor -= 1
         fov_sizes = shape_tensor * voxel_size
@@ -221,7 +221,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     @classmethod
     def centered(
         cls,
-        shape: Sequence[int],
+        spatial_shape: Sequence[int],
         voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -233,21 +233,21 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             voxel_size: Voxel size of the grid
             device: Device of the coordinate system
         """
-        return cls.voxel(shape, voxel_size=voxel_size, dtype=dtype, device=device).shift_voxel(
-            [-(dim_size - 1) / 2 for dim_size in shape]
-        )
+        return cls.voxel(
+            spatial_shape, voxel_size=voxel_size, dtype=dtype, device=device
+        ).shift_voxel([-(dim_size - 1) / 2 for dim_size in spatial_shape])
 
     @classmethod
     def voxel(
         cls,
-        shape: Sequence[int],
+        spatial_shape: Sequence[int],
         voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> "CoordinateSystem":
         """Create coordinate system corresponding to the voxel coordinates with
         potential scaling by voxel size"""
-        n_dims = len(shape)
+        n_dims = len(spatial_shape)
         if dtype is None:
             dtype = get_default_dtype()
         if voxel_size is not None:
@@ -268,7 +268,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             from_voxel_coordinates=HostDiagonalAffineTransformation(
                 diagonal=voxel_size, matrix_shape=(n_dims + 1, n_dims + 1), device=device
             ),
-            shape=shape,
+            shape=spatial_shape,
         )
 
     @property
@@ -409,7 +409,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             shift: Shift in the voxel coordinates
         """
         if not isinstance(shift, Tensor):
-            shift = tensor(shift, dtype=self.dtype, device=torch_device("cpu"))
+            shift = tensor(shift, dtype=self.dtype, device=torch_device("cpu"))[None]
         shift = broadcast_to_in_parts(shift, channels_shape=(len(self._shape),), n_channel_dims=1)
         shift_transformation = HostDiagonalAffineTransformation(
             translation=shift, device=self.device

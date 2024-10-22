@@ -605,6 +605,8 @@ def crop_and_then_pad_spatial(
         return tensor
     crops = []
     for (padding_start, padding_end), spatial_dim_size in zip(pads_or_crops, spatial_shape):
+        if not _is_dim_croppable_first(spatial_dim_size, padding_start, padding_end, mode):
+            raise ValueError("Invalid crops and pads provided")
         if padding_start >= 0:
             crop_start = None
         else:
@@ -619,8 +621,6 @@ def crop_and_then_pad_spatial(
         list(zip(pads_or_crops, spatial_shape))
     ):
         output_dim_size = spatial_dim_size + padding_start + padding_end
-        if output_dim_size < 0:
-            raise ValueError("Too much cropping")
         if padding_start >= 0:
             torch_paddings.append(min(padding_start, output_dim_size))
         else:
@@ -635,3 +635,55 @@ def crop_and_then_pad_spatial(
         mode=mode,
         value=value,
     )
+
+
+def is_croppable_first(
+    spatial_shape: Sequence[int],
+    pads_or_crops: Sequence[Tuple[int, int]],
+    mode: str = "constant",
+) -> bool:
+    """Checks whether the pads or crops can be applied by applying the cropping first"""
+    if mode == "constant":
+        return True
+    n_spatial_dims = len(spatial_shape)
+    if len(pads_or_crops) != n_spatial_dims:
+        raise ValueError("Number of paddings must match number of spatial dimensions")
+    for (padding_start, padding_end), spatial_dim_size in zip(pads_or_crops, spatial_shape):
+        if not _is_dim_croppable_first(spatial_dim_size, padding_start, padding_end, mode):
+            return False
+    return True
+
+
+def includes_padding(
+    pads_or_crops: Sequence[Tuple[int, int]],
+) -> bool:
+    """Checks if pads or crops include padding"""
+    return any(padding_start > 0 or padding_end > 0 for padding_start, padding_end in pads_or_crops)
+
+
+def _is_dim_croppable_first(
+    spatial_dim_size: int,
+    padding_start: int,
+    padding_end: int,
+    mode: str,
+) -> bool:
+    if mode == "constant":
+        return True
+    if spatial_dim_size + padding_start + padding_end < 0:
+        return False
+    if padding_start <= 0 and padding_end <= 0:
+        return True
+    if padding_start >= 0 and padding_end >= 0:
+        if mode in ("reflect", "circular") and (
+            padding_start >= spatial_dim_size or padding_end >= spatial_dim_size
+        ):
+            return False
+        return True
+    pad_width = max(padding_start, padding_end)
+    crop_width = -min(padding_start, padding_end)
+    remaining_width = spatial_dim_size - crop_width
+    if mode == "replicate" and remaining_width <= 0:
+        return False
+    if mode in ("reflect", "circular") and pad_width >= remaining_width:
+        return False
+    return True
