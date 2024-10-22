@@ -28,9 +28,11 @@ from composable_mapping.util import (
     avg_pool_nd_function,
     crop_and_then_pad_spatial,
     get_batch_dims,
+    get_batch_shape,
     get_channels_shape,
     get_n_channel_dims,
     get_spatial_dims,
+    get_spatial_shape,
     includes_padding,
     is_croppable_first,
     split_shape,
@@ -230,6 +232,8 @@ class _BaseSeparableInterpolator(IInterpolator):
                     - (shape_lower - 1 + dim_relative_coordinate)
                 )
             )
+        print(pads_or_crops)
+        print(kernels)
         padding_mode, padding_value = self._padding_mode_and_value
         if not is_croppable_first(
             spatial_shape=volume.spatial_shape, pads_or_crops=pads_or_crops, mode=padding_mode
@@ -449,7 +453,18 @@ class BicubicInterpolator(_BaseSeparableInterpolator):
         return (4.0, False, False)
 
     def _evaluate_interpolation_kernel(self, coordinates: Tensor) -> Tensor:
-        raise NotImplementedError("Not implemented!")
+        abs_coordinates = coordinates.abs()
+        alpha = -0.75
+        return ((alpha + 2) * abs_coordinates**3 - (alpha + 3) * abs_coordinates**2 + 1) * (
+            abs_coordinates <= 1.0
+        ) + (
+            alpha * abs_coordinates**3
+            - 5 * alpha * abs_coordinates**2
+            + 8 * alpha * abs_coordinates
+            - 4 * alpha
+        ) * (
+            (1 < abs_coordinates) & (abs_coordinates < 2)
+        )
 
     def interpolate_mask(
         self,
@@ -462,14 +477,19 @@ class BicubicInterpolator(_BaseSeparableInterpolator):
             mask.shape, n_channel_dims=n_channel_dims
         )
         mask = mask.view(batch_shape + (1,) + spatial_shape).to(voxel_coordinates.dtype)
-        mask = avg_pool_nd_function(n_spatial_dims)(mask, kernel_size=3, stride=1, padding=1) > 0
+        mask = avg_pool_nd_function(n_spatial_dims)(mask, kernel_size=3, stride=1, padding=1) >= 1
+        interpolated_mask = interpolate(
+            volume=mask.to(voxel_coordinates.dtype),
+            grid=voxel_coordinates,
+            mode="bilinear",
+            padding_mode="zeros",
+        )
         return (
-            interpolate(
-                volume=mask.to(voxel_coordinates.dtype),
-                grid=voxel_coordinates,
-                mode="bilinear",
-                padding_mode="zeros",
-            ).view(batch_shape + channels_shape + spatial_shape)
+            interpolated_mask.view(
+                get_batch_shape(interpolated_mask.shape, n_channel_dims=1)
+                + channels_shape
+                + get_spatial_shape(interpolated_mask.shape, n_channel_dims=1)
+            )
             >= 1 - self._mask_threshold
         )
 
