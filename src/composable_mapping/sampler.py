@@ -6,18 +6,19 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union, cast
 
 from numpy import argsort
 from torch import Tensor
-from torch import any as torch_any
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 from torch import linspace, long, ones, ones_like, tensor, zeros
 from torch.nn.functional import conv1d, conv_transpose1d
 
 from composable_mapping.mappable_tensor.affine_transformation import (
-    DiagonalAffineTransformation,
     HostAffineTransformation,
     HostDiagonalAffineTransformation,
     IdentityAffineTransformation,
     IHostAffineTransformation,
+)
+from composable_mapping.mappable_tensor.diagonal_matrix import (
+    DiagonalAffineMatrixDefinition,
 )
 from composable_mapping.mappable_tensor.mappable_tensor import (
     MappableTensor,
@@ -26,7 +27,6 @@ from composable_mapping.mappable_tensor.mappable_tensor import (
 from composable_mapping.util import (
     avg_pool_nd_function,
     crop_and_then_pad_spatial,
-    get_batch_dims,
     get_batch_shape,
     get_channels_shape,
     get_n_channel_dims,
@@ -37,7 +37,7 @@ from composable_mapping.util import (
     split_shape,
 )
 
-from .dense_deformation import generate_voxel_coordinate_grid, interpolate
+from .dense_deformation import interpolate
 from .interface import ISampler
 
 
@@ -137,52 +137,29 @@ class _BaseSeparableSampler(ISampler):
         host_matrix = host_matrix.view(-1, n_dims + 1, n_dims + 1)
         diagonal = host_matrix[0, :-1, :-1].diagonal()
         translation = host_matrix[0, :-1, -1].clone()
-        exact_transformation = affine_transformation.cast(device=torch_device("cpu"))
+
         transposed_convolve = diagonal < 0.75
-        if (diagonal == 0.0).any():
-            return None
         downsampling_factor = (
             diagonal.round() * (~transposed_convolve) + (1 / diagonal).round() * transposed_convolve
         )
-        downsampling_factor[transposed_convolve] = 1 / downsampling_factor[transposed_convolve]
-        rounded_diagonal_transformation = DiagonalAffineTransformation(
+        rounded_diagonal_matrix = DiagonalAffineMatrixDefinition(
             diagonal=downsampling_factor, translation=translation
-        )
+        ).as_matrix()
+        difference_matrix = host_matrix[:, :-1, :-1] - rounded_diagonal_matrix[:-1, :-1]
         shape_tensor = tensor(grid.spatial_shape, device=torch_device("cpu"), dtype=grid.dtype)
-        shape_transformation = DiagonalAffineTransformation(diagonal=shape_tensor)
-        unit_grid = generate_voxel_coordinate_grid(
-            shape=(2,) * n_dims, device=torch_device("cpu"), dtype=grid.dtype
+        max_conv_coordinate_difference_upper_bound = (
+            (difference_matrix * shape_tensor).abs().amax(dim=(0, 2))
         )
-        corner_points = (exact_transformation @ shape_transformation)(unit_grid)
-        rounded_diagonal_corner_points = (  # pylint: disable=not-callable
-            rounded_diagonal_transformation @ shape_transformation
-        )(unit_grid)
-        max_rounded_diagonal_displacements = (
-            (corner_points - rounded_diagonal_corner_points)
-            .abs()
-            .amax(
-                dim=get_batch_dims(unit_grid.ndim, n_channel_dims=1)
-                + get_spatial_dims(unit_grid.ndim, n_channel_dims=1)
-            )
-        )
-        if torch_any(max_rounded_diagonal_displacements > self._convolution_threshold):
+        if (max_conv_coordinate_difference_upper_bound > self._convolution_threshold).any():
             return None
         if self._interpolating_sampler:
             rounded_translation = translation.round()
-            rounded_diagonal_and_translation_transformation = DiagonalAffineTransformation(
-                diagonal=downsampling_factor, translation=rounded_translation
-            )
-            rounded_diagonal_and_translation_corner_points = (  # pylint: disable=not-callable
-                rounded_diagonal_and_translation_transformation @ shape_transformation
-            )(unit_grid)
+            max_slicing_coordinate_difference_upper_bound = (
+                (translation - rounded_translation).abs()
+                + max_conv_coordinate_difference_upper_bound
+            ).amax()
             convolve = (
-                (corner_points - rounded_diagonal_and_translation_corner_points)
-                .abs()
-                .amax(
-                    dim=get_batch_dims(unit_grid.ndim, n_channel_dims=1)
-                    + get_spatial_dims(unit_grid.ndim, n_channel_dims=1)
-                )
-                > self._convolution_threshold
+                max_slicing_coordinate_difference_upper_bound > self._convolution_threshold
             ) & (~transposed_convolve)
             no_convolve_or_transposed_convolve = (~transposed_convolve) & (~convolve)
             translation[no_convolve_or_transposed_convolve] = translation[
