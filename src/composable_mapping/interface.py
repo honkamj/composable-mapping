@@ -28,23 +28,23 @@ class IComposableMapping(ITensorLike):
         """
 
 
-class IInterpolator(ABC):
-    """Interpolates values on regular grid in voxel coordinates"""
+class ISampler(ABC):
+    """Samples values on regular grid in voxel coordinates"""
 
     @abstractmethod
     def __call__(self, volume: MappableTensor, coordinates: MappableTensor) -> MappableTensor:
-        """Interpolate
+        """Sample the volume at coordinates
 
         Args:
             volume: Volume to be interpolated
-            coordinates: Interpolation coordinates
+            coordinates: Interpolation coordinates in voxel coordinates
 
         Returns:
             Interpolated volume
         """
 
     @abstractmethod
-    def interpolate_values(
+    def sample_values(
         self,
         values: Tensor,
         voxel_coordinates: Tensor,
@@ -52,7 +52,7 @@ class IInterpolator(ABC):
         """Interpolate values as tensor"""
 
     @abstractmethod
-    def interpolate_mask(
+    def sample_mask(
         self,
         mask: Tensor,
         voxel_coordinates: Tensor,

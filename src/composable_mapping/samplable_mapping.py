@@ -21,7 +21,7 @@ from .finite_difference import (
     update_coordinate_system_for_jacobian_matrices,
 )
 from .grid_mapping import VoxelGridDeformation, VoxelGridVolume
-from .interface import IComposableMapping, IInterpolator
+from .interface import IComposableMapping, ISampler
 from .mappable_tensor import IAffineTransformation, MappableTensor
 from .tensor_like import ITensorLike
 
@@ -221,7 +221,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
         *,
         other_dims: Optional[str] = None,
         central: bool = False,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridVolume":
         """Estimate spatial derivatives over the mapping at the grid locations
         of the target
@@ -231,7 +231,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
             other_dims: How to handle the other dimensions, see
                 finite_difference.estimate_spatial_derivatives for more details
             central: Whether to use central differences
-            interpolator: Interpolator to use for the generated volume of derivatives
+            sampler: Sampler to use for the generated volume of derivatives
         """
         updated_coordinate_system = update_coordinate_system_for_derivatives(
             coordinate_system=target.coordinate_system,
@@ -250,7 +250,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
         return GridVolume.from_mappable_tensor(
             data=derivatives,
             coordinate_system=updated_coordinate_system,
-            interpolator=interpolator,
+            sampler=sampler,
         )
 
     def estimate_spatial_derivatives(
@@ -259,7 +259,7 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
         *,
         other_dims: Optional[str] = None,
         central: bool = False,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridVolume":
         """Estimate spatial derivatives over the mapping at the grid locations
 
@@ -268,14 +268,14 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
             other_dims: How to handle the other dimensions, see
                 finite_difference.estimate_spatial_derivatives for more details
             central: Whether to use central differences
-            interpolator: Interpolator to use for the generated volume of derivatives
+            sampler: Sampler to use for the generated volume of derivatives
         """
         return self.estimate_spatial_derivatives_to(
             self,
             spatial_dim=spatial_dim,
             other_dims=other_dims,
             central=central,
-            interpolator=interpolator,
+            sampler=sampler,
         )
 
     def estimate_spatial_jacobian_matrices_to(
@@ -283,14 +283,14 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
         target: ICoordinateSystemContainer,
         *,
         central: bool = False,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridVolume":
         """Estimate spatial Jacobian matrices over the mapping at the grid locations
         of the target
 
         Args:
             central: Whether to use central differences
-            interpolator: Interpolator to use for the generated volume of Jacobian matrices
+            sampler: Sampler to use for the generated volume of Jacobian matrices
         """
         updated_coordinate_system = update_coordinate_system_for_jacobian_matrices(
             coordinate_system=target.coordinate_system, central=central
@@ -303,24 +303,22 @@ class BaseSamplableMapping(BaseTensorLikeWrapper, ICoordinateSystemContainer):
         return GridVolume.from_mappable_tensor(
             data=jacobian_matrices,
             coordinate_system=updated_coordinate_system,
-            interpolator=interpolator,
+            sampler=sampler,
         )
 
     def estimate_spatial_jacobian_matrices(
         self,
         *,
         central: bool = False,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridVolume":
         """Estimate spatial Jacobian matrices over the mapping at the grid locations
 
         Args:
             central: Whether to use central differences
-            interpolator: Interpolator to use for the generated volume of Jacobian matrices
+            sampler: Sampler to use for the generated volume of Jacobian matrices
         """
-        return self.estimate_spatial_jacobian_matrices_to(
-            self, central=central, interpolator=interpolator
-        )
+        return self.estimate_spatial_jacobian_matrices_to(self, central=central, sampler=sampler)
 
 
 class GridDeformation(BaseSamplableMapping):
@@ -338,7 +336,7 @@ class GridDeformation(BaseSamplableMapping):
         coordinate_system: CoordinateSystem,
         mask: Optional[Tensor] = None,
         n_channel_dims: int = 1,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
         data_format: str = "displacement",
         data_coordinates: str = "voxel",
     ) -> "GridDeformation":
@@ -346,7 +344,7 @@ class GridDeformation(BaseSamplableMapping):
         return cls.from_mappable_tensor(
             PlainTensor(data, mask, n_channel_dims=n_channel_dims),
             coordinate_system=coordinate_system,
-            interpolator=interpolator,
+            sampler=sampler,
             data_format=data_format,
             data_coordinates=data_coordinates,
         )
@@ -357,7 +355,7 @@ class GridDeformation(BaseSamplableMapping):
         data: MappableTensor,
         coordinate_system: CoordinateSystem,
         *,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
         data_format: str = "displacement",
         data_coordinates: str = "voxel",
     ) -> "GridDeformation":
@@ -375,7 +373,7 @@ class GridDeformation(BaseSamplableMapping):
         return cls(
             mapping=(
                 coordinate_system.from_voxel_coordinates
-                @ VoxelGridDeformation(data, interpolator)
+                @ VoxelGridDeformation(data, sampler)
                 @ coordinate_system.to_voxel_coordinates
             ),
             coordinate_system=coordinate_system,
@@ -404,13 +402,13 @@ class GridDeformation(BaseSamplableMapping):
     def resample_to(
         self,
         target: ICoordinateSystemContainer,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridDeformation":
         """Resample the mapping to target"""
         coordinate_system = target.coordinate_system
         return type(self).from_mappable_tensor(
             data=self.sample_to_as_displacement_field(coordinate_system, data_coordinates="voxel"),
-            interpolator=interpolator,
+            sampler=sampler,
             coordinate_system=coordinate_system,
             data_format="displacement",
             data_coordinates="voxel",
@@ -418,10 +416,10 @@ class GridDeformation(BaseSamplableMapping):
 
     def resample(
         self,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridDeformation":
         """Resample the mapping"""
-        return self.resample_to(self, interpolator=interpolator)
+        return self.resample_to(self, sampler=sampler)
 
     @overload
     def as_affine(
@@ -538,13 +536,13 @@ class GridVolume(BaseSamplableMapping):
         coordinate_system: CoordinateSystem,
         mask: Optional[Tensor] = None,
         n_channel_dims: int = 1,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridVolume":
         """Create a volume from a tensor"""
         return cls.from_mappable_tensor(
             PlainTensor(data, mask, n_channel_dims=n_channel_dims),
             coordinate_system,
-            interpolator=interpolator,
+            sampler=sampler,
         )
 
     @classmethod
@@ -552,20 +550,20 @@ class GridVolume(BaseSamplableMapping):
         cls,
         data: MappableTensor,
         coordinate_system: CoordinateSystem,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridVolume":
         """Create a volume from a tensor"""
         if data.spatial_shape != coordinate_system.shape:
             raise ValueError("Spatial shape of data must match shape of coordinate system")
         return cls(
-            mapping=VoxelGridVolume(data, interpolator) @ coordinate_system.to_voxel_coordinates,
+            mapping=VoxelGridVolume(data, sampler) @ coordinate_system.to_voxel_coordinates,
             coordinate_system=coordinate_system,
         )
 
     def resample_to(
         self,
         target: ICoordinateSystemContainer,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> "GridVolume":
         """Resample the mapping"""
         coordinate_system = target.coordinate_system
@@ -573,7 +571,7 @@ class GridVolume(BaseSamplableMapping):
         return type(self).from_mappable_tensor(
             data=sampled,
             coordinate_system=coordinate_system,
-            interpolator=interpolator,
+            sampler=sampler,
         )
 
     def __repr__(self) -> str:

@@ -2,16 +2,15 @@
 
 from abc import abstractmethod
 from math import ceil, floor
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union, cast
 
 from numpy import argsort
 from torch import Tensor
 from torch import any as torch_any
-from torch import arange
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import long, ones, ones_like, tensor, zeros
-from torch.nn.functional import conv1d
+from torch import linspace, long, ones, ones_like, tensor, zeros
+from torch.nn.functional import conv1d, conv_transpose1d
 
 from composable_mapping.mappable_tensor.affine_transformation import (
     DiagonalAffineTransformation,
@@ -39,32 +38,30 @@ from composable_mapping.util import (
 )
 
 from .dense_deformation import generate_voxel_coordinate_grid, interpolate
-from .interface import IInterpolator
+from .interface import ISampler
 
 
-class _BaseSeparableInterpolator(IInterpolator):
-    """Base interpolator in voxel coordinates which can be implemented as a
+class _BaseSeparableSampler(ISampler):
+    """Base sampler in voxel coordinates which can be implemented as a
     separable convolution"""
 
     def __init__(
         self,
-        interpolation_mode: str,
-        extrapolation_mode: str = "border",
-        mask_extrapolated_regions_for_empty_volume_mask: bool = True,
-        convolution_threshold: float = 1e-5,
-        mask_threshold: float = 1e-5,
+        extrapolation_mode: str,
+        mask_extrapolated_regions_for_empty_volume_mask: bool,
+        convolution_threshold: float,
+        mask_threshold: float,
+        interpolating_sampler: bool,
     ) -> None:
         if extrapolation_mode not in ("zeros", "border", "reflection"):
             raise ValueError("Unknown extrapolation mode")
-        if interpolation_mode not in ("nearest", "bilinear", "bicubic"):
-            raise ValueError("Unknown interpolation mode")
-        self._interpolation_mode = interpolation_mode
         self._extrapolation_mode = extrapolation_mode
         self._mask_extrapolated_regions_for_empty_volume_mask = (
             mask_extrapolated_regions_for_empty_volume_mask
         )
         self._convolution_threshold = convolution_threshold
         self._mask_threshold = mask_threshold
+        self._interpolating_sampler = interpolating_sampler
 
     @property
     @abstractmethod
@@ -94,18 +91,6 @@ class _BaseSeparableInterpolator(IInterpolator):
             "reflection": ("reflect", 0.0),
         }[self._extrapolation_mode]
 
-    def interpolate_values(
-        self,
-        values: Tensor,
-        voxel_coordinates: Tensor,
-    ) -> Tensor:
-        return interpolate(
-            values,
-            voxel_coordinates,
-            mode=self._interpolation_mode,
-            padding_mode=self._extrapolation_mode,
-        )
-
     @staticmethod
     def _obtain_flipping_permutation(
         matrix: Tensor,
@@ -122,11 +107,11 @@ class _BaseSeparableInterpolator(IInterpolator):
         ]
         return _FlippingPermutation(permutation, flipped_spatial_dims)
 
-    def _interpolate_conv(
+    def _extract_conv_interpolatable_parameters(
         self,
         volume: MappableTensor,
         voxel_coordinates: MappableTensor,
-    ) -> Optional[MappableTensor]:
+    ) -> Optional[Tuple[Tensor, Tensor, Tensor, Tensor, "_FlippingPermutation"]]:
         if voxel_coordinates.displacements is not None:
             return None
         grid = voxel_coordinates.grid
@@ -151,11 +136,17 @@ class _BaseSeparableInterpolator(IInterpolator):
         assert host_matrix is not None
         host_matrix = host_matrix.view(-1, n_dims + 1, n_dims + 1)
         diagonal = host_matrix[0, :-1, :-1].diagonal()
-        translation = host_matrix[0, :-1, -1]
+        translation = host_matrix[0, :-1, -1].clone()
         exact_transformation = affine_transformation.cast(device=torch_device("cpu"))
-        rounded_diagonal = diagonal.round()
+        transposed_convolve = diagonal < 0.75
+        if (diagonal == 0.0).any():
+            return None
+        downsampling_factor = (
+            diagonal.round() * (~transposed_convolve) + (1 / diagonal).round() * transposed_convolve
+        )
+        downsampling_factor[transposed_convolve] = 1 / downsampling_factor[transposed_convolve]
         rounded_diagonal_transformation = DiagonalAffineTransformation(
-            diagonal=rounded_diagonal, translation=translation
+            diagonal=downsampling_factor, translation=translation
         )
         shape_tensor = tensor(grid.spatial_shape, device=torch_device("cpu"), dtype=grid.dtype)
         shape_transformation = DiagonalAffineTransformation(diagonal=shape_tensor)
@@ -176,75 +167,204 @@ class _BaseSeparableInterpolator(IInterpolator):
         )
         if torch_any(max_rounded_diagonal_displacements > self._convolution_threshold):
             return None
-        rounded_translation = translation.round()
-        rounded_diagonal_and_translation_transformation = DiagonalAffineTransformation(
-            diagonal=rounded_diagonal, translation=rounded_translation
+        if self._interpolating_sampler:
+            rounded_translation = translation.round()
+            rounded_diagonal_and_translation_transformation = DiagonalAffineTransformation(
+                diagonal=downsampling_factor, translation=rounded_translation
+            )
+            rounded_diagonal_and_translation_corner_points = (  # pylint: disable=not-callable
+                rounded_diagonal_and_translation_transformation @ shape_transformation
+            )(unit_grid)
+            convolve = (
+                (corner_points - rounded_diagonal_and_translation_corner_points)
+                .abs()
+                .amax(
+                    dim=get_batch_dims(unit_grid.ndim, n_channel_dims=1)
+                    + get_spatial_dims(unit_grid.ndim, n_channel_dims=1)
+                )
+                > self._convolution_threshold
+            ) & (~transposed_convolve)
+            no_convolve_or_transposed_convolve = (~transposed_convolve) & (~convolve)
+            translation[no_convolve_or_transposed_convolve] = translation[
+                no_convolve_or_transposed_convolve
+            ].round()
+        else:
+            convolve = ~transposed_convolve
+        return downsampling_factor, translation, convolve, transposed_convolve, flipping_permutation
+
+    def _obtain_conv_parameters(
+        self,
+        volume: MappableTensor,
+        voxel_coordinates: MappableTensor,
+    ) -> Optional[
+        Tuple[
+            Sequence[Optional[Tensor]],
+            Sequence[int],
+            Sequence[Tuple[int, int]],
+            Sequence[Tuple[int, int]],
+            Sequence[bool],
+            "_FlippingPermutation",
+        ]
+    ]:
+        conv_interpolation_parameters = self._extract_conv_interpolatable_parameters(
+            volume, voxel_coordinates
         )
-        rounded_diagonal_and_translation_corner_points = (  # pylint: disable=not-callable
-            rounded_diagonal_and_translation_transformation @ shape_transformation
-        )(unit_grid)
-        convolve_mask = (corner_points - rounded_diagonal_and_translation_corner_points).abs().amax(
-            dim=get_batch_dims(unit_grid.ndim, n_channel_dims=1)
-            + get_spatial_dims(unit_grid.ndim, n_channel_dims=1)
-        ) > self._convolution_threshold
-        floored_translation = translation.floor()
-        relative_coordinate = translation - floored_translation
-        rounded_integer_diagonal_list = rounded_diagonal.to(dtype=long).tolist()
+        if conv_interpolation_parameters is None:
+            return None
+        downsampling_factor, translation, convolve, transposed_convolve, flipping_permutation = (
+            conv_interpolation_parameters
+        )
         pads_or_crops: List[Tuple[int, int]] = []
-        kernels: List[Tensor] = []
+        post_pads_or_crops: List[Tuple[int, int]] = []
+        kernels: List[Optional[Tensor]] = []
         (kernel_width, inclusive_min, inclusive_max) = self._kernel_size
         for (
             dim_size_volume,
             dim_size_grid,
             dim_convolve,
-            dim_relative_coordinate,
-            dim_floored_integer_translation,
-            dim_integer_diagonal,
+            dim_transposed_convolve,
+            dim_translation,
+            dim_downsampling_factor,
         ) in zip(
             flipping_permutation.permute_sequence(volume.spatial_shape),
-            grid.spatial_shape,
-            convolve_mask.tolist(),
-            relative_coordinate.tolist(),
-            floored_translation.to(dtype=long).tolist(),
-            rounded_integer_diagonal_list,
+            voxel_coordinates.spatial_shape,
+            convolve.tolist(),
+            transposed_convolve.tolist(),
+            translation.tolist(),
+            downsampling_factor.tolist(),
         ):
-            if not dim_convolve:
-                dim_relative_coordinate = round(dim_relative_coordinate)
-                shape_lower, shape_upper = (1, 0) if dim_relative_coordinate == 0.0 else (1, 0)
+            lower_flooring_function = self._get_flooring_function(inclusive_min)
+            upper_flooring_function = self._get_flooring_function(inclusive_max)
+            min_coordinate = dim_translation
+            max_coordinate = dim_translation + dim_downsampling_factor * (dim_size_grid - 1)
+            if dim_convolve or dim_transposed_convolve:
+                padding_lower = lower_flooring_function(kernel_width / 2 - dim_translation)
+                padding_upper = upper_flooring_function(
+                    kernel_width / 2
+                    + dim_translation
+                    + dim_downsampling_factor * (dim_size_grid - 1)
+                    - (dim_size_volume - 1)
+                )
+                if dim_transposed_convolve:
+                    start_kernel_coordinate = (
+                        1
+                        - dim_translation
+                        + upper_flooring_function(
+                            (kernel_width / 2 - (1 - dim_translation)) / dim_downsampling_factor
+                        )
+                        * dim_downsampling_factor
+                    )
+                    end_kernel_coordinate = (
+                        -dim_translation
+                        - lower_flooring_function(
+                            (kernel_width / 2 - dim_translation) / dim_downsampling_factor
+                        )
+                        * dim_downsampling_factor
+                    )
+                    kernel_step_size = dim_downsampling_factor
+                else:
+                    relative_coordinate = dim_translation - floor(dim_translation)
+                    start_kernel_coordinate = (
+                        -lower_flooring_function(kernel_width / 2 - relative_coordinate)
+                        - relative_coordinate
+                    )
+                    end_kernel_coordinate = upper_flooring_function(
+                        kernel_width / 2 - (1 - relative_coordinate)
+                    ) + (1 - relative_coordinate)
+                    kernel_step_size = 1
+                kernel_coordinates = linspace(
+                    start_kernel_coordinate,
+                    end_kernel_coordinate,
+                    int(
+                        round(
+                            abs(end_kernel_coordinate - start_kernel_coordinate) / kernel_step_size
+                        )
+                    )
+                    + 1,
+                    dtype=voxel_coordinates.dtype,
+                    device=voxel_coordinates.device,
+                )
+                kernel = self._evaluate_interpolation_kernel(kernel_coordinates)
             else:
-                shape_lower = self._get_flooring_function(inclusive_min)(
-                    kernel_width / 2 - dim_relative_coordinate + 1
+                kernel = None
+                padding_lower = -int(min_coordinate)
+                padding_upper = int(max_coordinate) - (dim_size_volume - 1)
+            post_pad_or_crop_lower = (
+                -int(
+                    round(
+                        (min_coordinate + padding_lower + start_kernel_coordinate)
+                        / dim_downsampling_factor
+                    )
                 )
-                shape_upper = self._get_flooring_function(inclusive_max)(
-                    kernel_width / 2 + dim_relative_coordinate
+                if dim_transposed_convolve
+                else 0
+            )
+            post_pad_or_crop_upper = (
+                -int(
+                    round(
+                        (
+                            (dim_size_volume - 1)
+                            + padding_upper
+                            - end_kernel_coordinate
+                            - max_coordinate
+                        )
+                        / dim_downsampling_factor
+                    )
                 )
-            padding_lower = -dim_floored_integer_translation + shape_lower - 1
-            padding_upper = (
-                dim_floored_integer_translation
-                + dim_integer_diagonal * (dim_size_grid - 1)
-                - (dim_size_volume - 1)
-                + shape_upper
+                if dim_transposed_convolve
+                else 0
             )
             pads_or_crops.append((padding_lower, padding_upper))
-            kernels.append(
-                self._evaluate_interpolation_kernel(
-                    arange(shape_lower + shape_upper, device=grid.device, dtype=grid.dtype)
-                    - (shape_lower - 1 + dim_relative_coordinate)
-                )
-            )
-        print(pads_or_crops)
-        print(kernels)
-        padding_mode, padding_value = self._padding_mode_and_value
+            kernels.append(kernel)
+            post_pads_or_crops.append((post_pad_or_crop_lower, post_pad_or_crop_upper))
+        padding_mode, _padding_value = self._padding_mode_and_value
         if not is_croppable_first(
             spatial_shape=volume.spatial_shape, pads_or_crops=pads_or_crops, mode=padding_mode
         ):
             return None
+        strides = (
+            (
+                downsampling_factor * (~transposed_convolve)
+                + (1 / downsampling_factor) * transposed_convolve
+            )
+            .round()
+            .to(dtype=long)
+        )
+        return (
+            kernels,
+            strides.tolist(),
+            pads_or_crops,
+            post_pads_or_crops,
+            transposed_convolve.tolist(),
+            flipping_permutation,
+        )
+
+    def _interpolate_conv(
+        self,
+        volume: MappableTensor,
+        voxel_coordinates: MappableTensor,
+    ) -> Optional[MappableTensor]:
+        conv_parameters = self._obtain_conv_parameters(volume, voxel_coordinates)
+        if conv_parameters is None:
+            return None
+        (
+            kernels,
+            strides,
+            pads_or_crops,
+            post_pads_or_crops,
+            transposed_convolve,
+            flipping_permutation,
+        ) = conv_parameters
+
+        print(pads_or_crops)
+
         values, mask = volume.generate(
             generate_missing_mask=includes_padding(pads_or_crops)
             or self._mask_extrapolated_regions_for_empty_volume_mask,
             cast_mask=False,
         )
         values = flipping_permutation(values, n_channel_dims=volume.n_channel_dims)
+        padding_mode, padding_value = self._padding_mode_and_value
         interpolated_values = crop_and_then_pad_spatial(
             values,
             pads_or_crops=pads_or_crops,
@@ -255,7 +375,9 @@ class _BaseSeparableInterpolator(IInterpolator):
         interpolated_values = self._separable_conv_nd(
             volume=interpolated_values,
             kernels=kernels,
-            strides=rounded_integer_diagonal_list,
+            strides=strides,
+            transposed=transposed_convolve,
+            post_pads_or_crops=post_pads_or_crops,
             n_channel_dims=volume.n_channel_dims,
         )
         if mask is None:
@@ -271,9 +393,11 @@ class _BaseSeparableInterpolator(IInterpolator):
             )
             interpolated_mask = (
                 self._separable_conv_nd(
-                    volume=(~interpolated_mask).to(dtype=grid.dtype),
-                    kernels=[kernel.abs() for kernel in kernels],
-                    strides=rounded_integer_diagonal_list,
+                    volume=(~interpolated_mask).to(dtype=voxel_coordinates.dtype),
+                    kernels=[None if kernel is None else kernel.abs() for kernel in kernels],
+                    strides=strides,
+                    transposed=transposed_convolve,
+                    post_pads_or_crops=post_pads_or_crops,
                     n_channel_dims=volume.n_channel_dims,
                 )
                 <= self._mask_threshold
@@ -283,39 +407,81 @@ class _BaseSeparableInterpolator(IInterpolator):
         )
 
     def _separable_conv_nd(
-        self, volume: Tensor, kernels: Sequence[Tensor], strides: Sequence[int], n_channel_dims: int
+        self,
+        volume: Tensor,
+        kernels: Sequence[Optional[Tensor]],
+        strides: Sequence[int],
+        transposed: Sequence[bool],
+        post_pads_or_crops: Sequence[Tuple[int, int]],
+        n_channel_dims: int,
     ) -> Tensor:
-        if len(kernels) != len(strides) or len(kernels) != len(
-            get_spatial_dims(volume.ndim, n_channel_dims)
+        post_pads_or_crops = list(post_pads_or_crops)
+        if (
+            len(kernels) != len(get_spatial_dims(volume.ndim, n_channel_dims))
+            or len(kernels) != len(strides)
+            or len(kernels) != len(transposed)
+            or len(kernels) != len(post_pads_or_crops)
         ):
-            raise ValueError("Invalid number of kernels or strides")
-        for spatial_dim, (kernel, stride) in enumerate(zip(kernels, strides)):
-            if kernel.size(0) == 1:
+            raise ValueError(
+                "Invalid number of kernels, strides, transposed, or post_pads_or_crops"
+            )
+        for spatial_dim, (kernel, stride, dim_transposed, post_padding_or_crop) in enumerate(
+            zip(kernels, strides, transposed, post_pads_or_crops)
+        ):
+            if kernel is None or kernel.size(0) == 1:
+                assert dim_transposed is False
                 dim = get_spatial_dims(volume.ndim, n_channel_dims)[spatial_dim]
-                volume = kernel * volume[(slice(None),) * dim + (slice(None, None, stride),)]
+                volume = volume[(slice(None),) * dim + (slice(None, None, stride),)]
+                if kernel is not None:
+                    volume = kernel * volume
             else:
+                if dim_transposed:
+                    shared_crop = max(-max(post_padding_or_crop), 0)
+                    if shared_crop > 0:
+                        post_pads_or_crops[spatial_dim] = (
+                            post_padding_or_crop[0] + shared_crop,
+                            post_padding_or_crop[1] + shared_crop,
+                        )
                 volume = self._conv1d(
                     volume,
                     spatial_dim=spatial_dim,
                     kernel=kernel,
                     stride=stride,
                     n_channel_dims=n_channel_dims,
+                    transposed=dim_transposed,
+                    padding=shared_crop if dim_transposed else 0,
                 )
+        padding_mode, padding_value = self._padding_mode_and_value
+        volume = crop_and_then_pad_spatial(
+            volume,
+            pads_or_crops=post_pads_or_crops,
+            mode=padding_mode,
+            value=padding_value,
+            n_channel_dims=n_channel_dims,
+        )
         return volume
 
     @staticmethod
     def _conv1d(
-        volume: Tensor, spatial_dim: int, kernel: Tensor, stride: int, n_channel_dims: int
+        volume: Tensor,
+        spatial_dim: int,
+        kernel: Tensor,
+        stride: int,
+        n_channel_dims: int,
+        transposed: bool,
+        padding: int,
     ) -> Tensor:
         dim = get_spatial_dims(volume.ndim, n_channel_dims)[spatial_dim]
         volume = volume.moveaxis(dim, -1)
         dim_excluded_shape = volume.shape[:-1]
         volume = volume.reshape(-1, 1, volume.size(-1))
-        convolved = conv1d(  # pylint: disable=not-callable
+        conv_function = cast(Callable[..., Tensor], conv1d if not transposed else conv_transpose1d)
+        convolved = conv_function(  # pylint: disable=not-callable
             volume,
             kernel[None, None],
             bias=None,
             stride=(stride,),
+            padding=padding,
         ).reshape(dim_excluded_shape + (-1,))
         return convolved.moveaxis(-1, dim)
 
@@ -333,9 +499,9 @@ class _BaseSeparableInterpolator(IInterpolator):
             cast_mask=False,
         )
         coordinate_values = voxel_coordinates.generate_values()
-        interpolated_values = self.interpolate_values(volume_values, coordinate_values)
+        interpolated_values = self.sample_values(volume_values, coordinate_values)
         if volume_mask is not None:
-            interpolated_mask: Optional[Tensor] = self.interpolate_mask(
+            interpolated_mask: Optional[Tensor] = self.sample_mask(
                 volume_mask,
                 coordinate_values,
             )
@@ -346,7 +512,7 @@ class _BaseSeparableInterpolator(IInterpolator):
         )
 
 
-class LinearInterpolator(_BaseSeparableInterpolator):
+class LinearInterpolator(_BaseSeparableSampler):
     """Linear interpolation in voxel coordinates"""
 
     def __init__(
@@ -357,13 +523,25 @@ class LinearInterpolator(_BaseSeparableInterpolator):
         mask_threshold: float = 1e-5,
     ) -> None:
         super().__init__(
-            interpolation_mode="bilinear",
             extrapolation_mode=extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
                 mask_extrapolated_regions_for_empty_volume_mask
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
+            interpolating_sampler=True,
+        )
+
+    def sample_values(
+        self,
+        values: Tensor,
+        voxel_coordinates: Tensor,
+    ) -> Tensor:
+        return interpolate(
+            values,
+            voxel_coordinates,
+            mode="bilinear",
+            padding_mode=self._extrapolation_mode,
         )
 
     @property
@@ -373,7 +551,7 @@ class LinearInterpolator(_BaseSeparableInterpolator):
     def _evaluate_interpolation_kernel(self, coordinates: Tensor) -> Tensor:
         return 1 - coordinates.abs()
 
-    def interpolate_mask(
+    def sample_mask(
         self,
         mask: Tensor,
         voxel_coordinates: Tensor,
@@ -387,7 +565,7 @@ class LinearInterpolator(_BaseSeparableInterpolator):
         return interpolated_mask >= 1 - self._mask_threshold
 
 
-class NearestInterpolator(_BaseSeparableInterpolator):
+class NearestInterpolator(_BaseSeparableSampler):
     """Nearest neighbour interpolation in voxel coordinates"""
 
     def __init__(
@@ -398,23 +576,28 @@ class NearestInterpolator(_BaseSeparableInterpolator):
         mask_threshold: float = 1e-5,
     ) -> None:
         super().__init__(
-            interpolation_mode="nearest",
             extrapolation_mode=extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
                 mask_extrapolated_regions_for_empty_volume_mask
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
+            interpolating_sampler=True,
         )
 
-    @property
-    def _kernel_size(self) -> Tuple[float, bool, bool]:
-        return (1.0, True, False)
+    def sample_values(
+        self,
+        values: Tensor,
+        voxel_coordinates: Tensor,
+    ) -> Tensor:
+        return interpolate(
+            values,
+            voxel_coordinates,
+            mode="nearest",
+            padding_mode=self._extrapolation_mode,
+        )
 
-    def _evaluate_interpolation_kernel(self, coordinates: Tensor) -> Tensor:
-        return ones_like(coordinates)
-
-    def interpolate_mask(
+    def sample_mask(
         self,
         mask: Tensor,
         voxel_coordinates: Tensor,
@@ -426,8 +609,15 @@ class NearestInterpolator(_BaseSeparableInterpolator):
             padding_mode="zeros",
         ).to(mask.dtype)
 
+    @property
+    def _kernel_size(self) -> Tuple[float, bool, bool]:
+        return (1.0, True, False)
 
-class BicubicInterpolator(_BaseSeparableInterpolator):
+    def _evaluate_interpolation_kernel(self, coordinates: Tensor) -> Tensor:
+        return ones_like(coordinates)
+
+
+class BicubicInterpolator(_BaseSeparableSampler):
     """Bicubic interpolation in voxel coordinates"""
 
     def __init__(
@@ -438,35 +628,29 @@ class BicubicInterpolator(_BaseSeparableInterpolator):
         mask_threshold: float = 1e-5,
     ) -> None:
         super().__init__(
-            interpolation_mode="bicubic",
             extrapolation_mode=extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
                 mask_extrapolated_regions_for_empty_volume_mask
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
+            interpolating_sampler=True,
         )
         self._mask_threshold = mask_threshold
 
-    @property
-    def _kernel_size(self) -> Tuple[float, bool, bool]:
-        return (4.0, False, False)
-
-    def _evaluate_interpolation_kernel(self, coordinates: Tensor) -> Tensor:
-        abs_coordinates = coordinates.abs()
-        alpha = -0.75
-        return ((alpha + 2) * abs_coordinates**3 - (alpha + 3) * abs_coordinates**2 + 1) * (
-            abs_coordinates <= 1.0
-        ) + (
-            alpha * abs_coordinates**3
-            - 5 * alpha * abs_coordinates**2
-            + 8 * alpha * abs_coordinates
-            - 4 * alpha
-        ) * (
-            (1 < abs_coordinates) & (abs_coordinates < 2)
+    def sample_values(
+        self,
+        values: Tensor,
+        voxel_coordinates: Tensor,
+    ) -> Tensor:
+        return interpolate(
+            values,
+            voxel_coordinates,
+            mode="bicubic",
+            padding_mode=self._extrapolation_mode,
         )
 
-    def interpolate_mask(
+    def sample_mask(
         self,
         mask: Tensor,
         voxel_coordinates: Tensor,
@@ -491,6 +675,24 @@ class BicubicInterpolator(_BaseSeparableInterpolator):
                 + get_spatial_shape(interpolated_mask.shape, n_channel_dims=1)
             )
             >= 1 - self._mask_threshold
+        )
+
+    @property
+    def _kernel_size(self) -> Tuple[float, bool, bool]:
+        return (4.0, False, False)
+
+    def _evaluate_interpolation_kernel(self, coordinates: Tensor) -> Tensor:
+        abs_coordinates = coordinates.abs()
+        alpha = -0.75
+        return ((alpha + 2) * abs_coordinates**3 - (alpha + 3) * abs_coordinates**2 + 1) * (
+            abs_coordinates <= 1.0
+        ) + (
+            alpha * abs_coordinates**3
+            - 5 * alpha * abs_coordinates**2
+            + 8 * alpha * abs_coordinates
+            - 4 * alpha
+        ) * (
+            (1 < abs_coordinates) & (abs_coordinates < 2)
         )
 
 
@@ -556,11 +758,3 @@ class _FlippingPermutation:
         ).as_matrix()
         matrix = matrix[tuple(self.spatial_permutation) + (-1,), :]
         return HostAffineTransformation(transformation_matrix_on_host=matrix, device=device)
-
-    def invert(self) -> "_FlippingPermutation":
-        """Return the inverse transformation"""
-        inverse_permutation = argsort(self.spatial_permutation)
-        flipped_spatial_dims = [
-            self.spatial_permutation[spatial_dim] for spatial_dim in self.flipped_spatial_dims
-        ]
-        return _FlippingPermutation(tuple(inverse_permutation), flipped_spatial_dims)

@@ -12,9 +12,9 @@ from deformation_inversion_layer import (
 from torch import Tensor
 
 from .base import BaseComposableMapping
-from .interface import IComposableMapping, IInterpolator
-from .interpolator import LinearInterpolator
+from .interface import IComposableMapping, ISampler
 from .mappable_tensor import MappableTensor, PlainTensor
+from .sampler import LinearInterpolator
 from .tensor_like import ITensorLike
 
 
@@ -34,10 +34,10 @@ class VoxelGridVolume(BaseComposableMapping):
     def __init__(
         self,
         data: MappableTensor,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> None:
         self._data = data
-        self._interpolator = get_interpolator(interpolator)
+        self._sampler = get_sampler(sampler)
 
     @property
     def data(self) -> MappableTensor:
@@ -45,9 +45,9 @@ class VoxelGridVolume(BaseComposableMapping):
         return self._data
 
     @property
-    def interpolator(self) -> IInterpolator:
-        """Get the interpolator"""
-        return self._interpolator
+    def sampler(self) -> ISampler:
+        """Get the sampler"""
+        return self._sampler
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -64,17 +64,17 @@ class VoxelGridVolume(BaseComposableMapping):
             raise ValueError("Invalid children for VoxelGridVolume")
         return VoxelGridVolume(
             data=children["data"],
-            interpolator=self._interpolator,
+            sampler=self._sampler,
         )
 
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
-        return self._interpolator(self._data, coordinates)
+        return self._sampler(self._data, coordinates)
 
     def invert(self, **inversion_parameters) -> IComposableMapping:
         raise NotImplementedError("No inversion implemented for grid volumes")
 
     def __repr__(self) -> str:
-        return f"VoxelGridVolume(data={self._data}, interpolator={self._interpolator}, "
+        return f"VoxelGridVolume(data={self._data}, sampler={self._sampler}, "
 
 
 class VoxelGridDeformation(VoxelGridVolume):
@@ -90,7 +90,7 @@ class VoxelGridDeformation(VoxelGridVolume):
     def __init__(
         self,
         displacements: MappableTensor,
-        interpolator: Optional[IInterpolator] = None,
+        sampler: Optional[ISampler] = None,
     ) -> None:
         if displacements.n_channel_dims != 1:
             raise ValueError("Displacement field must have a single channel")
@@ -98,7 +98,7 @@ class VoxelGridDeformation(VoxelGridVolume):
             raise ValueError("Displacement field must have same number of channels as spatial dims")
         super().__init__(
             data=displacements,
-            interpolator=interpolator,
+            sampler=sampler,
         )
 
     def _modified_copy(
@@ -108,7 +108,7 @@ class VoxelGridDeformation(VoxelGridVolume):
             raise ValueError("Invalid children for VoxelGridDeformation")
         return VoxelGridDeformation(
             displacements=children["data"],
-            interpolator=self._interpolator,
+            sampler=self._sampler,
         )
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
@@ -125,9 +125,9 @@ class VoxelGridDeformation(VoxelGridVolume):
         fixed_point_inversion_arguments = inversion_parameters.get(
             "fixed_point_inversion_arguments", {}
         )
-        default_interpolator = partial(self._interpolator.interpolate_values)
+        default_sampler = partial(self._sampler.sample_values)
         deformation_inversion_arguments = DeformationInversionArguments(
-            interpolator=fixed_point_inversion_arguments.get("interpolator", default_interpolator),
+            interpolator=fixed_point_inversion_arguments.get("sampler", default_sampler),
             forward_solver=fixed_point_inversion_arguments.get("forward_solver"),
             backward_solver=fixed_point_inversion_arguments.get("backward_solver"),
             forward_dtype=fixed_point_inversion_arguments.get("forward_dtype"),
@@ -135,12 +135,12 @@ class VoxelGridDeformation(VoxelGridVolume):
         )
         return _VoxelGridDeformationInverse(
             displacements_to_invert=self._data,
-            interpolator=self._interpolator,
+            sampler=self._sampler,
             inversion_arguments=deformation_inversion_arguments,
         )
 
     def __repr__(self) -> str:
-        return f"GridDeformation(data={self._data}, interpolator={self._interpolator})"
+        return f"GridDeformation(data={self._data}, sampler={self._sampler})"
 
 
 class _VoxelGridDeformationInverse(VoxelGridVolume):
@@ -152,12 +152,12 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
     def __init__(
         self,
         displacements_to_invert: MappableTensor,
-        interpolator: IInterpolator,
+        sampler: ISampler,
         inversion_arguments: DeformationInversionArguments,
     ) -> None:
         super().__init__(
             data=displacements_to_invert,
-            interpolator=interpolator,
+            sampler=sampler,
         )
         self._inversion_arguments = inversion_arguments
 
@@ -168,7 +168,7 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
             raise ValueError("Invalid children for samplable composable")
         return _VoxelGridDeformationInverse(
             displacements_to_invert=children["data"],
-            interpolator=self._interpolator,
+            sampler=self._sampler,
             inversion_arguments=self._inversion_arguments,
         )
 
@@ -185,7 +185,7 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
             initial_guess=(None if coordinates_as_slice is None else -data[coordinates_as_slice]),
             coordinates=voxel_coordinates,
         )
-        mask = self._interpolator.interpolate_mask(
+        mask = self._sampler.sample_mask(
             mask=data_mask,
             voxel_coordinates=voxel_coordinates,
         )
@@ -194,45 +194,45 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
     def invert(self, **inversion_parameters) -> VoxelGridDeformation:
         return VoxelGridDeformation(
             displacements=self._data,
-            interpolator=self._interpolator,
+            sampler=self._sampler,
         )
 
     def __repr__(self) -> str:
         return (
             f"_VoxelGridDeformationInverse(displacement_field_to_invert={self._data}, "
-            f"interpolator={self._interpolator}, inversion_arguments={self._inversion_arguments})"
+            f"sampler={self._sampler}, inversion_arguments={self._inversion_arguments})"
         )
 
 
-_DEFAULT_INTERPOLATOR: Optional[IInterpolator] = None
-_DEFAULT_INTERPOLATOR_CONTEXT_STACK = local()
-_DEFAULT_INTERPOLATOR_CONTEXT_STACK.stack = []
+_DEFAULT_SAMPLER: Optional[ISampler] = None
+_DEFAULT_SAMPLER_CONTEXT_STACK = local()
+_DEFAULT_SAMPLER_CONTEXT_STACK.stack = []
 
 
-def get_default_interpolator() -> IInterpolator:
+def get_default_sampler() -> ISampler:
     """Get current default interpolation args"""
-    if _DEFAULT_INTERPOLATOR_CONTEXT_STACK.stack:
-        return _DEFAULT_INTERPOLATOR_CONTEXT_STACK.stack[-1]
-    if _DEFAULT_INTERPOLATOR is None:
+    if _DEFAULT_SAMPLER_CONTEXT_STACK.stack:
+        return _DEFAULT_SAMPLER_CONTEXT_STACK.stack[-1]
+    if _DEFAULT_SAMPLER is None:
         return LinearInterpolator()
-    return _DEFAULT_INTERPOLATOR
+    return _DEFAULT_SAMPLER
 
 
-def set_default_interpolator(interpolator: Optional[IInterpolator]) -> None:
+def set_default_sampler(sampler: Optional[ISampler]) -> None:
     """Set default interpolation args"""
-    global _DEFAULT_INTERPOLATOR  # pylint: disable=global-statement
-    _DEFAULT_INTERPOLATOR = interpolator
+    global _DEFAULT_SAMPLER  # pylint: disable=global-statement
+    _DEFAULT_SAMPLER = sampler
 
 
 def clear_default_interpolation_args() -> None:
     """Clear default interpolation args"""
-    global _DEFAULT_INTERPOLATOR  # pylint: disable=global-statement
-    _DEFAULT_INTERPOLATOR = None
+    global _DEFAULT_SAMPLER  # pylint: disable=global-statement
+    _DEFAULT_SAMPLER = None
 
 
-def get_interpolator(interpolator: Optional[IInterpolator]) -> IInterpolator:
+def get_sampler(sampler: Optional[ISampler]) -> ISampler:
     """Get interpolation args, either from argument or default"""
-    return interpolator if interpolator is not None else get_default_interpolator()
+    return sampler if sampler is not None else get_default_sampler()
 
 
 class default_interpolation_args(  # this is supposed to appear as function - pylint: disable=invalid-name
@@ -240,11 +240,11 @@ class default_interpolation_args(  # this is supposed to appear as function - py
 ):
     """Context manager for setting default interpolation args"""
 
-    def __init__(self, interpolator: IInterpolator):
-        self.interpolator = interpolator
+    def __init__(self, sampler: ISampler):
+        self.sampler = sampler
 
     def __enter__(self) -> None:
-        _DEFAULT_INTERPOLATOR_CONTEXT_STACK.stack.append(self.interpolator)
+        _DEFAULT_SAMPLER_CONTEXT_STACK.stack.append(self.sampler)
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        _DEFAULT_INTERPOLATOR_CONTEXT_STACK.stack.pop()
+        _DEFAULT_SAMPLER_CONTEXT_STACK.stack.pop()
