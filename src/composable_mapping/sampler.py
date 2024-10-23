@@ -356,8 +356,6 @@ class _BaseSeparableSampler(ISampler):
             flipping_permutation,
         ) = conv_parameters
 
-        print(pads_or_crops)
-
         values, mask = volume.generate(
             generate_missing_mask=includes_padding(pads_or_crops)
             or self._mask_extrapolated_regions_for_empty_volume_mask,
