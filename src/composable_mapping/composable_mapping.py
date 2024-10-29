@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -18,19 +19,14 @@ from typing import (
 from matplotlib.figure import Figure  # type: ignore
 from torch import Tensor
 
-from composable_mapping.coordinate_system import (
-    CoordinateSystem,
-    ICoordinateSystemContainer,
-)
-from composable_mapping.mappable_tensor.affine_transformation import (
-    IAffineTransformation,
-)
-from composable_mapping.visualization import visualize_as_grid, visualize_as_image
-
 from .mappable_tensor import MappableTensor
-from .sampler import ISampler, get_sampler
+from .mappable_tensor.affine_transformation import IAffineTransformation
+from .sampler import DataFormat, ISampler, get_sampler
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
+from .visualization import visualize_as_grid, visualize_as_image
 
+if TYPE_CHECKING:
+    from .coordinate_system import CoordinateSystem
 Number = Union[int, float]
 
 
@@ -126,24 +122,15 @@ def _composition(
     )
 
 
-class DataFormat:
-    """Defines data format for grid mappings"""
+class ICoordinateSystemContainer(ABC):
+    """Class holding a unique voxel coordinate system"""
 
-    def __init__(
-        self, representation: str = "coordinates", coordinate_system: str = "world"
-    ) -> None:
-        if representation not in ["coordinates", "displacements"]:
-            raise ValueError("Invalid format")
-        if coordinate_system not in ["world", "voxel"]:
-            raise ValueError("Invalid system")
-        self.representation = representation
-        self.coordinate_system = coordinate_system
-
-    def __repr__(self) -> str:
-        return (
-            f"DataFormat(representation={self.representation}, "
-            f"coordinate_system={self.coordinate_system})"
-        )
+    @property
+    @abstractmethod
+    def coordinate_system(
+        self,
+    ) -> "CoordinateSystem":
+        """Get voxel coordinate system of the container"""
 
 
 class ComposableMapping(ITensorLike, ABC):
@@ -173,7 +160,7 @@ class ComposableMapping(ITensorLike, ABC):
         sampled = self(target.coordinate_system.grid())
         if data_format.representation == "displacements":
             sampled = sampled - target.coordinate_system.grid()
-        if data_format.coordinate_system == "voxel":
+        if data_format.coordinate_type == "voxel":
             sampled = target.coordinate_system.to_voxel_coordinates(sampled)
         return sampled
 
@@ -183,7 +170,6 @@ class ComposableMapping(ITensorLike, ABC):
         *,
         data_format: Optional[DataFormat] = None,
         sampler: Optional["ISampler"] = None,
-        inverse_sampler: Optional["ISampler"] = None,
     ) -> "GridComposableMapping":
         """Resample the deformation to the target coordinate system"""
         return GridVolume(
@@ -194,7 +180,6 @@ class ComposableMapping(ITensorLike, ABC):
             coordinate_system=target.coordinate_system,
             data_format=data_format,
             sampler=sampler,
-            inverse_sampler=inverse_sampler,
         )
 
     def as_affine_transformation(self) -> IAffineTransformation:
@@ -291,11 +276,12 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
         *,
         data_format: Optional[DataFormat] = None,
         sampler: Optional[ISampler] = None,
-        inverse_sampler: Optional[ISampler] = None,
     ) -> "GridComposableMapping":
         """Resample the deformation with respect to the contained coordinates"""
         return self.resample_to(
-            self, data_format=data_format, sampler=sampler, inverse_sampler=inverse_sampler
+            self,
+            data_format=data_format,
+            sampler=sampler,
         )
 
     def visualize_as_deformed_grid(
@@ -321,7 +307,7 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
 class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMapping):
     """Base decorator for composable mappings"""
 
-    def __init__(self, mapping: ComposableMapping, coordinate_system: CoordinateSystem) -> None:
+    def __init__(self, mapping: ComposableMapping, coordinate_system: "CoordinateSystem") -> None:
         self._mapping = mapping
         self._coordinate_system = coordinate_system
 
@@ -331,13 +317,9 @@ class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMappin
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "GridComposableMappingDecorator":
-        if not isinstance(children["mapping"], ComposableMapping) or not isinstance(
-            children["coordinate_system"], CoordinateSystem
-        ):
-            raise ValueError("Invalid children for a grid composable mapping decorator")
         return GridComposableMappingDecorator(
-            children["mapping"],
-            children["coordinate_system"],
+            cast(ComposableMapping, children["mapping"]),
+            cast("CoordinateSystem", children["coordinate_system"]),
         )
 
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
@@ -349,7 +331,7 @@ class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMappin
         )
 
     @property
-    def coordinate_system(self) -> CoordinateSystem:
+    def coordinate_system(self) -> "CoordinateSystem":
         return self._coordinate_system
 
     def __repr__(self) -> str:
@@ -441,14 +423,12 @@ class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "_ArithmeticOperator":
-        if "other" in children:
-            if not isinstance(children["other"], MappableTensor) and not isinstance(
-                children["other"], ComposableMapping
-            ):
-                raise ValueError("Invalid children for arithmetic operator")
-            other: Union[ComposableMapping, MappableTensor, Number, Tensor] = children["other"]
-        other = tensors["other"]
-        return _ArithmeticOperator(self._mapping, other, self._operator, self._inverse_operator)
+        return _ArithmeticOperator(
+            cast(ComposableMapping, self._mapping),
+            cast(Union[ComposableMapping, MappableTensor, Number, Tensor], tensors["other"]),
+            self._operator,
+            self._inverse_operator,
+        )
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         tensors = {}
@@ -498,20 +478,18 @@ class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
     def __init__(
         self,
         data: MappableTensor,
-        coordinate_system: CoordinateSystem,
+        coordinate_system: "CoordinateSystem",
         *,
         data_format: Optional[DataFormat] = None,
         sampler: Optional[ISampler] = None,
-        inverse_sampler: Optional[ISampler] = None,
     ) -> None:
         self._data = data
         self._coordinate_system = coordinate_system
         self._data_format = DataFormat() if data_format is None else data_format
         self._sampler = get_sampler(sampler)
-        self._inverse_sampler = inverse_sampler
 
     @property
-    def coordinate_system(self) -> CoordinateSystem:
+    def coordinate_system(self) -> "CoordinateSystem":
         return self._coordinate_system
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
@@ -526,37 +504,29 @@ class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "GridVolume":
-        if not isinstance(children["data"], MappableTensor) or not isinstance(
-            children["coordinate_system"], CoordinateSystem
-        ):
-            raise ValueError("Invalid children for GridVolume")
         return GridVolume(
-            data=children["data"],
-            coordinate_system=children["coordinate_system"],
+            data=cast(MappableTensor, children["data"]),
+            coordinate_system=cast("CoordinateSystem", children["coordinate_system"]),
             data_format=self._data_format,
             sampler=self._sampler,
-            inverse_sampler=self._inverse_sampler,
         )
 
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
         sampled = self._sampler(
             self._data, self._coordinate_system.to_voxel_coordinates(coordinates)
         )
-        if self._data_format.coordinate_system == "voxel":
+        if self._data_format.coordinate_type == "voxel":
             sampled = self._coordinate_system.from_voxel_coordinates(sampled)
         if self._data_format.representation == "displacements":
             sampled = coordinates + sampled
         return sampled
 
     def invert(self, **arguments) -> ComposableMapping:
-        if self._inverse_sampler is None:
-            raise ValueError("No inverse sampler defined for the grid volume")
         return GridVolume(
             data=self._data,
             coordinate_system=self._coordinate_system,
             data_format=self._data_format,
-            sampler=self._inverse_sampler,
-            inverse_sampler=self._sampler,
+            sampler=self._sampler.inverse(self._coordinate_system, self._data_format, arguments),
         )
 
     def __repr__(self) -> str:
@@ -564,8 +534,7 @@ class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
             f"GridVolume(data={self._data}, "
             f"coordinate_system={self._coordinate_system}, "
             f"data_format={self._data_format}, "
-            f"sampler={self._sampler}, "
-            f"inverse_sampler={self._inverse_sampler})"
+            f"sampler={self._sampler})"
         )
 
 

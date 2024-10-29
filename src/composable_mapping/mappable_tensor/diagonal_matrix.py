@@ -5,7 +5,7 @@ from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 from torch import Tensor, allclose, broadcast_shapes, cat
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import get_default_dtype, ones, zeros
+from torch import get_default_dtype, ones, tensor, zeros
 
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
@@ -33,8 +33,8 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
 
     def __init__(
         self,
-        diagonal: Optional[Union[Tensor, Number]] = None,
-        translation: Optional[Union[Tensor, Number]] = None,
+        diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
         matrix_shape: Optional[Sequence[int]] = None,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -44,8 +44,16 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
         )
         if isinstance(diagonal, (float, int)):
             diagonal = ones(1, dtype=self._dtype, device=self._device) * diagonal
+        elif not isinstance(diagonal, Tensor) and diagonal is not None:
+            diagonal = tensor(diagonal, dtype=self._dtype, device=torch_device("cpu"))
+            if self._device.type != "cpu":
+                diagonal = diagonal.to(device=self._device, non_blocking=True)
         if isinstance(translation, (float, int)):
             translation = ones(1, dtype=self._dtype, device=self._device) * translation
+        elif not isinstance(translation, Tensor) and translation is not None:
+            translation = tensor(translation, dtype=self._dtype, device=torch_device("cpu"))
+            if self._device.type != "cpu":
+                translation = translation.to(device=self._device, non_blocking=True)
         if diagonal is not None and diagonal.ndim == 0:
             diagonal = diagonal.unsqueeze(0)
         if translation is not None and translation.ndim == 0:
@@ -267,8 +275,8 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
 
     @staticmethod
     def _handle_dtype_and_device(
-        diagonal: Optional[Union[Tensor, Number]],
-        translation: Optional[Union[Tensor, Number]],
+        diagonal: Optional[Union[Tensor, Sequence[Number], Number]],
+        translation: Optional[Union[Tensor, Sequence[Number], Number]],
         dtype: Optional[torch_dtype],
         device: Optional[torch_device],
     ) -> Tuple[torch_dtype, torch_device]:

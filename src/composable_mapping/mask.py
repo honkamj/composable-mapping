@@ -4,13 +4,13 @@ from typing import Mapping, Sequence
 
 from torch import Tensor
 
-from .base import BaseComposableMapping
+from .composable_mapping import ComposableMapping
 from .dense_deformation import compute_fov_mask_based_on_bounds
 from .mappable_tensor import MappableTensor
-from .tensor_like import ITensorLike
+from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 
 
-class RectangleMask(BaseComposableMapping):
+class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
     """Add values to mask based on bounds"""
 
     def __init__(
@@ -48,7 +48,7 @@ class RectangleMask(BaseComposableMapping):
         )
         return coordinates.mask_and(update_mask)
 
-    def invert(self, **inversion_parameters):
+    def invert(self, **arguments):
         raise NotImplementedError("Rectangle mask is not invertible")
 
     def detach(self) -> "RectangleMask":
@@ -58,7 +58,7 @@ class RectangleMask(BaseComposableMapping):
         return f"RectangleMask(min_values={self._min_values}, max_values={self._max_values})"
 
 
-class ClearMask(BaseComposableMapping):
+class ClearMask(BaseTensorLikeWrapper, ComposableMapping):
     """Clear mask"""
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
@@ -75,7 +75,7 @@ class ClearMask(BaseComposableMapping):
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
         return masked_coordinates.clear_mask()
 
-    def invert(self, **inversion_parameters):
+    def invert(self, **arguments):
         raise NotImplementedError("Mask clearing is not invertible")
 
     def detach(self) -> "ClearMask":

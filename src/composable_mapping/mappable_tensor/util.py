@@ -6,7 +6,7 @@ from torch import Tensor, cat, stack
 
 from composable_mapping.util import combine_optional_masks, get_channel_dims
 
-from .mappable_tensor import MappableTensor, PlainTensor
+from .mappable_tensor import MappableTensor, mappable
 
 
 def concatenate_channels(
@@ -37,7 +37,7 @@ def concatenate_channels(
     for masked_tensor in masked_tensors:
         update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
         mask = combine_optional_masks(mask, update_mask, n_channel_dims=n_channel_dims)
-    return PlainTensor(
+    return mappable(
         values=values,
         mask=mask,
         n_channel_dims=n_channel_dims,
@@ -73,7 +73,7 @@ def stack_channels(*masked_tensors: MappableTensor, channel_index: int = 0) -> "
         if update_mask is not None:
             update_mask = update_mask.unsqueeze(dim=stacking_dim)
             mask = combine_optional_masks(mask, update_mask, n_channel_dims=n_channel_dims + 1)
-    return PlainTensor(
+    return mappable(
         values=values,
         mask=mask,
         n_channel_dims=n_channel_dims + 1,

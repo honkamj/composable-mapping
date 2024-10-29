@@ -8,7 +8,6 @@ from torch import bool as torch_bool
 from torch import device as torch_device
 from torch import diag, diagonal
 from torch import dtype as torch_dtype
-from torch import get_default_dtype
 from torch import int32 as torch_int32
 from torch import ones
 from torch import round as torch_round
@@ -30,18 +29,24 @@ from composable_mapping.util import (
     split_shape,
 )
 
-from .affine_transformation import IAffineTransformation, IdentityAffineTransformation
+from .affine_transformation import (
+    HostDiagonalAffineTransformation,
+    IAffineTransformation,
+    IdentityAffineTransformation,
+)
 from .grid import GridDefinition
 
 REDUCE_TO_SLICE_TOLERANCE = 1e-5
+
+Number = Union[float, int]
 
 
 class MappableTensor(BaseTensorLikeWrapper):
     """A tensor wrapper used as inputs for composable mappings
 
     It is not recommended to create instances of this class directly, but to
-    use instead the subclasses `PlainTensor` and `VoxelGrid` and operations
-    defined on them.
+    use instead the constructors provided in the module, or as class methods
+    of this class.
     """
 
     def __init__(
@@ -74,6 +79,33 @@ class MappableTensor(BaseTensorLikeWrapper):
         )
         self._grid = grid
         self._shape = self._infer_shape()
+
+    @classmethod
+    def from_tensor(
+        cls, values: Tensor, mask: Optional[Tensor] = None, n_channel_dims: int = 1
+    ) -> "MappableTensor":
+        """Create a mappable tensor from a tensor"""
+        return MappableTensor(displacements=values, mask=mask, n_channel_dims=n_channel_dims)
+
+    @classmethod
+    def create_voxel_grid(
+        cls,
+        spatial_shape: Sequence[int],
+        mask: Optional[Tensor] = None,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> "MappableTensor":
+        """Create a voxel grid with optional mask"""
+        return MappableTensor(
+            mask=mask,
+            n_channel_dims=1,
+            grid=GridDefinition(
+                spatial_shape=spatial_shape,
+                affine_transformation=IdentityAffineTransformation(
+                    len(spatial_shape), dtype=dtype, device=device
+                ),
+            ),
+        )
 
     @property
     def _transformed_displacements_shape(self) -> Optional[Tuple[int, ...]]:
@@ -351,8 +383,132 @@ class MappableTensor(BaseTensorLikeWrapper):
             grid=grid,
         )
 
-    def __add__(self, other: "MappableTensor") -> "MappableTensor":
-        """Sum of two mappable tensors"""
+    def __rtruediv__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, (MappableTensor, Tensor, int, float)):
+            return self._reciprocal().__mul__(other)
+        return NotImplemented
+
+    def _reciprocal(self) -> "MappableTensor":
+        return mappable(
+            values=1 / self.generate_values(),
+            mask=self._mask,
+            n_channel_dims=self._n_channel_dims,
+        )
+
+    def __truediv__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, MappableTensor):
+            return self._truediv_mappable_tensor(other)
+        if isinstance(other, (int, float)):
+            return self.__mul__(1 / other)
+        if isinstance(other, Tensor):
+            return self.__mul__(1 / other)
+        return NotImplemented
+
+    def _truediv_mappable_tensor(self, other: "MappableTensor") -> "MappableTensor":
+        self_values, self_mask = self.generate(generate_missing_mask=False, cast_mask=False)
+        other_values, other_mask = other.generate(generate_missing_mask=False, cast_mask=False)
+        mask = combine_optional_masks(
+            self_mask,
+            other_mask,
+            n_channel_dims=(self.n_channel_dims, other.n_channel_dims),
+        )
+        n_channel_dims = max(self.n_channel_dims, other.n_channel_dims)
+        self_values, other_values = broadcast_tensors_in_parts(
+            self_values, other_values, n_channel_dims=(self.n_channel_dims, other.n_channel_dims)
+        )
+        return mappable(
+            values=self_values / other_values,
+            mask=mask,
+            n_channel_dims=n_channel_dims,
+        )
+
+    def __mul__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, MappableTensor):
+            return self._mul_mappable_tensor(other)
+        if isinstance(other, (int, float)):
+            return self._mul_scalar(other)
+        if isinstance(other, Tensor):
+            return self._mul_tensor(other)
+        return NotImplemented
+
+    def _mul_tensor(self, other: Tensor) -> "MappableTensor":
+        if other.ndim > 1:
+            raise ValueError(
+                "Multiplication is ambigous since n_channel_dims is not specified. "
+                "Multiply a MappableTensor instead or apply an affine transformation."
+            )
+        n_dims = self.channels_shape[-1]
+        affine = HostDiagonalAffineTransformation(
+            diagonal=other,
+            matrix_shape=(n_dims + 1, n_dims + 1),
+            dtype=self.dtype,
+            device=self.device,
+        )
+        return self.transform(affine)
+
+    def _mul_scalar(self, other: Number) -> "MappableTensor":
+        n_dims = self.channels_shape[-1]
+        affine = HostDiagonalAffineTransformation(
+            diagonal=other,
+            matrix_shape=(n_dims + 1, n_dims + 1),
+            dtype=self.dtype,
+            device=self.device,
+        )
+        return self.transform(affine)
+
+    def _mul_mappable_tensor(self, other: "MappableTensor") -> "MappableTensor":
+        self_values, self_mask = self.generate(generate_missing_mask=False, cast_mask=False)
+        other_values, other_mask = other.generate(generate_missing_mask=False, cast_mask=False)
+        mask = combine_optional_masks(
+            self_mask,
+            other_mask,
+            n_channel_dims=(self.n_channel_dims, other.n_channel_dims),
+        )
+        n_channel_dims = max(self.n_channel_dims, other.n_channel_dims)
+        self_values, other_values = broadcast_tensors_in_parts(
+            self_values, other_values, n_channel_dims=(self.n_channel_dims, other.n_channel_dims)
+        )
+        return mappable(
+            values=self_values * other_values,
+            mask=mask,
+            n_channel_dims=n_channel_dims,
+        )
+
+    def __add__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, MappableTensor):
+            return self._add_mappable_tensor(other)
+        if isinstance(other, (int, float)):
+            return self._add_scalar(other)
+        if isinstance(other, Tensor):
+            return self._add_tensor(other)
+        return NotImplemented
+
+    def _add_tensor(self, other: Tensor) -> "MappableTensor":
+        if other.ndim > 1:
+            raise ValueError(
+                "Addition is ambigous since n_channel_dims is not specified. "
+                "Add a MappableTensor instead or apply an affine transformation."
+            )
+        n_dims = self.channels_shape[-1]
+        affine = HostDiagonalAffineTransformation(
+            translation=other,
+            matrix_shape=(n_dims + 1, n_dims + 1),
+            dtype=self.dtype,
+            device=self.device,
+        )
+        return self.transform(affine)
+
+    def _add_scalar(self, other: Number) -> "MappableTensor":
+        n_dims = self.channels_shape[-1]
+        affine = HostDiagonalAffineTransformation(
+            translation=other,
+            matrix_shape=(n_dims + 1, n_dims + 1),
+            dtype=self.dtype,
+            device=self.device,
+        )
+        return self.transform(affine)
+
+    def _add_mappable_tensor(self, other: "MappableTensor") -> "MappableTensor":
         mask = combine_optional_masks(
             self.generate_mask(generate_missing_mask=False, cast_mask=False),
             other.generate_mask(generate_missing_mask=False, cast_mask=False),
@@ -392,8 +548,7 @@ class MappableTensor(BaseTensorLikeWrapper):
             grid=grid,
         )
 
-    def __sub__(self, other: "MappableTensor") -> "MappableTensor":
-        """Substraction of two mappable tensors"""
+    def __sub__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
         return self.__add__(-other)
 
     def __neg__(self) -> "MappableTensor":
@@ -455,10 +610,10 @@ class MappableTensor(BaseTensorLikeWrapper):
             for (slice_start, slice_end, step_size) in zip(translation, slice_ends, scale)
         )
 
-    def reduce(self) -> "PlainTensor":
+    def reduce(self) -> "MappableTensor":
         """Reduce the masked tensor to a plain tensor"""
         values, mask = self.generate(generate_missing_mask=False, cast_mask=False)
-        return PlainTensor(
+        return mappable(
             values=values,
             mask=mask,
             n_channel_dims=self._n_channel_dims,
@@ -509,59 +664,20 @@ class MappableTensor(BaseTensorLikeWrapper):
         )
 
 
-class PlainTensor(MappableTensor):
-    """Plain tensor
-
-    Arguments:
-        values: Tensor with shape (batch_size, *channel_dims, *spatial_dims)
-        mask: Tensor with shape (batch_size, (1,) * n_channel_dims, *spatial_dims)
-        n_channel_dims: Number of channel dimensions
-    """
-
-    def __init__(
-        self,
-        values: Tensor,
-        mask: Optional[Tensor] = None,
-        n_channel_dims: int = 1,
-    ) -> None:
-        super().__init__(
-            displacements=values,
-            mask=mask,
-            n_channel_dims=n_channel_dims,
-        )
-
-    def __repr__(self) -> str:
-        return (
-            "PlainTensor(values="
-            f"{self._displacements}, mask={self._mask}, "
-            f"n_channel_dims={self._n_channel_dims})"
-        )
+def mappable(
+    values: Tensor, mask: Optional[Tensor] = None, n_channel_dims: int = 1
+) -> MappableTensor:
+    """Create a mappable tensor from values and mask"""
+    return MappableTensor.from_tensor(values, mask=mask, n_channel_dims=n_channel_dims)
 
 
-class VoxelGrid(MappableTensor):
-    """Voxel grid with optional mask
-
-    Arguments:
-        values: Tensor with shape (batch_size, *spatial_dims, n_channels)
-        mask: Tensor with shape (batch_size, 1, *spatial_dims)
-    """
-
-    def __init__(
-        self,
-        spatial_shape: Sequence[int],
-        dtype: Optional[torch_dtype] = None,
-        device: Optional[torch_device] = None,
-        mask: Optional[Tensor] = None,
-    ) -> None:
-        dtype = get_default_dtype() if dtype is None else dtype
-        device = torch_device("cpu") if device is None else device
-        super().__init__(
-            mask=mask,
-            n_channel_dims=1,
-            grid=GridDefinition(
-                spatial_shape=spatial_shape,
-                affine_transformation=IdentityAffineTransformation(
-                    len(spatial_shape), dtype=dtype, device=device
-                ),
-            ),
-        )
+def voxel_grid(
+    spatial_shape: Sequence[int],
+    mask: Optional[Tensor] = None,
+    dtype: Optional[torch_dtype] = None,
+    device: Optional[torch_device] = None,
+) -> MappableTensor:
+    """Create a voxel grid with optional mask"""
+    return MappableTensor.create_voxel_grid(
+        spatial_shape=spatial_shape, mask=mask, dtype=dtype, device=device
+    )

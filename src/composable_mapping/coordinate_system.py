@@ -1,20 +1,22 @@
 """Voxel coordinate system"""
 
 from abc import ABC, abstractmethod
-from typing import List, Mapping, Optional, Sequence, Tuple, Union, cast, overload
+from typing import Any, List, Mapping, Optional, Sequence, Tuple, Union, cast, overload
 
 from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import empty, get_default_dtype, tensor
+from torch import empty, tensor
 from torch.nn import Module
 
 from .affine import Affine
+from .composable_mapping import ICoordinateSystemContainer
 from .mappable_tensor import (
+    HostAffineTransformation,
     HostDiagonalAffineTransformation,
     IHostAffineTransformation,
     MappableTensor,
-    VoxelGrid,
+    voxel_grid,
 )
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 from .util import (
@@ -27,18 +29,6 @@ from .util import (
     get_spatial_shape,
     move_channels_last,
 )
-
-
-class ICoordinateSystemContainer(ABC):
-    """Class holding a unique voxel coordinate system"""
-
-    @property
-    @abstractmethod
-    def coordinate_system(
-        self,
-    ) -> "CoordinateSystem":
-        """Get voxel coordinate system of the container"""
-
 
 Number = Union[float, int]
 
@@ -128,7 +118,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     """Represents coordinate system between voxel and world coordinates
 
     Arguments:
-        shape: Shape of the grid
+        spatial_shape: Spatial shape of the grid
         to_voxel_coordinates: Affine transformation from world to voxel coordinates,
             should be inverse of from_voxel_coordinates, can be omitted if
             from_voxel_coordinates is given
@@ -139,12 +129,12 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
 
     def __init__(
         self,
-        shape: Sequence[int],
+        spatial_shape: Sequence[int],
         to_voxel_coordinates: Optional[IHostAffineTransformation] = None,
         from_voxel_coordinates: Optional[IHostAffineTransformation] = None,
     ) -> None:
         super().__init__()
-        self._shape = tuple(shape)
+        self._spatial_shape = tuple(spatial_shape)
         if from_voxel_coordinates is None:
             if to_voxel_coordinates is None:
                 raise ValueError(
@@ -160,8 +150,8 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         if (
             get_channels_shape(from_voxel_coordinates.shape, n_channel_dims=2)
             != (
-                len(shape) + 1,
-                len(shape) + 1,
+                len(spatial_shape) + 1,
+                len(spatial_shape) + 1,
             )
             or get_spatial_shape(from_voxel_coordinates.shape, n_channel_dims=2) != tuple()
         ):
@@ -169,8 +159,8 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         if (
             get_channels_shape(to_voxel_coordinates.shape, n_channel_dims=2)
             != (
-                len(shape) + 1,
-                len(shape) + 1,
+                len(spatial_shape) + 1,
+                len(spatial_shape) + 1,
             )
             or get_spatial_shape(to_voxel_coordinates.shape, n_channel_dims=2) != tuple()
         ):
@@ -184,7 +174,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         )
 
     @classmethod
-    def centered_normalized(
+    def create_centered_normalized(
         cls,
         spatial_shape: Sequence[int],
         voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
@@ -204,7 +194,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
                 by voxel centers (see similar option in torch.nn.functional.grid_sample)
             device: Device of the coordinate system
         """
-        centered = cls.centered(spatial_shape, voxel_size, dtype=dtype, device=device)
+        centered = cls.create_centered(spatial_shape, voxel_size, dtype=dtype, device=device)
         voxel_size = centered.grid_spacing_cpu()
         shape_tensor = voxel_size.new_tensor(spatial_shape)
         if align_corners:
@@ -215,11 +205,11 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         return centered.reformat(
             voxel_size=target_voxel_size,
             reference=ReferenceOption(position="center"),
-            shape=RetainShapeOption(),
+            spatial_shape=RetainShapeOption(),
         )
 
     @classmethod
-    def centered(
+    def create_centered(
         cls,
         spatial_shape: Sequence[int],
         voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
@@ -229,46 +219,104 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         """Create centered coordinate system with given voxel size
 
         Args:
-            shape: Shape of the grid
+            spatial_shape: Shape of the grid
             voxel_size: Voxel size of the grid
             device: Device of the coordinate system
         """
-        return cls.voxel(
+        return cls.create_voxel(
             spatial_shape, voxel_size=voxel_size, dtype=dtype, device=device
-        ).shift_voxel([-(dim_size - 1) / 2 for dim_size in spatial_shape])
+        ).translate_voxel([-(dim_size - 1) / 2 for dim_size in spatial_shape])
 
     @classmethod
-    def voxel(
+    def create_voxel(
         cls,
         spatial_shape: Sequence[int],
-        voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
+        voxel_size: Optional[Union[Tensor, Sequence[Number], Number]] = None,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> "CoordinateSystem":
         """Create coordinate system corresponding to the voxel coordinates with
         potential scaling by voxel size"""
-        n_dims = len(spatial_shape)
-        if dtype is None:
-            dtype = get_default_dtype()
-        if voxel_size is not None:
-            if isinstance(voxel_size, (float, int)):
-                voxel_size = [voxel_size] * n_dims
-            if isinstance(voxel_size, Tensor):
-                if dtype is not None and voxel_size.dtype != dtype:
-                    raise ValueError(
-                        "Data type of the voxel size should match the given data type, "
-                        "note that the dtype option can be omitted when voxel size "
-                        "is given as a tensor."
-                    )
-            else:
-                voxel_size = tensor(voxel_size, dtype=dtype, device=torch_device("cpu"))
-            if get_channels_shape(voxel_size.shape, n_channel_dims=1)[0] != n_dims:
-                raise ValueError("Invalid voxel size for the coordinate system")
-        return cls(
-            from_voxel_coordinates=HostDiagonalAffineTransformation(
-                diagonal=voxel_size, matrix_shape=(n_dims + 1, n_dims + 1), device=device
+        return cls.from_diagonal_affine_matrix(
+            spatial_shape=spatial_shape,
+            diagonal=voxel_size,
+            dtype=dtype,
+            device=device,
+        )
+
+    @classmethod
+    def create_torch_grid_sample(
+        cls,
+        spatial_shape: Sequence[int],
+        align_corners: bool = False,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> "CoordinateSystem":
+        """Create coordinate system corresponding to the one used by the
+        torch.nn.functional.grid_sample"""
+        centered = cls.create_centered(spatial_shape, dtype=dtype, device=device)
+        shape_tensor = tensor(spatial_shape, dtype=centered.dtype, device=torch_device("cpu"))
+        if align_corners:
+            shape_tensor -= 1
+        fov_sizes = shape_tensor
+        target_voxel_size = 2 / fov_sizes
+        return centered.reformat(
+            voxel_size=target_voxel_size,
+            reference=ReferenceOption(position="center"),
+            spatial_shape=RetainShapeOption(),
+        )
+
+    @classmethod
+    def from_affine_matrix(
+        cls,
+        spatial_shape: Sequence[int],
+        affine_matrix: Tensor,
+        device: Optional[torch_device] = None,
+    ) -> "CoordinateSystem":
+        """Create coordinate system from affine matrix
+
+        Args:
+            spatial_shape: Shape of the grid
+            affine_matrix: Affine matrix
+            device: Device of the coordinate system
+        """
+        cls._ensure_tensor_on_host(affine_matrix)
+        return CoordinateSystem(
+            from_voxel_coordinates=HostAffineTransformation(
+                affine_matrix,
+                device=device,
             ),
-            shape=spatial_shape,
+            spatial_shape=spatial_shape,
+        )
+
+    @classmethod
+    def from_diagonal_affine_matrix(
+        cls,
+        spatial_shape: Sequence[int],
+        diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        dtype: Optional[torch_dtype] = None,
+        device: Optional[torch_device] = None,
+    ) -> "CoordinateSystem":
+        """Create coordinate system from diagonal affine matrix
+
+        Args:
+            spatial_shape: Shape of the grid
+            affine_matrix: Affine matrix
+            device: Device of the coordinate system
+        """
+        cls._ensure_tensor_on_host(diagonal)
+        cls._ensure_tensor_on_host(translation)
+        n_dims = len(spatial_shape)
+        return CoordinateSystem(
+            from_voxel_coordinates=HostDiagonalAffineTransformation(
+                diagonal=diagonal,
+                translation=translation,
+                matrix_shape=(n_dims + 1, n_dims + 1),
+                dtype=dtype,
+                device=device,
+            ),
+            spatial_shape=spatial_shape,
         )
 
     @property
@@ -277,58 +325,6 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
 
     def forward(self) -> None:
         """Dummy forward pass to make the coordinate system a torch.nn.Module"""
-
-    @property
-    def _from_voxel_coordinates(self) -> IHostAffineTransformation:
-        from_voxel_coordinates = (
-            self._coordinate_transformations_which_should_not_be_accessed_directly[
-                "from_voxel_coordinates"
-            ]
-        )
-        if (
-            from_voxel_coordinates.device != self.device
-            or from_voxel_coordinates.dtype != self.dtype
-        ):
-            self._coordinate_transformations_which_should_not_be_accessed_directly[
-                "from_voxel_coordinates"
-            ] = from_voxel_coordinates.cast(dtype=self.dtype, device=self.device)
-        return self._coordinate_transformations_which_should_not_be_accessed_directly[
-            "from_voxel_coordinates"
-        ]
-
-    @property
-    def _to_voxel_coordinates(self) -> IHostAffineTransformation:
-        to_voxel_coordinates = (
-            self._coordinate_transformations_which_should_not_be_accessed_directly[
-                "to_voxel_coordinates"
-            ]
-        )
-        if to_voxel_coordinates.device != self.device or to_voxel_coordinates.dtype != self.dtype:
-            self._coordinate_transformations_which_should_not_be_accessed_directly[
-                "to_voxel_coordinates"
-            ] = to_voxel_coordinates.cast(dtype=self.dtype, device=self.device)
-        return self._coordinate_transformations_which_should_not_be_accessed_directly[
-            "to_voxel_coordinates"
-        ]
-
-    def _get_children(self) -> Mapping[str, ITensorLike]:
-        return {
-            "from_voxel_coordinates": self._from_voxel_coordinates,
-            "to_voxel_coordinates": self._to_voxel_coordinates,
-        }
-
-    def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
-    ) -> "CoordinateSystem":
-        if not isinstance(children["from_voxel_coordinates"], IHostAffineTransformation):
-            raise ValueError("from_voxel_coordinates should be an affine transformation")
-        if not isinstance(children["to_voxel_coordinates"], IHostAffineTransformation):
-            raise ValueError("to_voxel_coordinates should be an affine transformation")
-        return CoordinateSystem(
-            shape=self._shape,
-            from_voxel_coordinates=children["from_voxel_coordinates"],
-            to_voxel_coordinates=children["to_voxel_coordinates"],
-        )
 
     @property
     def dtype(self) -> torch_dtype:
@@ -351,15 +347,15 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         return Affine(self._to_voxel_coordinates)
 
     @property
-    def shape(self) -> Tuple[int, ...]:
-        """Shape of the coordinate system grid"""
-        return self._shape
+    def spatial_shape(self) -> Tuple[int, ...]:
+        """Spatial shape of the coordinate system grid"""
+        return self._spatial_shape
 
     def grid(self) -> MappableTensor:
         """Grid in the world coordinates"""
         return self.from_voxel_coordinates(
-            VoxelGrid(
-                spatial_shape=self._shape,
+            voxel_grid(
+                spatial_shape=self._spatial_shape,
                 dtype=self.dtype,
                 device=self.device,
             )
@@ -367,7 +363,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
 
     def voxel_grid(self) -> MappableTensor:
         """Grid in the voxel coordinates"""
-        return VoxelGrid(spatial_shape=self._shape, dtype=self.dtype, device=self.device)
+        return voxel_grid(spatial_shape=self._spatial_shape, dtype=self.dtype, device=self.device)
 
     @staticmethod
     def _calculate_voxel_size(affine_matrix: Tensor) -> Tensor:
@@ -395,49 +391,117 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     def __repr__(self) -> str:
         return (
             "CoordinateSystem("
-            f"shape={self._shape}, "
+            f"spatial_shape={self._spatial_shape}, "
             f"to_voxel_coordinates={self._to_voxel_coordinates}, "
             f"from_voxel_coordinates={self.from_voxel_coordinates})"
         )
 
-    def _shift(
-        self, shift: Union[Sequence[Number], Number, Tensor], in_voxel_coordinates: bool
-    ) -> "CoordinateSystem":
-        """Shift the coordinate system in the voxel coordinates
-
-        Args:
-            shift: Shift in the voxel coordinates
-        """
-        if not isinstance(shift, Tensor):
-            shift = tensor(shift, dtype=self.dtype, device=torch_device("cpu"))[None]
-        shift = broadcast_to_in_parts(shift, channels_shape=(len(self._shape),), n_channel_dims=1)
-        shift_transformation = HostDiagonalAffineTransformation(
-            translation=shift, device=self.device
-        )
-        if in_voxel_coordinates:
-            updated_transformation = shift_transformation @ self._from_voxel_coordinates
-        else:
-            updated_transformation = self._from_voxel_coordinates @ shift_transformation
+    def transform_voxel(self, affine_matrix: Tensor) -> "CoordinateSystem":
+        """Transform the coordinates with the given affine matrix in the
+        voxel coordinates before applying the current affine transformation"""
         return CoordinateSystem(
-            from_voxel_coordinates=updated_transformation,
-            shape=self._shape,
+            from_voxel_coordinates=self._from_voxel_coordinates
+            @ HostAffineTransformation(affine_matrix, device=self.device),
+            spatial_shape=self._spatial_shape,
         )
 
-    def shift_voxel(self, shift: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
-        """Shift the coordinate system in the voxel coordinates
+    def transform_voxel_with_diagonal_matrix(
+        self,
+        diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+    ) -> "CoordinateSystem":
+        """Transform the coordinates with the given diagonal affine matrix in the
+        voxel coordinates (before applying the current affine transformation)"""
+        n_dims = len(self.spatial_shape)
+        return CoordinateSystem(
+            from_voxel_coordinates=self._from_voxel_coordinates
+            @ HostDiagonalAffineTransformation(
+                diagonal=diagonal,
+                translation=translation,
+                matrix_shape=(n_dims + 1, n_dims + 1),
+                dtype=self.dtype,
+                device=self.device,
+            ),
+            spatial_shape=self._spatial_shape,
+        )
+
+    def transform_world(self, affine_matrix: Tensor) -> "CoordinateSystem":
+        """Transform the coordinates with the given affine matrix in the
+        world coordinates (after applying the current affine transformation)"""
+        return CoordinateSystem(
+            from_voxel_coordinates=HostAffineTransformation(affine_matrix, device=self.device)
+            @ self._from_voxel_coordinates,
+            spatial_shape=self._spatial_shape,
+        )
+
+    def __rmatmul__(self, affine_matrix: Tensor) -> "CoordinateSystem":
+        return self.transform_world(affine_matrix)
+
+    def transform_world_with_diagonal_matrix(
+        self,
+        diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+    ) -> "CoordinateSystem":
+        """Transform the coordinates with the given diagonal affine matrix in the
+        world coordinates (after applying the current affine transformation)"""
+        n_dims = len(self.spatial_shape)
+        return CoordinateSystem(
+            from_voxel_coordinates=HostDiagonalAffineTransformation(
+                diagonal=diagonal,
+                translation=translation,
+                matrix_shape=(n_dims + 1, n_dims + 1),
+                dtype=self.dtype,
+                device=self.device,
+            )
+            @ self._from_voxel_coordinates,
+            spatial_shape=self._spatial_shape,
+        )
+
+    def translate_voxel(
+        self, translation: Union[Sequence[Number], Number, Tensor]
+    ) -> "CoordinateSystem":
+        """Translate the coordinates in the voxel coordinates (before applying
+        the current affine transformation)
 
         Args:
-            shift: Shift in the voxel coordinates
+            translation: Translation in the voxel coordinates
         """
-        return self._shift(shift, in_voxel_coordinates=True)
+        return self.transform_voxel_with_diagonal_matrix(translation=translation)
 
-    def shift_world(self, shift: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
-        """Shift the coordinate system in the world coordinates
+    def translate_world(
+        self, translation: Union[Sequence[Number], Number, Tensor]
+    ) -> "CoordinateSystem":
+        """Translate the coordinates in the world coordinates (after applying
+        the current affine transformation)
 
         Args:
-            shift: Shift in the world coordinates
+            translation: Translation in the world coordinates
         """
-        return self._shift(shift, in_voxel_coordinates=False)
+        return self.transform_world_with_diagonal_matrix(translation=translation)
+
+    def __add__(self, other: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
+        return self.translate_world(other)
+
+    def multiply_voxel(self, factor: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
+        """Multiply the coordinates in the voxel coordinates (before applying
+        the current affine transformation)
+
+        Args:
+            factor: Factor to multiply the grid spacing
+        """
+        return self.transform_voxel_with_diagonal_matrix(diagonal=factor)
+
+    def multiply_world(self, factor: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
+        """Multiply the coordinates in the world coordinates (after applying
+        the current affine transformation)
+
+        Args:
+            factor: Factor to multiply each dimension of the grid
+        """
+        return self.transform_world_with_diagonal_matrix(diagonal=factor)
+
+    def __mul__(self, other: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
+        return self.multiply_world(other)
 
     @overload
     def reformat(
@@ -445,7 +509,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         *,
         downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
-        shape: Optional[
+        spatial_shape: Optional[
             Union[
                 Sequence[Union[IReformattingShapeOption, int]],
                 IReformattingShapeOption,
@@ -474,7 +538,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         self,
         *,
         voxel_size: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
-        shape: Optional[
+        spatial_shape: Optional[
             Union[
                 Sequence[Union[IReformattingShapeOption, int]],
                 IReformattingShapeOption,
@@ -504,7 +568,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
-        shape: Optional[
+        spatial_shape: Optional[
             Union[
                 Sequence[Union[IReformattingShapeOption, int]],
                 IReformattingShapeOption,
@@ -542,7 +606,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             voxel_size: Voxel size of the grid, if given
                 as a tensor, it should be on CPU, and have the same dtype as the
                 coordinate system.
-            shape: Defines shape of the target grid, either given separately for
+            spatial_shape: Defines spatial_shape of the target grid, either given separately for
                 each dimension or as a single value in which case the same value
                 is used for all the dimensions. Defaults to
                 FitToFOVOption("round", "full_voxels")
@@ -562,13 +626,13 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         downsampling_factor = self._as_downsampling_factor(
             original_voxel_size, downsampling_factor, upsampling_factor, voxel_size
         )
-        if shape is None:
-            shape = FitToFOVOption(fitting_method="round", fov_convention="full_voxels")
-        target_shape = self._get_target_shape(downsampling_factor, shape)
+        if spatial_shape is None:
+            spatial_shape = FitToFOVOption(fitting_method="round", fov_convention="full_voxels")
+        target_shape = self._get_target_shape(downsampling_factor, spatial_shape)
         if reference is None:
             reference = ReferenceOption(position="left", fov_convention="full_voxels")
         source_reference_in_voxel_coordinates = original_voxel_size.new_tensor(
-            self._get_reference_in_voxel_coordinates(reference, self._shape)
+            self._get_reference_in_voxel_coordinates(reference, self._spatial_shape)
         )
         if target_reference is None:
             target_reference = reference
@@ -593,7 +657,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
 
         return CoordinateSystem(
             from_voxel_coordinates=reformatted_transformation,
-            shape=target_shape,
+            spatial_shape=target_shape,
         )
 
     def _as_downsampling_factor(
@@ -658,12 +722,12 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             IReformattingReferenceOption,
             Number,
         ],
-        shape: Sequence[int],
+        spatial_shape: Sequence[int],
     ) -> List[float]:
         if isinstance(reference, (IReformattingReferenceOption, float, int)):
-            reference = [reference] * len(shape)
+            reference = [reference] * len(spatial_shape)
         voxel_coordinate_reference: List[float] = []
-        for dim_reference, dim_size in zip(reference, shape):
+        for dim_reference, dim_size in zip(reference, spatial_shape):
             if isinstance(dim_reference, (float, int)):
                 voxel_coordinate_reference.append(dim_reference)
             else:
@@ -673,26 +737,26 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     def _get_target_shape(
         self,
         downsampling_factor: Tensor,
-        shape: Union[
+        spatial_shape: Union[
             Sequence[Union[IReformattingShapeOption, int]], IReformattingShapeOption, int, Tensor
         ],
     ) -> Sequence[int]:
-        if isinstance(shape, Tensor):
-            if shape.ndim not in (0, 1):
-                raise ValueError("Invalid shape tensor for reformatting")
-            if shape.is_floating_point() or shape.is_complex():
+        if isinstance(spatial_shape, Tensor):
+            if spatial_shape.ndim not in (0, 1):
+                raise ValueError("Invalid spatial_shape tensor for reformatting")
+            if spatial_shape.is_floating_point() or spatial_shape.is_complex():
                 raise ValueError("Shape tensor should be an integer tensor")
-            shape = shape.expand((len(self._shape),))
-            return shape.tolist()
-        if isinstance(shape, int):
-            return [shape] * len(self._shape)
-        if isinstance(shape, IReformattingShapeOption):
-            shape = [shape] * len(self._shape)
+            spatial_shape = spatial_shape.expand((len(self._spatial_shape),))
+            return spatial_shape.tolist()
+        if isinstance(spatial_shape, int):
+            return [spatial_shape] * len(self._spatial_shape)
+        if isinstance(spatial_shape, IReformattingShapeOption):
+            spatial_shape = [spatial_shape] * len(self._spatial_shape)
         else:
-            if len(shape) != len(self._shape):
-                raise ValueError("Invalid shape for reformatting")
-            if all(isinstance(dim_shape, int) for dim_shape in shape):
-                return cast(Sequence[int], shape)
+            if len(spatial_shape) != len(self._spatial_shape):
+                raise ValueError("Invalid spatial_shape for reformatting")
+            if all(isinstance(dim_shape, int) for dim_shape in spatial_shape):
+                return cast(Sequence[int], spatial_shape)
         downsampling_factor = move_channels_last(downsampling_factor).view(
             -1, get_channels_shape(downsampling_factor.shape, n_channel_dims=1)[0]
         )
@@ -700,13 +764,15 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             downsampling_factor = downsampling_factor.unsqueeze(0)
         output_shape: Optional[Sequence[int]] = None
         for batch_index in range(downsampling_factor.size(0)):
-            target_shape = self._get_target_shape_for_batch(downsampling_factor[batch_index], shape)
+            target_shape = self._get_target_shape_for_batch(
+                downsampling_factor[batch_index], spatial_shape
+            )
             if output_shape is None:
                 output_shape = target_shape
             else:
                 if output_shape != target_shape:
                     raise ValueError(
-                        "Inconsistent target shapes obtained with given shape options, "
+                        "Inconsistent target shapes obtained with given spatial shape options, "
                         "consider defining an explicit target shape for reformatting."
                     )
         assert output_shape is not None
@@ -715,11 +781,11 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     def _get_target_shape_for_batch(
         self,
         single_downsampling_factor: Tensor,
-        shape: Sequence[Union[IReformattingShapeOption, int]],
+        spatial_shape: Sequence[Union[IReformattingShapeOption, int]],
     ) -> Sequence[int]:
         target_shape = []
         for dim_original_shape, dim_shape, dim_downsampling_factor in zip(
-            self._shape, shape, single_downsampling_factor
+            self._spatial_shape, spatial_shape, single_downsampling_factor
         ):
             if isinstance(dim_shape, IReformattingShapeOption):
                 target_shape.append(
@@ -728,5 +794,68 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             elif isinstance(dim_shape, int):
                 target_shape.append(dim_shape)
             else:
-                raise ValueError(f"Invalid shape for reformatting: {shape}")
+                raise ValueError(f"Invalid spatial shape for reformatting: {spatial_shape}")
         return target_shape
+
+    @staticmethod
+    def _ensure_tensor_on_host(item: Any) -> None:
+        if isinstance(item, Tensor) and item.device.type != "cpu":
+            raise ValueError(
+                "Tensors contained by the coordinate system should be located on CPU. "
+                "That is since the coordinate system can affect the control flow "
+                "and we want to avoid CPU-GPU synchronizations. Tensors contained "
+                "by the coordinate system are moved to the target device of the "
+                "coordinate system when needed (which can be done asynchonously)."
+            )
+
+    @property
+    def _from_voxel_coordinates(self) -> IHostAffineTransformation:
+        from_voxel_coordinates = (
+            self._coordinate_transformations_which_should_not_be_accessed_directly[
+                "from_voxel_coordinates"
+            ]
+        )
+        if (
+            from_voxel_coordinates.device != self.device
+            or from_voxel_coordinates.dtype != self.dtype
+        ):
+            self._coordinate_transformations_which_should_not_be_accessed_directly[
+                "from_voxel_coordinates"
+            ] = from_voxel_coordinates.cast(dtype=self.dtype, device=self.device)
+        return self._coordinate_transformations_which_should_not_be_accessed_directly[
+            "from_voxel_coordinates"
+        ]
+
+    @property
+    def _to_voxel_coordinates(self) -> IHostAffineTransformation:
+        to_voxel_coordinates = (
+            self._coordinate_transformations_which_should_not_be_accessed_directly[
+                "to_voxel_coordinates"
+            ]
+        )
+        if to_voxel_coordinates.device != self.device or to_voxel_coordinates.dtype != self.dtype:
+            self._coordinate_transformations_which_should_not_be_accessed_directly[
+                "to_voxel_coordinates"
+            ] = to_voxel_coordinates.cast(dtype=self.dtype, device=self.device)
+        return self._coordinate_transformations_which_should_not_be_accessed_directly[
+            "to_voxel_coordinates"
+        ]
+
+    def _get_children(self) -> Mapping[str, ITensorLike]:
+        return {
+            "from_voxel_coordinates": self._from_voxel_coordinates,
+            "to_voxel_coordinates": self._to_voxel_coordinates,
+        }
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "CoordinateSystem":
+        if not isinstance(children["from_voxel_coordinates"], IHostAffineTransformation):
+            raise ValueError("from_voxel_coordinates should be an affine transformation")
+        if not isinstance(children["to_voxel_coordinates"], IHostAffineTransformation):
+            raise ValueError("to_voxel_coordinates should be an affine transformation")
+        return CoordinateSystem(
+            spatial_shape=self._spatial_shape,
+            from_voxel_coordinates=children["from_voxel_coordinates"],
+            to_voxel_coordinates=children["to_voxel_coordinates"],
+        )

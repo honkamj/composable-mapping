@@ -8,9 +8,6 @@ from torch import device as torch_device
 from torch import dtype as torch_dtype
 from torch import ones, zeros
 
-from composable_mapping.mappable_tensor.diagonal_matrix import (
-    DiagonalAffineMatrixDefinition,
-)
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
     are_broadcastable,
@@ -622,8 +619,8 @@ class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTran
 
     def __init__(
         self,
-        diagonal: Optional[Union[Tensor, Number]] = None,
-        translation: Optional[Union[Tensor, Number]] = None,
+        diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
         matrix_shape: Optional[Sequence[int]] = None,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
@@ -709,8 +706,8 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
 
     def __init__(
         self,
-        diagonal: Optional[Union[Tensor, Number]] = None,
-        translation: Optional[Union[Tensor, Number]] = None,
+        diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
         matrix_shape: Optional[Sequence[int]] = None,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,

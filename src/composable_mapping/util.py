@@ -4,6 +4,7 @@ from itertools import repeat
 from typing import Callable, Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
 
 import torch.nn
+from numpy import ndarray
 from torch import Tensor, broadcast_shapes
 from torch.nn.functional import pad
 
@@ -687,3 +688,8 @@ def _is_dim_croppable_first(
     if mode in ("reflect", "circular") and pad_width >= remaining_width:
         return False
     return True
+
+
+def to_numpy(item: Tensor) -> ndarray:
+    """Convert tensor to numpy"""
+    return item.detach().cpu().resolve_conj().resolve_neg().numpy()

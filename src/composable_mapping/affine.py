@@ -6,22 +6,18 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 
-from composable_mapping.mappable_tensor.affine_transformation import (
-    IdentityAffineTransformation,
-)
-
-from .base import BaseComposableMapping
-from .interface import IComposableMapping
+from .composable_mapping import ComposableMapping
 from .mappable_tensor import (
     AffineTransformation,
     DiagonalAffineTransformation,
     IAffineTransformation,
+    IdentityAffineTransformation,
     MappableTensor,
 )
-from .tensor_like import ITensorLike
+from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 
 
-class Affine(BaseComposableMapping):
+class Affine(BaseTensorLikeWrapper, ComposableMapping):
     """Affine transformation"""
 
     def __init__(self, transformation: IAffineTransformation) -> None:
@@ -53,7 +49,7 @@ class Affine(BaseComposableMapping):
         )
 
     @classmethod
-    def identity(
+    def create_identity(
         cls, n_dims: int, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
     ) -> "Affine":
         """Create identity affine transformation"""
@@ -75,49 +71,8 @@ class Affine(BaseComposableMapping):
             raise ValueError("Child of a composable affine must be an affine transformation")
         return Affine(children["transformation"])
 
-    def invert(self, **inversion_parameters) -> IComposableMapping:
+    def invert(self, **arguments) -> ComposableMapping:
         return Affine(self.transformation.invert())
 
     def __repr__(self) -> str:
         return f"Affine(transformation={self.transformation})"
-
-
-class NotAffineTransformationError(Exception):
-    """Error raised when a composable mapping is not affine"""
-
-
-def as_affine_transformation(
-    composable_mapping: IComposableMapping,
-) -> IAffineTransformation:
-    """Extract affine mapping from composable mapping
-
-    Raises an error if the composable mapping is not fully affine.
-    """
-    tracer = _AffineTracer()
-    traced = composable_mapping(tracer)
-    if isinstance(traced, _AffineTracer):
-        if traced.traced_affine is None:
-            raise NotAffineTransformationError("Could not infer affine transformation")
-        return traced.traced_affine
-    raise NotAffineTransformationError("Could not infer affine transformation")
-
-
-class _AffineTracer(MappableTensor):
-    # pylint: disable=super-init-not-called
-    def __init__(self, affine_transformation: Optional[IAffineTransformation] = None) -> None:
-        self.traced_affine: Optional[IAffineTransformation] = affine_transformation
-
-    def transform(self, affine_transformation: IAffineTransformation) -> MappableTensor:
-        if self.traced_affine is not None:
-            traced_affine = affine_transformation @ self.traced_affine
-        else:
-            traced_affine = affine_transformation
-        return _AffineTracer(traced_affine)
-
-    def __getattribute__(self, name: str):
-        if name not in ("transform", "traced_affine"):
-            raise NotAffineTransformationError(
-                "Could not infer affine transformation since an other operation "
-                f"than applying affine transformation was applied ({name})"
-            )
-        return object.__getattribute__(self, name)

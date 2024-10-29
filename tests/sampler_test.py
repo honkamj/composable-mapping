@@ -9,22 +9,18 @@ from torch import device as torch_device
 from torch import float32, ones, randn, tensor
 from torch.testing import assert_close
 
-from composable_mapping.affine import Affine
-from composable_mapping.coordinate_system import CoordinateSystem
-from composable_mapping.interface import ISampler
-from composable_mapping.mappable_tensor.affine_transformation import (
-    HostAffineTransformation,
-)
-from composable_mapping.mappable_tensor.mappable_tensor import (
-    MappableTensor,
-    PlainTensor,
-    VoxelGrid,
-)
-from composable_mapping.sampler import (
+from composable_mapping import (
+    Affine,
     BicubicInterpolator,
+    CoordinateSystem,
+    ISampler,
     LinearInterpolator,
+    MappableTensor,
     NearestInterpolator,
+    mappable,
+    voxel_grid,
 )
+from composable_mapping.mappable_tensor import HostAffineTransformation
 
 
 class ICountingInterpolator(ISampler):
@@ -36,7 +32,7 @@ class ICountingInterpolator(ISampler):
         """Number of calls to the interpolator"""
 
 
-class CountingLinearInterpolator(ICountingInterpolator, LinearInterpolator):
+class CountingLinearInterpolator(LinearInterpolator, ICountingInterpolator):
     """Linear interpolator that counts the number of calls to the core interpolator"""
 
     def __init__(self, **kwargs):
@@ -47,12 +43,12 @@ class CountingLinearInterpolator(ICountingInterpolator, LinearInterpolator):
     def calls(self) -> int:
         return self._calls
 
-    def sample_values(self, values: Tensor, voxel_coordinates: Tensor) -> Tensor:
+    def sample_values(self, volume: Tensor, coordinates: Tensor) -> Tensor:
         self._calls += 1
-        return super().sample_values(values, voxel_coordinates)
+        return super().sample_values(volume, coordinates)
 
 
-class CountingNearestInterpolator(ICountingInterpolator, NearestInterpolator):
+class CountingNearestInterpolator(NearestInterpolator, ICountingInterpolator):
     """Nearest interpolator that counts the number of calls to the core interpolator"""
 
     def __init__(self, **kwargs):
@@ -63,12 +59,12 @@ class CountingNearestInterpolator(ICountingInterpolator, NearestInterpolator):
     def calls(self) -> int:
         return self._calls
 
-    def sample_values(self, values: Tensor, voxel_coordinates: Tensor) -> Tensor:
+    def sample_values(self, volume: Tensor, coordinates: Tensor) -> Tensor:
         self._calls += 1
-        return super().sample_values(values, voxel_coordinates)
+        return super().sample_values(volume, coordinates)
 
 
-class CountingBicubicInterpolator(ICountingInterpolator, BicubicInterpolator):
+class CountingBicubicInterpolator(BicubicInterpolator, ICountingInterpolator):
     """Bicubic interpolator that counts the number of calls to the core interpolator"""
 
     def __init__(self, **kwargs):
@@ -79,9 +75,9 @@ class CountingBicubicInterpolator(ICountingInterpolator, BicubicInterpolator):
     def calls(self) -> int:
         return self._calls
 
-    def sample_values(self, values: Tensor, voxel_coordinates: Tensor) -> Tensor:
+    def sample_values(self, volume: Tensor, coordinates: Tensor) -> Tensor:
         self._calls += 1
-        return super().sample_values(values, voxel_coordinates)
+        return super().sample_values(volume, coordinates)
 
 
 class InterpolatorTest(TestCase):
@@ -111,10 +107,10 @@ class InterpolatorTest(TestCase):
 
     def test_voxel_grid_consistency(self):
         """Test interpolator with a voxel grid"""
-        grid = VoxelGrid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
+        grid = voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(
@@ -133,18 +129,18 @@ class InterpolatorTest(TestCase):
     def test_positive_slightly_shifted_voxel_grid_consistency(self):
         """Test interpolator with a slightly shifted voxel grid"""
         grid = (
-            CoordinateSystem.voxel(
+            CoordinateSystem.create_voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
                 device=torch_device("cpu"),
             )
-            .shift_voxel(0.01)
+            .translate_voxel(0.01)
             .grid()
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(
@@ -163,18 +159,18 @@ class InterpolatorTest(TestCase):
     def test_negative_slightly_shifted_voxel_grid_consistency(self):
         """Test interpolator with a slightly shifted voxel grid"""
         grid = (
-            CoordinateSystem.voxel(
+            CoordinateSystem.create_voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
                 device=torch_device("cpu"),
             )
-            .shift_voxel(-0.01)
+            .translate_voxel(-0.01)
             .grid()
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(
@@ -186,7 +182,7 @@ class InterpolatorTest(TestCase):
 
     def test_strided_grid_consistency(self):
         """Test interpolator with a strided voxel grid"""
-        grid = CoordinateSystem.voxel(
+        grid = CoordinateSystem.create_voxel(
             spatial_shape=(3, 4),
             voxel_size=(2.0, 2.0),
             dtype=float32,
@@ -194,7 +190,7 @@ class InterpolatorTest(TestCase):
         ).grid()
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(
@@ -213,18 +209,18 @@ class InterpolatorTest(TestCase):
     def test_strided_and_shifted_grid_consistency(self):
         """Test interpolator with a strided and shited grid"""
         grid = (
-            CoordinateSystem.voxel(
+            CoordinateSystem.create_voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
                 device=torch_device("cpu"),
             )
-            .shift_voxel(0.3)
+            .translate_voxel(0.3)
             .grid()
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
@@ -232,18 +228,18 @@ class InterpolatorTest(TestCase):
     def test_strided_and_shifted_grid_consistency_with_extrapolation(self):
         """Test interpolator with an extrapolating grid"""
         grid = (
-            CoordinateSystem.voxel(
+            CoordinateSystem.create_voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
                 device=torch_device("cpu"),
             )
-            .shift_voxel(-2.49)
+            .translate_voxel(-2.49)
             .grid()
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(
@@ -263,11 +259,11 @@ class InterpolatorTest(TestCase):
             ),
         )
         grid = Affine(affine)(
-            VoxelGrid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
+            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
@@ -285,11 +281,11 @@ class InterpolatorTest(TestCase):
             ),
         )
         grid = Affine(affine)(
-            VoxelGrid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
+            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
@@ -307,11 +303,11 @@ class InterpolatorTest(TestCase):
             ),
         )
         grid = Affine(affine)(
-            VoxelGrid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
+            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
@@ -319,19 +315,19 @@ class InterpolatorTest(TestCase):
     def test_upsampling_consistency(self):
         """Test interpolator with a voxel grid"""
         grid = (
-            CoordinateSystem.voxel(
+            CoordinateSystem.create_voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(1.0, 1.0),
                 dtype=float32,
                 device=torch_device("cpu"),
             )
             .reformat(upsampling_factor=(3, 2))
-            .shift_voxel(0.8)
+            .translate_voxel(0.8)
             .grid()
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(
@@ -344,19 +340,19 @@ class InterpolatorTest(TestCase):
     def test_upsampling_consistency_with_extrapolation(self):
         """Test interpolator with a voxel grid"""
         grid = (
-            CoordinateSystem.voxel(
+            CoordinateSystem.create_voxel(
                 spatial_shape=(8, 9),
                 voxel_size=(1.0, 1.0),
                 dtype=float32,
                 device=torch_device("cpu"),
             )
             .reformat(upsampling_factor=(2, 3))
-            .shift_voxel(-3)
+            .translate_world(-3)
             .grid()
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(
@@ -379,11 +375,11 @@ class InterpolatorTest(TestCase):
             ),
         )
         grid = Affine(affine)(
-            VoxelGrid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
+            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
-        test_volume = PlainTensor(
+        test_volume = mappable(
             randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
         )
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)

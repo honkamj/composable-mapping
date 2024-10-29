@@ -12,5 +12,5 @@ from .affine_transformation import (
     IdentityAffineTransformation,
     IHostAffineTransformation,
 )
-from .mappable_tensor import MappableTensor, PlainTensor, VoxelGrid
+from .mappable_tensor import MappableTensor, mappable, voxel_grid
 from .util import concatenate_channels, stack_channels

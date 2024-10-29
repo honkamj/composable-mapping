@@ -6,7 +6,7 @@ from typing import Optional, Sequence, Union
 from torch import Tensor, tensor
 
 from .coordinate_system import CoordinateSystem, ReferenceOption
-from .mappable_tensor import MappableTensor, PlainTensor, stack_channels
+from .mappable_tensor import MappableTensor, mappable, stack_channels
 from .util import num_spatial_dims
 
 _OTHER_DIMS_TO_SHIFT = {
@@ -33,48 +33,85 @@ _CENTRAL_TO_SHAPE_DIFFERENCE = {
 }
 
 
+class SpatialDerivationArguments:
+    """Arguments for estimating spatial derivatives"""
+
+    def __init__(
+        self,
+        other_dims: Optional[str] = None,
+        central: bool = False,
+    ) -> None:
+        if central and other_dims not in (None, "crop"):
+            raise ValueError(
+                f'Can not use central difference with option other_dims == "{other_dims}"'
+            )
+        self.other_dims = other_dims
+        self.central = central
+
+
+class SpatialJacobiansArguments:
+    """Arguments for estimating spatial Jacobian matrices"""
+
+    def __init__(
+        self,
+        central: bool = False,
+    ) -> None:
+        self.central = central
+
+
 def update_coordinate_system_for_derivatives(
     coordinate_system: CoordinateSystem,
     spatial_dim: int,
-    other_dims: Optional[str],
-    central: bool,
+    arguments: Optional[SpatialDerivationArguments] = None,
 ) -> CoordinateSystem:
-    """Update coordinate system to match the shape of the derivatives"""
+    """Update coordinate system to match the derivatives volume"""
+    if arguments is None:
+        arguments = SpatialDerivationArguments()
     shifts = tuple(
-        _OTHER_DIMS_TO_SHIFT[other_dims] if dim != spatial_dim else _CENTRAL_TO_SHIFT[central]
+        (
+            _OTHER_DIMS_TO_SHIFT[arguments.other_dims]
+            if dim != spatial_dim
+            else _CENTRAL_TO_SHIFT[arguments.central]
+        )
         for dim in range(len(coordinate_system.shape))
     )
     target_shape = tuple(
         (
             dim_size
             + (
-                _OTHER_DIMS_TO_SHAPE_DIFFERENCE[other_dims]
+                _OTHER_DIMS_TO_SHAPE_DIFFERENCE[arguments.other_dims]
                 if dim != spatial_dim
-                else _CENTRAL_TO_SHAPE_DIFFERENCE[central]
+                else _CENTRAL_TO_SHAPE_DIFFERENCE[arguments.central]
             )
         )
         for dim, dim_size in enumerate(coordinate_system.shape)
     )
-    return coordinate_system.reformat(shape=target_shape, reference=shifts, target_reference=0)
+    return coordinate_system.reformat(
+        spatial_shape=target_shape, reference=shifts, target_reference=0
+    )
 
 
 def update_coordinate_system_for_jacobian_matrices(
     coordinate_system: CoordinateSystem,
-    central: bool,
+    arguments: Optional[SpatialJacobiansArguments] = None,
 ) -> CoordinateSystem:
     """Update coordinate system to match the shape of the Jacobian matrices"""
+    if arguments is None:
+        arguments = SpatialJacobiansArguments()
     target_shape = tuple(
-        (dim_size + _CENTRAL_TO_SHAPE_DIFFERENCE[central]) for dim_size in coordinate_system.shape
+        (dim_size + _CENTRAL_TO_SHAPE_DIFFERENCE[arguments.central])
+        for dim_size in coordinate_system.shape
     )
-    return coordinate_system.reformat(shape=target_shape, reference=ReferenceOption("center"))
+    return coordinate_system.reformat(
+        spatial_shape=target_shape, reference=ReferenceOption("center")
+    )
 
 
 def estimate_spatial_derivatives(
     volume: MappableTensor,
     spatial_dim: int,
     spacing: Optional[Union[Tensor, float, int]] = None,
-    other_dims: Optional[str] = None,
-    central: bool = False,
+    arguments: Optional[SpatialDerivationArguments] = None,
 ) -> MappableTensor:
     """Calculate spatial derivatives over a dimension estimated using finite differences
 
@@ -120,8 +157,8 @@ def estimate_spatial_derivatives(
             (batch_size, channel_dim_1, ..., channel_dim_{n_channel_dims},
             dim_1, ..., dim_{spatial_dim} - 1, ..., dim_{n_dims})
     """
-    if central and other_dims not in (None, "crop"):
-        raise ValueError(f'Can not use central difference with option other_dims == "{other_dims}"')
+    if arguments is None:
+        arguments = SpatialDerivationArguments()
     data, mask = volume.generate(generate_missing_mask=False, cast_mask=False)
     n_channel_dims = len(volume.channels_shape)
     batch_size = data.shape[0]
@@ -133,15 +170,15 @@ def estimate_spatial_derivatives(
         )
     spacing = spacing.expand((batch_size,))[(...,) + (None,) * (data.ndim - 1)]
     n_spatial_dims = num_spatial_dims(data.ndim, n_channel_dims)
-    if other_dims == "crop":
-        other_crop = slice(1, -1) if central else slice(None, -1)
-    elif other_dims == "crop_first":
+    if arguments.other_dims == "crop":
+        other_crop = slice(1, -1) if arguments.central else slice(None, -1)
+    elif arguments.other_dims == "crop_first":
         other_crop = slice(1, None)
-    elif other_dims == "crop_last":
+    elif arguments.other_dims == "crop_last":
         other_crop = slice(None, -1)
     else:
         other_crop = slice(None)
-    if central:
+    if arguments.central:
         front_crop = slice(2, None)
         back_crop = slice(None, -2)
     else:
@@ -158,9 +195,9 @@ def estimate_spatial_derivatives(
         updated_mask: Optional[Tensor] = mask[front_cropping_slice] & mask[back_cropping_slice]
     else:
         updated_mask = None
-    if central:
+    if arguments.central:
         derivatives = derivatives / 2
-    elif other_dims == "average":
+    elif arguments.other_dims == "average":
         summed_derivatives: Optional[Tensor] = None
         combined_mask: Optional[Tensor] = None
         for slice_parts in product((slice(1, None), slice(None, -1)), repeat=n_spatial_dims - 1):
@@ -179,13 +216,13 @@ def estimate_spatial_derivatives(
                     combined_mask = combined_mask & updated_mask[shifting_slice]
         derivatives = summed_derivatives / 2 ** (n_spatial_dims - 1)
         updated_mask = combined_mask
-    return PlainTensor(derivatives, mask=updated_mask, n_channel_dims=n_channel_dims)
+    return mappable(derivatives, mask=updated_mask, n_channel_dims=n_channel_dims)
 
 
 def estimate_spatial_jacobian_matrices(
     volume: MappableTensor,
     spacing: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
-    central: bool = False,
+    arguments: Optional[SpatialJacobiansArguments] = None,
 ) -> MappableTensor:
     """Calculate local Jacobian matrices of a volume estimated using finite differences
 
@@ -205,6 +242,8 @@ def estimate_spatial_jacobian_matrices(
                 n_dims, dim_1 - 1, ..., dim_{n_dims} - 1)
 
     """
+    if arguments is None:
+        arguments = SpatialJacobiansArguments()
     data, mask = volume.generate(generate_missing_mask=False, cast_mask=False)
     n_channel_dims = len(volume.channels_shape)
     n_spatial_dims = len(volume.spatial_shape)
@@ -217,11 +256,13 @@ def estimate_spatial_jacobian_matrices(
     return stack_channels(
         *(
             estimate_spatial_derivatives(
-                volume=PlainTensor(data, mask, n_channel_dims=n_channel_dims),
+                volume=mappable(data, mask, n_channel_dims=n_channel_dims),
                 spatial_dim=dim,
                 spacing=spacing[:, dim],
-                other_dims={False: "average", True: "crop"}[central],
-                central=central,
+                arguments=SpatialDerivationArguments(
+                    other_dims={False: "average", True: "crop"}[arguments.central],
+                    central=arguments.central,
+                ),
             )
             for dim in range(n_spatial_dims)
         ),

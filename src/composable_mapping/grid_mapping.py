@@ -13,12 +13,12 @@ from torch import Tensor
 
 from .base import BaseComposableMapping
 from .interface import IComposableMapping, ISampler
-from .mappable_tensor import MappableTensor, PlainTensor
+from .mappable_tensor import MappableTensor, mappable
 from .sampler import LinearInterpolator
 from .tensor_like import ITensorLike
 
 
-class VoxelGridVolume(BaseComposableMapping):
+class voxel_gridVolume(BaseComposableMapping):
     """Continuously defined mapping based on regular grid samples
 
     Arguments:
@@ -70,7 +70,7 @@ class VoxelGridVolume(BaseComposableMapping):
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
         return self._sampler(self._data, coordinates)
 
-    def invert(self, **inversion_parameters) -> IComposableMapping:
+    def invert(self, **arguments) -> IComposableMapping:
         raise NotImplementedError("No inversion implemented for grid volumes")
 
     def __repr__(self) -> str:
@@ -115,7 +115,7 @@ class VoxelGridDeformation(VoxelGridVolume):
         displacement = super().__call__(masked_coordinates)
         return displacement + masked_coordinates
 
-    def invert(self, **inversion_parameters) -> "_VoxelGridDeformationInverse":
+    def invert(self, **arguments) -> "_VoxelGridDeformationInverse":
         """Invert the deformation
 
         inversion_parameters:
@@ -189,9 +189,9 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
             mask=data_mask,
             voxel_coordinates=voxel_coordinates,
         )
-        return PlainTensor(inverted_values, mask) + masked_coordinates
+        return mappable(inverted_values, mask) + masked_coordinates
 
-    def invert(self, **inversion_parameters) -> VoxelGridDeformation:
+    def invert(self, **arguments) -> VoxelGridDeformation:
         return VoxelGridDeformation(
             displacements=self._data,
             sampler=self._sampler,
@@ -202,49 +202,3 @@ class _VoxelGridDeformationInverse(VoxelGridVolume):
             f"_VoxelGridDeformationInverse(displacement_field_to_invert={self._data}, "
             f"sampler={self._sampler}, inversion_arguments={self._inversion_arguments})"
         )
-
-
-_DEFAULT_SAMPLER: Optional[ISampler] = None
-_DEFAULT_SAMPLER_CONTEXT_STACK = local()
-_DEFAULT_SAMPLER_CONTEXT_STACK.stack = []
-
-
-def get_default_sampler() -> ISampler:
-    """Get current default interpolation args"""
-    if _DEFAULT_SAMPLER_CONTEXT_STACK.stack:
-        return _DEFAULT_SAMPLER_CONTEXT_STACK.stack[-1]
-    if _DEFAULT_SAMPLER is None:
-        return LinearInterpolator()
-    return _DEFAULT_SAMPLER
-
-
-def set_default_sampler(sampler: Optional[ISampler]) -> None:
-    """Set default interpolation args"""
-    global _DEFAULT_SAMPLER  # pylint: disable=global-statement
-    _DEFAULT_SAMPLER = sampler
-
-
-def clear_default_interpolation_args() -> None:
-    """Clear default interpolation args"""
-    global _DEFAULT_SAMPLER  # pylint: disable=global-statement
-    _DEFAULT_SAMPLER = None
-
-
-def get_sampler(sampler: Optional[ISampler]) -> ISampler:
-    """Get interpolation args, either from argument or default"""
-    return sampler if sampler is not None else get_default_sampler()
-
-
-class default_interpolation_args(  # this is supposed to appear as function - pylint: disable=invalid-name
-    ContextDecorator
-):
-    """Context manager for setting default interpolation args"""
-
-    def __init__(self, sampler: ISampler):
-        self.sampler = sampler
-
-    def __enter__(self) -> None:
-        _DEFAULT_SAMPLER_CONTEXT_STACK.stack.append(self.sampler)
-
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        _DEFAULT_SAMPLER_CONTEXT_STACK.stack.pop()
