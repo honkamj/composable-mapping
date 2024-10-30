@@ -19,8 +19,13 @@ from typing import (
 from matplotlib.figure import Figure  # type: ignore
 from torch import Tensor
 
-from .mappable_tensor import MappableTensor
-from .mappable_tensor.affine_transformation import IAffineTransformation
+from .mappable_tensor import (
+    IAffineTransformation,
+    MappableTensor,
+    concatenate_mappable_tensors,
+    mappable,
+    stack_mappable_tensors,
+)
 from .sampler import DataFormat, ISampler, get_sampler
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 from .visualization import visualize_as_grid, visualize_as_image
@@ -34,14 +39,18 @@ def _as_grid_composable_mapping_if_needed(
     target_mapping: "ComposableMapping", sources: Iterable[Any]
 ) -> "ComposableMapping":
     for source_mapping in sources:
-        if isinstance(sources, GridComposableMapping):
+        if isinstance(source_mapping, GridComposableMapping):
             return GridComposableMappingDecorator(target_mapping, source_mapping.coordinate_system)
     return target_mapping
 
 
 @overload
 def _bivariate_arithmetic_operator_template(
-    mapping: "GridComposableMapping", other: Union["GridComposableMapping", Number, MappableTensor]
+    mapping: "GridComposableMapping", other: Union["ComposableMapping", Number, MappableTensor]
+) -> "GridComposableMapping": ...
+@overload
+def _bivariate_arithmetic_operator_template(
+    mapping: "ComposableMapping", other: "GridComposableMapping"
 ) -> "GridComposableMapping": ...
 @overload
 def _bivariate_arithmetic_operator_template(
@@ -53,7 +62,7 @@ def _bivariate_arithmetic_operator_template(  # type: ignore
 ) -> "ComposableMapping": ...
 
 
-ComposableMappingT = TypeVar("ComposableMappingT")
+ComposableMappingT = TypeVar("ComposableMappingT", bound="ComposableMapping")
 
 
 def _univariate_arithmetic_operator_template(  # type: ignore
@@ -104,16 +113,16 @@ def _generate_univariate_arithmetic_operator(
 
 @overload
 def _composition(
-    left_mapping: "GridComposableMapping", right_mapping: "GridComposableMapping"
+    left_mapping: "GridComposableMapping", right_mapping: "ComposableMapping"
 ) -> "GridComposableMapping": ...
-
-
+@overload
+def _composition(
+    left_mapping: "ComposableMapping", right_mapping: "GridComposableMapping"
+) -> "GridComposableMapping": ...
 @overload
 def _composition(
     left_mapping: "ComposableMapping", right_mapping: "ComposableMapping"
 ) -> "ComposableMapping": ...
-
-
 def _composition(
     left_mapping: "ComposableMapping", right_mapping: "ComposableMapping"
 ) -> "ComposableMapping":
@@ -170,9 +179,9 @@ class ComposableMapping(ITensorLike, ABC):
         *,
         data_format: Optional[DataFormat] = None,
         sampler: Optional["ISampler"] = None,
-    ) -> "GridComposableMapping":
+    ) -> "SamplableVolume":
         """Resample the deformation to the target coordinate system"""
-        return GridVolume(
+        return SamplableVolume(
             data=self.sample_to(
                 target,
                 data_format=data_format,
@@ -181,6 +190,10 @@ class ComposableMapping(ITensorLike, ABC):
             data_format=data_format,
             sampler=sampler,
         )
+
+    def to_coordinates(self, target: "ICoordinateSystemContainer") -> "GridComposableMapping":
+        """Set a coordinate system for the mapping, no resampling is done"""
+        return GridComposableMappingDecorator(self, target.coordinate_system)
 
     def as_affine_transformation(self) -> IAffineTransformation:
         """Obtain the mapping as an affine transformation, if possible"""
@@ -276,7 +289,7 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
         *,
         data_format: Optional[DataFormat] = None,
         sampler: Optional[ISampler] = None,
-    ) -> "GridComposableMapping":
+    ) -> "SamplableVolume":
         """Resample the deformation with respect to the contained coordinates"""
         return self.resample_to(
             self,
@@ -378,11 +391,10 @@ class _Composition(BaseTensorLikeWrapper, ComposableMapping):
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "_Composition":
-        if not isinstance(children["left_mapping"], ComposableMapping) or not isinstance(
-            children["right_mapping"], ComposableMapping
-        ):
-            raise ValueError("Children of a composition must be composable mappings")
-        return _Composition(children["left_mapping"], children["right_mapping"])
+        return _Composition(
+            cast(ComposableMapping, children["left_mapping"]),
+            cast(ComposableMapping, children["right_mapping"]),
+        )
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -465,7 +477,7 @@ class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
         )
 
 
-class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
+class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
     """Continuously defined mapping based on regular grid samples
 
     Arguments:
@@ -488,6 +500,15 @@ class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
         self._data_format = DataFormat() if data_format is None else data_format
         self._sampler = get_sampler(sampler)
 
+    def modify_sampler(self, sampler: ISampler) -> "SamplableVolume":
+        """Modify the sampler of the volume"""
+        return SamplableVolume(
+            data=self._data,
+            coordinate_system=self._coordinate_system,
+            data_format=self._data_format,
+            sampler=sampler,
+        )
+
     @property
     def coordinate_system(self) -> "CoordinateSystem":
         return self._coordinate_system
@@ -503,8 +524,8 @@ class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
-    ) -> "GridVolume":
-        return GridVolume(
+    ) -> "SamplableVolume":
+        return SamplableVolume(
             data=cast(MappableTensor, children["data"]),
             coordinate_system=cast("CoordinateSystem", children["coordinate_system"]),
             data_format=self._data_format,
@@ -512,17 +533,19 @@ class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
         )
 
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
-        sampled = self._sampler(
-            self._data, self._coordinate_system.to_voxel_coordinates(coordinates)
-        )
+        voxel_coordinates = self._coordinate_system.to_voxel_coordinates(coordinates)
+        sampled = self._sampler(self._data, voxel_coordinates)
+        if self._data_format.representation == "displacements":
+            if self._data_format.coordinate_type == "voxel":
+                sampled = voxel_coordinates + sampled
+            elif self._data_format.coordinate_type == "world":
+                sampled = coordinates + sampled
         if self._data_format.coordinate_type == "voxel":
             sampled = self._coordinate_system.from_voxel_coordinates(sampled)
-        if self._data_format.representation == "displacements":
-            sampled = coordinates + sampled
         return sampled
 
     def invert(self, **arguments) -> ComposableMapping:
-        return GridVolume(
+        return SamplableVolume(
             data=self._data,
             coordinate_system=self._coordinate_system,
             data_format=self._data_format,
@@ -531,11 +554,28 @@ class GridVolume(BaseTensorLikeWrapper, GridComposableMapping):
 
     def __repr__(self) -> str:
         return (
-            f"GridVolume(data={self._data}, "
+            f"SamplableVolume(data={self._data}, "
             f"coordinate_system={self._coordinate_system}, "
             f"data_format={self._data_format}, "
             f"sampler={self._sampler})"
         )
+
+
+def samplable_volume(
+    data: Tensor,
+    coordinate_system: "CoordinateSystem",
+    mask: Optional[Tensor] = None,
+    *,
+    data_format: Optional[DataFormat] = None,
+    sampler: Optional[ISampler] = None,
+) -> GridComposableMapping:
+    """Create a continuously defined mapping based on regular grid samples"""
+    return SamplableVolume(
+        data=mappable(data, mask),
+        coordinate_system=coordinate_system,
+        data_format=data_format,
+        sampler=sampler,
+    )
 
 
 class NotAffineTransformationError(Exception):
@@ -561,3 +601,97 @@ class _AffineTracer(MappableTensor):
                 f"than applying affine transformation was applied ({name})"
             )
         return object.__getattribute__(self, name)
+
+
+class _Stack(BaseTensorLikeWrapper, ComposableMapping):
+    """Stacked mappings"""
+
+    def __init__(self, *mappings: ComposableMapping, channel_index: int) -> None:
+        self._mappings = mappings
+        self._channel_index = channel_index
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "_Stack":
+        return _Stack(
+            *(cast(ComposableMapping, children[f"mapping_{i}"]) for i in range(len(children))),
+            channel_index=self._channel_index,
+        )
+
+    def _get_tensors(self) -> Mapping[str, Tensor]:
+        return {}
+
+    def _get_children(self) -> Mapping[str, ITensorLike]:
+        children = {}
+        for i, mapping in enumerate(self._mappings):
+            children[f"mapping_{i}"] = mapping
+        return children
+
+    def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
+        return stack_mappable_tensors(
+            *(mapping(masked_coordinates) for mapping in self._mappings),
+            channel_index=self._channel_index,
+        )
+
+    def invert(self, **arguments) -> "ComposableMapping":
+        raise NotImplementedError("Inversion of stacked mappings is not implemented")
+
+    def __repr__(self) -> str:
+        return f"_Stack(mappings={self._mappings}, " f"channel_index={self._channel_index})"
+
+
+class _Concatenate(BaseTensorLikeWrapper, ComposableMapping):
+    """Concatenated mappings"""
+
+    def __init__(self, *mappings: ComposableMapping, channel_index: int) -> None:
+        self._mappings = mappings
+        self._channel_index = channel_index
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "_Concatenate":
+        return _Concatenate(
+            *(cast(ComposableMapping, children[f"mapping_{i}"]) for i in range(len(children))),
+            channel_index=self._channel_index,
+        )
+
+    def _get_tensors(self) -> Mapping[str, Tensor]:
+        return {}
+
+    def _get_children(self) -> Mapping[str, ITensorLike]:
+        children = {}
+        for i, mapping in enumerate(self._mappings):
+            children[f"mapping_{i}"] = mapping
+        return children
+
+    def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
+        return concatenate_mappable_tensors(
+            *(mapping(masked_coordinates) for mapping in self._mappings),
+            channel_index=self._channel_index,
+        )
+
+    def invert(self, **arguments) -> "ComposableMapping":
+        raise NotImplementedError("Inversion of stacked mappings is not implemented")
+
+    def __repr__(self) -> str:
+        return f"_Concatenate(mappings={self._mappings}, " f"channel_index={self._channel_index})"
+
+
+def stack_mappings(*mappings: ComposableMappingT, channel_index: int = 0) -> ComposableMappingT:
+    """Stack mappings along the channel dimension"""
+    stacked: ComposableMapping = _Stack(*mappings, channel_index=channel_index)
+    for mapping in mappings:
+        if isinstance(mapping, GridComposableMapping):
+            stacked = GridComposableMappingDecorator(stacked, mapping.coordinate_system)
+    return cast(ComposableMappingT, stacked)
+
+
+def concatenate_mappings(
+    *mappings: ComposableMappingT, channel_index: int = 0
+) -> ComposableMappingT:
+    """Concatenate mappings along the channel dimension"""
+    concatenated: ComposableMapping = _Concatenate(*mappings, channel_index=channel_index)
+    for mapping in mappings:
+        if isinstance(mapping, GridComposableMapping):
+            concatenated = GridComposableMappingDecorator(concatenated, mapping.coordinate_system)
+    return cast(ComposableMappingT, concatenated)

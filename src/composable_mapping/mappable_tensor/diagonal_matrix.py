@@ -315,6 +315,16 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
         device = torch_device("cpu") if device is None else device
         return dtype, device
 
+    def clear_translation(self) -> "DiagonalAffineMatrixDefinition":
+        """Clear the translation"""
+        return DiagonalAffineMatrixDefinition(
+            diagonal=self._diagonal,
+            translation=None,
+            matrix_shape=self._matrix_shape,
+            dtype=self._dtype,
+            device=self._device,
+        )
+
 
 def transform_values_with_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,

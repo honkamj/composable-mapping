@@ -31,6 +31,26 @@ class DataFormat:
         self.representation = representation
         self.coordinate_type = coordinate_type
 
+    @classmethod
+    def voxel_displacements(cls) -> "DataFormat":
+        """Voxel displacements data format"""
+        return cls(representation="displacements", coordinate_type="voxel")
+
+    @classmethod
+    def world_displacements(cls) -> "DataFormat":
+        """World displacements data format"""
+        return cls(representation="displacements", coordinate_type="world")
+
+    @classmethod
+    def voxel_coordinates(cls) -> "DataFormat":
+        """Voxel coordinates data format"""
+        return cls(representation="coordinates", coordinate_type="voxel")
+
+    @classmethod
+    def world_coordinates(cls) -> "DataFormat":
+        """World coordinates data format"""
+        return cls(representation="coordinates", coordinate_type="world")
+
     def __repr__(self) -> str:
         return (
             f"DataFormat(representation={self.representation}, "

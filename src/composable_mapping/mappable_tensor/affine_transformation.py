@@ -33,6 +33,7 @@ from .diagonal_matrix import (
 )
 from .matrix import (
     add_affine_matrices,
+    clear_translation_from_affine_matrix,
     compose_affine_matrices,
     embed_matrix,
     invert_matrix,
@@ -156,6 +157,10 @@ class IAffineTransformation(ITensorLike):
         """Modify the transformation to output n_output_channels channels such that the output
         would equal broadcasting the original output to have n_output_channels channels."""
 
+    @abstractmethod
+    def clear_translation(self) -> "IAffineTransformation":
+        """Return the transformation without translation"""
+
 
 class IHostAffineTransformation(IAffineTransformation):
     """Host affine transformation"""
@@ -212,6 +217,10 @@ class IHostAffineTransformation(IAffineTransformation):
     @abstractmethod
     def as_host_matrix(self) -> Tensor:
         """Return detach transformation matrix detached on host (cpu)"""
+
+    @abstractmethod
+    def clear_translation(self) -> "IHostAffineTransformation":
+        """Return the transformation without translation"""
 
 
 class BaseAffineTransformation(IAffineTransformation):
@@ -429,14 +438,17 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
     def as_host_matrix(self) -> Optional[Tensor]:
         return None
 
-    def __neg__(self) -> IAffineTransformation:
+    def __neg__(self) -> "AffineTransformation":
         return AffineTransformation(negate_affine_matrix(self.as_matrix()))
 
-    def invert(self) -> IAffineTransformation:
+    def invert(self) -> "AffineTransformation":
         return AffineTransformation(invert_matrix(self.as_matrix()))
 
     def __repr__(self) -> str:
         return f"AffineTransformation(transformation_matrix={self._transformation_matrix})"
+
+    def clear_translation(self) -> "AffineTransformation":
+        return AffineTransformation(clear_translation_from_affine_matrix(self.as_matrix()))
 
 
 class HostAffineTransformation(AffineTransformation, IHostAffineTransformation):
@@ -529,6 +541,14 @@ class HostAffineTransformation(AffineTransformation, IHostAffineTransformation):
     def invert(self) -> "HostAffineTransformation":
         return HostAffineTransformation(
             transformation_matrix_on_host=invert_matrix(self.as_host_matrix()),
+            device=self.device,
+        )
+
+    def clear_translation(self) -> "HostAffineTransformation":
+        return HostAffineTransformation(
+            transformation_matrix_on_host=clear_translation_from_affine_matrix(
+                self.as_host_matrix()
+            ),
             device=self.device,
         )
 
@@ -650,7 +670,7 @@ class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTran
     ) -> "DiagonalAffineTransformation":
         if not isinstance(children["matrix_definition"], DiagonalAffineMatrixDefinition):
             raise ValueError("Invalid children for DiagonalAffineTransformation")
-        return DiagonalAffineTransformation.from_definition(children["matrix_definition"])
+        return self.from_definition(children["matrix_definition"])
 
     @property
     def shape(self) -> Sequence[int]:
@@ -679,21 +699,20 @@ class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTran
     def as_host_diagonal(self) -> Optional[DiagonalAffineMatrixDefinition]:
         return None
 
-    def __neg__(self) -> IAffineTransformation:
-        return DiagonalAffineTransformation.from_definition(
-            negate_diagonal_affine_matrix(self._matrix_definition)
-        )
+    def __neg__(self) -> "DiagonalAffineTransformation":
+        return self.from_definition(negate_diagonal_affine_matrix(self._matrix_definition))
 
-    def invert(self) -> IAffineTransformation:
-        return DiagonalAffineTransformation.from_definition(
-            invert_diagonal_affine_matrix(self._matrix_definition)
-        )
+    def invert(self) -> "DiagonalAffineTransformation":
+        return self.from_definition(invert_diagonal_affine_matrix(self._matrix_definition))
 
     def __repr__(self) -> str:
         return f"DiagonalAffineTransformation(definition={self._matrix_definition})"
 
     def is_zero(self) -> Optional[bool]:
         return None
+
+    def clear_translation(self) -> IAffineTransformation:
+        return self.from_definition(self._matrix_definition.clear_translation())
 
 
 class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffineTransformation):
@@ -823,6 +842,9 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
     def is_zero(self) -> bool:
         host_diagonal_matrix = self.as_host_diagonal()
         return is_zero_diagonal_affine_matrix(host_diagonal_matrix)
+
+    def clear_translation(self) -> "HostDiagonalAffineTransformation":
+        return self.from_definition(self._matrix_definition.clear_translation(), device=self.device)
 
 
 class IdentityAffineTransformation(HostDiagonalAffineTransformation):

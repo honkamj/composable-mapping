@@ -76,3 +76,25 @@ class Affine(BaseTensorLikeWrapper, ComposableMapping):
 
     def __repr__(self) -> str:
         return f"Affine(transformation={self.transformation})"
+
+
+def affine(matrix: Tensor) -> Affine:
+    """Create affine transformation from an affine transformation matrix"""
+    return Affine.from_matrix(matrix)
+
+
+def diagonal_affine(
+    diagonal: Optional[Tensor] = None,
+    translation: Optional[Tensor] = None,
+    matrix_shape: Optional[Sequence[int]] = None,
+    dtype: Optional[torch_dtype] = None,
+    device: Optional[torch_device] = None,
+) -> Affine:
+    """Create affine transformation from diagonal and translation"""
+    return Affine.from_diagonal_and_translation(
+        diagonal=diagonal,
+        translation=translation,
+        matrix_shape=matrix_shape,
+        dtype=dtype,
+        device=device,
+    )

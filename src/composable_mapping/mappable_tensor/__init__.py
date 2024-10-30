@@ -13,4 +13,4 @@ from .affine_transformation import (
     IHostAffineTransformation,
 )
 from .mappable_tensor import MappableTensor, mappable, voxel_grid
-from .util import concatenate_channels, stack_channels
+from .util import concatenate_mappable_tensors, stack_mappable_tensors

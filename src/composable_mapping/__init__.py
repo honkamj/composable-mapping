@@ -1,9 +1,16 @@
 """Composable mapping library"""
 
-__all__ = ["coordinate_system", "sampler", "mappable_tensor", "grid_mapping", "tensor_like"]
+__all__ = ["mappable_tensor"]
 
-from .affine import Affine
-from .composable_mapping import ComposableMapping, GridComposableMapping, GridVolume
+from .affine_mapping import Affine, affine, diagonal_affine
+from .composable_mapping import (
+    ComposableMapping,
+    GridComposableMapping,
+    SamplableVolume,
+    concatenate_mappings,
+    samplable_volume,
+    stack_mappings,
+)
 from .coordinate_system import (
     CoordinateSystem,
     FitToFOVOption,
@@ -12,16 +19,18 @@ from .coordinate_system import (
 )
 from .mappable_tensor import (
     MappableTensor,
-    concatenate_channels,
+    concatenate_mappable_tensors,
     mappable,
-    stack_channels,
+    stack_mappable_tensors,
     voxel_grid,
 )
 from .mask import ClearMask, RectangleMask
 from .sampler import (
+    BaseSeparableSampler,
     BicubicInterpolator,
     CubicSplineSampler,
     DataFormat,
+    GenericSeparableDerivativeSampler,
     ISampler,
     LimitDirection,
     LinearInterpolator,
@@ -32,3 +41,4 @@ from .sampler import (
     get_sampler,
     set_default_sampler,
 )
+from .tensor_like import BaseTensorLikeWrapper, ITensorLike

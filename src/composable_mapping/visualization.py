@@ -1,3 +1,5 @@
+"""Visualization utilities for composable mapping"""
+
 from itertools import combinations
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
@@ -12,10 +14,11 @@ from .util import get_spatial_dims, to_numpy
 Number = Union[float, int]
 
 
-def obtain_central_planes(
+def obtain_coordinate_mapping_central_planes(
     volume: MappableTensor, batch_index: int = 0
 ) -> Tuple[Sequence[ndarray], Sequence[Tuple[int, int]]]:
-    """Obtain central slices of a volume along each channel dimension"""
+    """Obtain central slices of a coordinate mapping along each channel
+    dimension"""
     values = volume.generate_values()
     spatial_dims = get_spatial_dims(values.ndim, volume.n_channel_dims)
     n_dims = len(spatial_dims)
@@ -33,6 +36,27 @@ def obtain_central_planes(
     else:
         raise NotImplementedError("Currently 1D volumes are not supported")
     return slices, dimension_pairs
+
+
+def obtain_central_planes(
+    volume: MappableTensor,
+) -> Tuple[Sequence[ndarray], Sequence[Tuple[int, int]]]:
+    """Obtain central slices of a volume along each channel dimension"""
+    values = volume.generate_values()
+    spatial_dims = get_spatial_dims(values.ndim, volume.n_channel_dims)
+    n_dims = len(spatial_dims)
+    if n_dims > 1:
+        planes = []
+        dimension_pairs = list(combinations(range(n_dims), 2))
+        for dimension_pair in dimension_pairs:
+            other_dims = [dim for dim in range(n_dims) if dim not in dimension_pair]
+            plane = values
+            for other_dim in reversed(other_dims):
+                plane = plane.movedim(spatial_dims[other_dim], 1)
+                plane = plane[:, plane.size(0) // 2]
+            planes.append(to_numpy(plane))
+        return planes, dimension_pairs
+    raise NotImplementedError("Currently 1D volumes are not supported")
 
 
 def dimension_to_letter(dim: int, n_dims: int) -> str:
@@ -55,7 +79,7 @@ def visualize_as_grid(
     if coordinates.channels_shape[0] != len(coordinates.spatial_shape):
         raise ValueError("Number of channels must match number of spatial dimensions")
     n_dims = len(coordinates.spatial_shape)
-    grids, dimension_pairs = obtain_central_planes(coordinates, batch_index=batch_index)
+    grids, dimension_pairs = obtain_central_planes(coordinates)
     if plot_kwargs is None:
         plot_kwargs = {}
 
@@ -74,6 +98,7 @@ def visualize_as_grid(
     )
 
     for axis, grid, (dim_1, dim_2) in zip(axes.flatten(), grids, dimension_pairs):
+        grid = grid[batch_index, [dim_1, dim_2]]
         axis.axis("equal")
         axis.set_xlabel(dimension_to_letter(dim_1, n_dims))
         axis.set_ylabel(dimension_to_letter(dim_2, n_dims))
@@ -120,14 +145,14 @@ def visualize_as_image(
         kwargs["cmap"] = "gray"
     if imshow_kwargs is not None:
         kwargs.update(imshow_kwargs)
-    grids, dimension_pairs = obtain_central_planes(volume, batch_index=batch_index)
+    grids, dimension_pairs = obtain_central_planes(volume)
     figure, axes = subplots(
         1, len(grids), figsize=(figure_height * len(grids), figure_height), squeeze=False
     )
 
     for axis, grid, (dim_1, dim_2) in zip(axes.flatten(), grids, dimension_pairs):
         aspect = voxel_size[dim_1].item() / voxel_size[dim_2].item()
-        grid = moveaxis(grid, 0, -1)
+        grid = moveaxis(grid[batch_index], 0, -1)
         if grid.shape[-1] == 1:
             grid = grid[..., 0]
         axis.set_xlabel(dimension_to_letter(dim_1, n_dims))

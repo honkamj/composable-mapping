@@ -9,7 +9,7 @@ from torch import dtype as torch_dtype
 from torch import empty, tensor
 from torch.nn import Module
 
-from .affine import Affine
+from .affine_mapping import Affine
 from .composable_mapping import ICoordinateSystemContainer
 from .mappable_tensor import (
     HostAffineTransformation,
@@ -630,7 +630,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             spatial_shape = FitToFOVOption(fitting_method="round", fov_convention="full_voxels")
         target_shape = self._get_target_shape(downsampling_factor, spatial_shape)
         if reference is None:
-            reference = ReferenceOption(position="left", fov_convention="full_voxels")
+            reference = ReferenceOption(position="center")
         source_reference_in_voxel_coordinates = original_voxel_size.new_tensor(
             self._get_reference_in_voxel_coordinates(reference, self._spatial_shape)
         )

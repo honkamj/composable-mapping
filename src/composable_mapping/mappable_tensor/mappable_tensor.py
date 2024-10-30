@@ -365,6 +365,7 @@ class MappableTensor(BaseTensorLikeWrapper):
             grid = self._grid.broadcast_to_n_channels(
                 n_affine_transformation_input_channels
             ).transform(affine_transformation)
+            affine_transformation = affine_transformation.clear_translation()
         if self._affine_transformation is None:
             assert self._displacements is None
             affine_transformation_on_displacements: Optional[IAffineTransformation] = None

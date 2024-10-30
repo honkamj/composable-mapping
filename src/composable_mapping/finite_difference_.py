@@ -6,7 +6,7 @@ from typing import Optional, Sequence, Union
 from torch import Tensor, tensor
 
 from .coordinate_system import CoordinateSystem, ReferenceOption
-from .mappable_tensor import MappableTensor, mappable, stack_channels
+from .mappable_tensor import MappableTensor, mappable, stack_mappable_tensors
 from .util import num_spatial_dims
 
 _OTHER_DIMS_TO_SHIFT = {
@@ -253,7 +253,7 @@ def estimate_spatial_jacobian_matrices(
         spacing = tensor(spacing, dtype=volume.dtype, device=volume.device)
     batch_size = volume.shape[0]
     spacing = spacing.expand((batch_size, n_spatial_dims))
-    return stack_channels(
+    return stack_mappable_tensors(
         *(
             estimate_spatial_derivatives(
                 volume=mappable(data, mask, n_channel_dims=n_channel_dims),

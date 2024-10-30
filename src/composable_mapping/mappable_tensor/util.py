@@ -9,7 +9,7 @@ from composable_mapping.util import combine_optional_masks, get_channel_dims
 from .mappable_tensor import MappableTensor, mappable
 
 
-def concatenate_channels(
+def concatenate_mappable_tensors(
     *masked_tensors: MappableTensor, channel_index: int = 0
 ) -> "MappableTensor":
     """Concatenate masked tensors along the channel dimension
@@ -44,7 +44,9 @@ def concatenate_channels(
     )
 
 
-def stack_channels(*masked_tensors: MappableTensor, channel_index: int = 0) -> "MappableTensor":
+def stack_mappable_tensors(
+    *masked_tensors: MappableTensor, channel_index: int = 0
+) -> "MappableTensor":
     """Concatenate masked tensors along the channel dimension
 
     Args:

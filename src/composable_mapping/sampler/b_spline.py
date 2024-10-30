@@ -32,13 +32,16 @@ class CubicSplineSampler(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            interpolating_sampler=prefilter,
             kernel_support=SymmetricPolynomialKernelSupport(
                 kernel_width=lambda _: 4.0, polynomial_degree=lambda _: 3
             ),
             limit_direction=LimitDirection.RIGHT,
         )
         self._mask_threshold = mask_threshold
+        self._prefilter = prefilter
+
+    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+        return self._prefilter
 
     def _kernel_parts(self, coordinates: Tensor) -> Tuple[Tensor, Tensor]:
         abs_coordinates = coordinates.abs()

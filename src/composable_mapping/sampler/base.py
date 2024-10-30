@@ -15,8 +15,9 @@ from typing import (
     cast,
 )
 
-from numpy import argsort
-from torch import Tensor, contiguous_format
+from torch import Tensor
+from torch import bool as torch_bool
+from torch import contiguous_format
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 from torch import empty, linspace, long, ones, tensor, zeros
@@ -77,7 +78,8 @@ class SymmetricPolynomialKernelSupport(IKernelSupport):
     ) -> Tuple[float, bool, bool]:
         degree = self._polynomial_degree(spatial_dim)
         if degree < 0:
-            return (1.0, False, False)
+            # kernel is zeros
+            return (1.0, True, False)
         bound_inclusive = degree == 0
         if limit_direction == LimitDirection.LEFT:
             return (self._kernel_width(spatial_dim), False, bound_inclusive)
@@ -117,7 +119,6 @@ class BaseSeparableSampler(ISampler):
         mask_extrapolated_regions_for_empty_volume_mask: bool,
         convolution_threshold: float,
         mask_threshold: float,
-        interpolating_sampler: bool,
         kernel_support: IKernelSupport,
         limit_direction: LimitDirection,
     ) -> None:
@@ -129,9 +130,12 @@ class BaseSeparableSampler(ISampler):
         )
         self._convolution_threshold = convolution_threshold
         self._mask_threshold = mask_threshold
-        self._interpolating_sampler = interpolating_sampler
         self._kernel_support = kernel_support
         self._limit_direction = limit_direction
+
+    @abstractmethod
+    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+        """Return whether the kernel is interpolating or not"""
 
     @abstractmethod
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
@@ -167,6 +171,7 @@ class BaseSeparableSampler(ISampler):
                 coordinates, spatial_dim
             ),
             kernel_support=self._kernel_support.derivative(spatial_dim),
+            interpolating_kernel=self._interpolating_kernel,
             limit_direction=limit_direction,
             extrapolation_mode=self._extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
@@ -194,27 +199,11 @@ class BaseSeparableSampler(ISampler):
             "reflection": ("reflect", 0.0),
         }[self._extrapolation_mode]
 
-    @staticmethod
-    def _obtain_flipping_permutation(
-        matrix: Tensor,
-    ) -> Optional["_FlippingPermutation"]:
-        largest_indices = matrix[:-1, :-1].abs().argmax(dim=1).tolist()
-        n_dims = matrix.shape[-1] - 1
-        if not _FlippingPermutation.is_valid_permutation(n_dims, largest_indices):
-            return None
-        permutation = tuple(argsort(largest_indices))
-        flipped_spatial_dims = [
-            largest_index
-            for column, largest_index in enumerate(largest_indices)
-            if matrix[largest_index, column] < 0
-        ]
-        return _FlippingPermutation(permutation, flipped_spatial_dims)
-
     def _extract_conv_interpolatable_parameters(
         self,
         volume: MappableTensor,
         voxel_coordinates: MappableTensor,
-    ) -> Optional[Tuple[Tensor, Tensor, Tensor, Tensor, "_FlippingPermutation"]]:
+    ) -> Optional[Tuple[Tensor, Tensor, Tensor, Tensor, "FlippingPermutation"]]:
         if voxel_coordinates.displacements is not None:
             return None
         grid = voxel_coordinates.grid
@@ -228,7 +217,9 @@ class BaseSeparableSampler(ISampler):
         if host_matrix is None:
             return None
         host_matrix = host_matrix.view(-1, n_dims + 1, n_dims + 1)
-        flipping_permutation = self._obtain_flipping_permutation(host_matrix[0])
+        flipping_permutation = FlippingPermutation.obtain_normalizing_flipping_permutation(
+            host_matrix[0]
+        )
         if flipping_permutation is None:
             return None
         affine_transformation = (
@@ -257,14 +248,23 @@ class BaseSeparableSampler(ISampler):
         )
         if (max_conv_coordinate_difference_upper_bound > self._convolution_threshold).any():
             return None
-        if self._interpolating_sampler and not transposed_convolve.all():
+        interpolating_kernel = tensor(
+            [
+                self._interpolating_kernel(flipping_permutation.spatial_permutation[spatial_dim])
+                for spatial_dim in range(n_dims)
+            ],
+            device=torch_device("cpu"),
+            dtype=torch_bool,
+        )
+        if (interpolating_kernel & (~transposed_convolve)).any():
             rounded_translation = translation.round()
             max_slicing_coordinate_difference_upper_bound = (
                 (translation - rounded_translation).abs()
                 + max_conv_coordinate_difference_upper_bound
             ).amax()
             convolve = (
-                max_slicing_coordinate_difference_upper_bound > self._convolution_threshold
+                (~interpolating_kernel)
+                | (max_slicing_coordinate_difference_upper_bound > self._convolution_threshold)
             ) & (~transposed_convolve)
             no_convolve_or_transposed_convolve = (~transposed_convolve) & (~convolve)
             translation[no_convolve_or_transposed_convolve] = translation[
@@ -286,7 +286,7 @@ class BaseSeparableSampler(ISampler):
             Sequence[bool],
             Sequence[Tuple[int, int]],
             Sequence[Tuple[int, int]],
-            "_FlippingPermutation",
+            "FlippingPermutation",
         ]
     ]:
         conv_interpolation_parameters = self._extract_conv_interpolatable_parameters(
@@ -318,9 +318,13 @@ class BaseSeparableSampler(ISampler):
                 downsampling_factor.tolist(),
             )
         ):
+            kernel_dim = flipping_permutation.spatial_permutation[spatial_dim]
+            flip_kernel = kernel_dim in flipping_permutation.flipped_spatial_dims
             (kernel_width, inclusive_min, inclusive_max) = self._kernel_support(
-                spatial_dim, self._limit_direction
+                kernel_dim, self._limit_direction
             )
+            if flip_kernel:
+                inclusive_min, inclusive_max = inclusive_max, inclusive_min
             lower_flooring_function = self._get_flooring_function(inclusive_min)
             upper_flooring_function = self._get_flooring_function(inclusive_max)
             min_coordinate = dim_translation
@@ -372,7 +376,12 @@ class BaseSeparableSampler(ISampler):
                     dtype=voxel_coordinates.dtype,
                     device=voxel_coordinates.device,
                 )
-                kernel = self._kernel(kernel_coordinates, spatial_dim=spatial_dim)
+                if flip_kernel:
+                    kernel_coordinates = -kernel_coordinates
+                kernel = self._kernel(
+                    kernel_coordinates,
+                    spatial_dim=kernel_dim,
+                )
             else:
                 kernel = None
                 pre_pad_or_crop_lower = -int(min_coordinate)
@@ -631,6 +640,7 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         left_limit_kernel: Callable[[Tensor, int, bool], Tensor],
         right_limit_kernel: Callable[[Tensor, int, bool], Tensor],
         kernel_support: IKernelSupport,
+        interpolating_kernel: Callable[[int], bool],
         limit_direction: LimitDirection,
         extrapolation_mode: str = "border",
         mask_extrapolated_regions_for_empty_volume_mask: bool = True,
@@ -644,13 +654,13 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            interpolating_sampler=False,
             kernel_support=kernel_support,
             limit_direction=limit_direction,
         )
         self._spatial_dim = spatial_dim
         self._parent_left_limit_kernel = left_limit_kernel
         self._parent_right_limit_kernel = right_limit_kernel
+        self._parent_interpolating_kernel = interpolating_kernel
 
     def derivative(
         self, spatial_dim: int, limit_direction: LimitDirection = LimitDirection.AVERAGE
@@ -660,6 +670,7 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             left_limit_kernel=self._left_limit_kernel_for_derivation,
             right_limit_kernel=self._right_limit_kernel_for_derivation,
             kernel_support=self._kernel_support.derivative(spatial_dim),
+            interpolating_kernel=self._interpolating_kernel,
             limit_direction=limit_direction,
             extrapolation_mode=self._extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
@@ -669,6 +680,11 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             mask_threshold=self._mask_threshold,
         )
 
+    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+        if spatial_dim == self._spatial_dim:
+            return False
+        return self._parent_interpolating_kernel(spatial_dim)
+
     def _derive_function(
         self,
         kernel_function: Callable[[Tensor, int, bool], Tensor],
@@ -677,7 +693,7 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         needs_derivatives: bool,
     ) -> Tensor:
         def partial_kernel_function(coordinates: Tensor) -> Tensor:
-            return kernel_function(coordinates, spatial_dim, True)
+            return -kernel_function(coordinates, spatial_dim, True)
 
         _output, derivatives = vjp(
             partial_kernel_function,
@@ -730,8 +746,10 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         coordinates: Tensor,
     ) -> Tensor:
         raise NotImplementedError(
-            "Sampling values at arbitrary coordinates is not currently implemented "
-            "for derivatives."
+            "Sampling derivatives at arbitrary coordinates is not currently implemented. "
+            "Contact the developers if you would like this to be included. Currently only "
+            "cases where the coordinates are on a regular grid with the axes "
+            "aligned with the spatial dimensions are supported (implementable with convolution)."
         )
 
     def sample_mask(
@@ -740,12 +758,16 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         coordinates: Tensor,
     ) -> Tensor:
         raise NotImplementedError(
-            "Sampling values at arbitrary coordinates is not currently implemented "
-            "for derivatives."
+            "Sampling derivatives at arbitrary coordinates is not currently implemented. "
+            "Contact the developers if you would like this to be included. Currently only "
+            "cases where the coordinates are on a regular grid with the axes "
+            "aligned with the spatial dimensions are supported (implementable with convolution)."
         )
 
 
-class _FlippingPermutation:
+class FlippingPermutation:
+    """Class for flipping and permuting coordinates and volumes"""
+
     def __init__(
         self, spatial_permutation: Sequence[int], flipped_spatial_dims: Sequence[int]
     ) -> None:
@@ -807,3 +829,27 @@ class _FlippingPermutation:
         ).as_matrix()
         matrix = matrix[tuple(self.spatial_permutation) + (-1,), :]
         return HostAffineTransformation(transformation_matrix_on_host=matrix, device=device)
+
+    @classmethod
+    def obtain_normalizing_flipping_permutation(
+        cls,
+        matrix: Tensor,
+    ) -> Optional["FlippingPermutation"]:
+        """Obtain permutation with flipping which turns the affine matrix as
+        close to a diagonal matrix with positive diagonal, if possible
+
+        This does not currently handle zero diagonal elements.
+
+        Args:
+            matrix: The affine matrix to normalize with shape (n_dims + 1, n_dims + 1)
+        """
+        permutation = matrix[:-1, :-1].abs().argmax(dim=0).tolist()
+        n_dims = matrix.shape[-1] - 1
+        if not FlippingPermutation.is_valid_permutation(n_dims, permutation):
+            return None
+        flipped_spatial_dims = [
+            largest_row
+            for column, largest_row in enumerate(permutation)
+            if matrix[largest_row, column] < 0
+        ]
+        return FlippingPermutation(permutation, flipped_spatial_dims)

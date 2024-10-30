@@ -8,6 +8,7 @@ from composable_mapping.util import (
     broadcast_tensors_in_parts,
     broadcast_to_in_parts,
     get_channel_dims,
+    get_channels_shape,
     move_channels_first,
     move_channels_last,
     split_shape,
@@ -42,7 +43,7 @@ def embed_matrix(matrix: Tensor, target_shape: Sequence[int]) -> Tensor:
         matrix: Tensor with shape ([batch_size, ]n_dims, n_dims, ...)
         target_shape: Target matrix shape
 
-    Returns: Tensor with shape (batch_size, *target_shape)
+    Returns: Tensor with shape (batch_size, *target_shape, ...)
     """
     if len(target_shape) != 2:
         raise ValueError("Matrix shape must be two dimensional.")
@@ -88,7 +89,11 @@ def embed_matrix(matrix: Tensor, target_shape: Sequence[int]) -> Tensor:
         dim=0,
     ).expand(*batch_dimensions_shape, -1, -1, *spatial_shape)
     channel_dims = get_channel_dims(matrix.ndim, n_channel_dims=2)
-    embedded_matrix = cat([cat([matrix, rows], dim=channel_dims[0]), cols], dim=channel_dims[1])
+    embedded_matrix = matrix
+    if rows.numel() > 0:
+        embedded_matrix = cat([matrix, rows], dim=channel_dims[0])
+    if cols.numel() > 0:
+        embedded_matrix = cat([embedded_matrix, cols], dim=channel_dims[1])
     return embedded_matrix
 
 
@@ -290,3 +295,15 @@ def transform_values_with_affine_matrix(
     transformed = move_channels_first(transformed, n_channel_dims)
 
     return transformed
+
+
+def clear_translation_from_affine_matrix(matrix: Tensor) -> Tensor:
+    """Clear translation from affine matrix"""
+    matrix_shape = get_channels_shape(matrix.shape, n_channel_dims=2)
+    matrix = move_channels_last(matrix, 2)
+    matrix = matrix[..., :-1, :-1]
+    matrix = move_channels_first(matrix, 2)
+    return embed_matrix(
+        matrix,
+        target_shape=matrix_shape,
+    )

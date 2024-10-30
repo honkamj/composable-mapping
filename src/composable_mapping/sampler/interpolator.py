@@ -35,12 +35,14 @@ class LinearInterpolator(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            interpolating_sampler=True,
             kernel_support=SymmetricPolynomialKernelSupport(
                 kernel_width=lambda _: 2.0, polynomial_degree=lambda _: 1
             ),
             limit_direction=LimitDirection.RIGHT,
         )
+
+    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+        return True
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
         return (1 + coordinates) * ((coordinates > -1) & (coordinates <= 0)) + (1 - coordinates) * (
@@ -96,12 +98,14 @@ class NearestInterpolator(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            interpolating_sampler=True,
             kernel_support=SymmetricPolynomialKernelSupport(
                 kernel_width=lambda _: 1.0, polynomial_degree=lambda _: 0
             ),
             limit_direction=limit_direction,
         )
+
+    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+        return True
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
         return ones_like(coordinates) * ((coordinates > -0.5) & (coordinates <= 0.5))
@@ -151,13 +155,15 @@ class BicubicInterpolator(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            interpolating_sampler=True,
             kernel_support=SymmetricPolynomialKernelSupport(
                 kernel_width=lambda _: 4.0, polynomial_degree=lambda _: 3
             ),
             limit_direction=LimitDirection.RIGHT,
         )
         self._mask_threshold = mask_threshold
+
+    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+        return True
 
     def _kernel_parts(self, coordinates: Tensor) -> Tuple[Tensor, Tensor]:
         abs_coordinates = coordinates.abs()
