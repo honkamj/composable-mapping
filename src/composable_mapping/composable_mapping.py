@@ -9,14 +9,12 @@ from typing import (
     Iterable,
     Mapping,
     Optional,
-    Tuple,
     TypeVar,
     Union,
     cast,
     overload,
 )
 
-from matplotlib.figure import Figure  # type: ignore
 from torch import Tensor
 
 from .mappable_tensor import (
@@ -28,7 +26,6 @@ from .mappable_tensor import (
 )
 from .sampler import DataFormat, ISampler, get_sampler
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
-from .visualization import visualize_as_grid, visualize_as_image
 
 if TYPE_CHECKING:
     from .coordinate_system import CoordinateSystem
@@ -209,49 +206,6 @@ class ComposableMapping(ITensorLike, ABC):
         """Obtain the mapping as an affine matrix, if possible"""
         return self.as_affine_transformation().as_matrix()
 
-    def visualize_to_as_deformed_grid(
-        self,
-        target: ICoordinateSystemContainer,
-        *,
-        batch_index: int = 0,
-        figure_height: Number = 5,
-        emphasize_every_nth_line: Optional[Tuple[int, int]] = None,
-    ) -> Figure:
-        """Visualize the mapping as a deformation
-
-        If there are more than two dimension, central slices are shown for each pair of dimensions.
-
-        Args:
-            batch_index: Index of the batch element to visualize
-            figure_height: Height of the figure
-            emphasize_every_nth_line: Tuple of two integers, the first one is the number of lines
-                to emphasize, the second one is the offset
-        """
-        return visualize_as_grid(
-            self.sample_to(target),
-            batch_index=batch_index,
-            figure_height=figure_height,
-            emphasize_every_nth_line=emphasize_every_nth_line,
-        )
-
-    def visualize_to_as_image(
-        self,
-        target: ICoordinateSystemContainer,
-        batch_index: int = 0,
-        figure_height: Number = 5,
-        multiply_by_mask: bool = False,
-        imshow_kwargs: Optional[Mapping[str, Any]] = None,
-    ) -> Figure:
-        """Visualize the mapping as an image"""
-        return visualize_as_image(
-            self.sample_to(target),
-            voxel_size=target.coordinate_system.grid_spacing_cpu(),
-            batch_index=batch_index,
-            figure_height=figure_height,
-            multiply_by_mask=multiply_by_mask,
-            imshow_kwargs=imshow_kwargs,
-        )
-
     __matmul__ = _composition
     __add__ = _generate_bivariate_arithmetic_operator(
         lambda x, y: x + y, lambda x, y: x - y, _bivariate_arithmetic_operator_template
@@ -296,25 +250,6 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
             data_format=data_format,
             sampler=sampler,
         )
-
-    def visualize_as_deformed_grid(
-        self,
-        *,
-        batch_index: int = 0,
-        figure_height: int = 5,
-        emphasize_every_nth_line: Optional[Tuple[int, int]] = None,
-    ) -> Figure:
-        """Visualize the mapping as a deformation"""
-        return self.visualize_to_as_deformed_grid(
-            self,
-            batch_index=batch_index,
-            figure_height=figure_height,
-            emphasize_every_nth_line=emphasize_every_nth_line,
-        )
-
-    def visualize_as_image(self, **kwargs) -> Figure:
-        """Visualize the mapping as an image"""
-        return self.visualize_to_as_image(self, **kwargs)
 
 
 class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMapping):

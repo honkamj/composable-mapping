@@ -148,20 +148,14 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             "to_voxel_coordinates": to_voxel_coordinates,
         }
         if (
-            get_channels_shape(from_voxel_coordinates.shape, n_channel_dims=2)
-            != (
-                len(spatial_shape) + 1,
-                len(spatial_shape) + 1,
-            )
+            get_channels_shape(from_voxel_coordinates.shape, n_channel_dims=2)[1]
+            != len(spatial_shape) + 1
             or get_spatial_shape(from_voxel_coordinates.shape, n_channel_dims=2) != tuple()
         ):
             raise ValueError("Invalid affine transformation for a coordinate system")
         if (
-            get_channels_shape(to_voxel_coordinates.shape, n_channel_dims=2)
-            != (
-                len(spatial_shape) + 1,
-                len(spatial_shape) + 1,
-            )
+            get_channels_shape(to_voxel_coordinates.shape, n_channel_dims=2)[1]
+            != len(spatial_shape) + 1
             or get_spatial_shape(to_voxel_coordinates.shape, n_channel_dims=2) != tuple()
         ):
             raise ValueError("Invalid affine transformation for a coordinate system")
@@ -200,8 +194,9 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         if align_corners:
             shape_tensor -= 1
         fov_sizes = shape_tensor * voxel_size
-        max_fov_size = fov_sizes.amax(dim=-1)
-        target_voxel_size = 2 / max_fov_size
+        max_fov_size_index = fov_sizes.argmax()
+        relative_voxel_sizes = voxel_size / voxel_size[max_fov_size_index]
+        target_voxel_size = 2 / fov_sizes[max_fov_size_index] * relative_voxel_sizes
         return centered.reformat(
             voxel_size=target_voxel_size,
             reference=ReferenceOption(position="center"),
