@@ -1,8 +1,22 @@
 # Composable mapping
 
-*Composable mapping* is a PyTorch utility library for handling geometric deformations, develped as part of SITReg, a deep learning intra-modality image registration arhitecture fulfilling strict symmetry properties.
+*Composable mapping* is a PyTorch utility library developed for handling
+coordinate mappings between images (2D or 3D), develped as part of SITReg, a
+deep learning intra-modality image registration arhitecture fulfilling strict
+symmetry properties.
 
-NOTE: The repository is at beta stage and more documentation is coming very coming soon! (4-OCT-2024)
+Developed originally for medical imaging, this library provides a set of classes
+and functions for handling spatial coordinate transformations.
+
+The most powerful feature of this library is the ability to easily compose
+transformations lazily and resample them to different coordinate systems as well
+as sampler classes for sampling volumes defined on regular grids such that the
+optimal method (either convolution or torch.grid_sample) is used based on the
+sampling locations.
+
+The main idea was to develop a library that allows handling of the coordinate
+mappings as if they were mathematical functions, without losing much performance
+compared to more manual implementation.
 
 ## Installation
 
@@ -17,7 +31,7 @@ Install using pip by running the command
 
 ## Documentation
 
-For a quick start tutorial, see [quick_start.ipynb](tutorials/quick_start.ipynb).
+For a quick start tutorial, see [quick_start.ipynb](tutorials/quick_start.ipynb). For API reference, go to [https://honkamj.github.io/composable-mapping/](https://honkamj.github.io/composable-mapping/).
 
 ## SITReg
 

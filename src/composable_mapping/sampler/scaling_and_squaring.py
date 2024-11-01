@@ -1,6 +1,6 @@
-"""Scaling and squaring sampler"""
+"""Scaling and squaring sampler."""
 
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
 
 from torch import Tensor
 
@@ -14,7 +14,18 @@ if TYPE_CHECKING:
 
 
 class ScalingAndSquaring(ISampler):
-    """Scaling and squaring sampler"""
+    """Scaling and squaring sampler.
+
+    Applies scaling and squaring to integrate stationary velocity field (SVF) before
+    sampling the volume.
+
+    Arguments:
+        sampler: Sampler used in integration of the SVF and sampling the volume.
+        steps: Number of scaling and squaring steps.
+        inverse: Whether to integrate in the inverse direction.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
+    """
 
     def __init__(
         self,
@@ -40,7 +51,11 @@ class ScalingAndSquaring(ISampler):
         return self._sampler(volume.modify_values(ddf), coordinates)
 
     def derivative(
-        self, spatial_dim: int, limit_direction: LimitDirection = LimitDirection.AVERAGE
+        self,
+        spatial_dim: int,
+        limit_direction: Union[
+            LimitDirection, Callable[[int], LimitDirection]
+        ] = LimitDirection.average(),
     ) -> "ISampler":
         raise NotImplementedError("Derivative sampling is not implemented for scaling and squaring")
 

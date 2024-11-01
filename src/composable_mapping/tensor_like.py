@@ -1,4 +1,4 @@
-"""Tensor like interface and base class"""
+"""Abstraction for PyTorch tensor like objects."""
 
 from abc import ABC, abstractmethod
 from typing import Mapping, Optional, TypeVar
@@ -22,14 +22,14 @@ class ITensorLike(ABC):
     def dtype(
         self,
     ) -> torch_dtype:
-        """Return the dtype of the underlying tensor(s)"""
+        """PyTorch data type"""
 
     @property
     @abstractmethod
     def device(
         self,
     ) -> torch_device:
-        """Return the device of the underlying tensor(s)"""
+        """PyTorch device"""
 
     @abstractmethod
     def cast(
@@ -38,7 +38,7 @@ class ITensorLike(ABC):
         device: Optional[torch_device] = None,
         non_blocking: bool = False,
     ) -> ITensorLikeT:
-        """Cast underlying tensors to given dtype and device
+        """Cast to given data type and device
 
         We will not use method name "to" as it would create conflict with
         torch.nn.Module.to method which does casting in-place.

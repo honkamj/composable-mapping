@@ -1,28 +1,22 @@
-"""Masked tensors"""
+"""Core mappable tensor class and related functions."""
 
 from typing import Dict, Literal, Mapping, Optional, Sequence, Tuple, Union, overload
 
-from torch import Tensor, allclose
-from torch import any as torch_any
+from torch import Tensor
 from torch import bool as torch_bool
 from torch import device as torch_device
-from torch import diag, diagonal
 from torch import dtype as torch_dtype
-from torch import int32 as torch_int32
-from torch import ones
-from torch import round as torch_round
-from torch import tensor, zeros
+from torch import ones, zeros
 
+from composable_mapping.interface import Number
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
     broadcast_optional_shapes_in_parts_to_single_shape,
     broadcast_tensors_in_parts,
     broadcast_to_in_parts,
     combine_optional_masks,
-    get_batch_dims,
     get_batch_shape,
     get_channels_shape,
-    get_spatial_dims,
     get_spatial_shape,
     optional_add,
     reduce_channels_shape_to_ones,
@@ -38,15 +32,32 @@ from .grid import GridDefinition
 
 REDUCE_TO_SLICE_TOLERANCE = 1e-5
 
-Number = Union[float, int]
-
 
 class MappableTensor(BaseTensorLikeWrapper):
     """A tensor wrapper used as inputs for composable mappings
 
     It is not recommended to create instances of this class directly, but to
     use instead the constructors provided in the module, or as class methods
-    of this class.
+    of this class: `mappable`, `voxel_grid`, `MappableTensor.from_tensor`,
+    `MappableTensor.voxel_grid`.
+
+    The core idea of the mappable tensor is that affine transformations applied
+    to the tensor are not applied right away, but only when the values are
+    generated. This allows for more efficient computation. Additionally,
+    representing voxel coordinate grids and their transformations without
+    generating the grid is possible. Such grids can be also combined with
+    displacement vectors, still without generating the grid.
+
+    Masks can also be used to define valid regions of the tensor.
+
+    Arguments:
+        displacements: Displacement vectors, tensor with shape
+            (*batch_shape, *channels_shape, *spatial_shape).
+        mask: Mask of the tensor with shape (*batch_shape, *(1,) *
+            n_channel_dims, *spatial_shape).
+        n_channel_dims: Number of channel dimensions.
+        affine_transformation: Affine transformation acting on the displacements.
+        grid: Definition of a grid added to the displacements.
     """
 
     def __init__(
@@ -84,18 +95,43 @@ class MappableTensor(BaseTensorLikeWrapper):
     def from_tensor(
         cls, values: Tensor, mask: Optional[Tensor] = None, n_channel_dims: int = 1
     ) -> "MappableTensor":
-        """Create a mappable tensor from a tensor"""
+        """Create a mappable tensor from values and mask
+
+        Args:
+            values: Values of the generated mappable tensor, tensor with shape
+                (*batch_shape, *channels_shape, *spatial_shape).
+            mask: Mask of the generated mapable tensor with shape
+                (*batch_shape, *(1,) * n_channel_dims, *spatial_shape).
+            n_channel_dims: Number of channel dimensions.
+
+        Returns:
+            Mappable tensor.
+        """
         return MappableTensor(displacements=values, mask=mask, n_channel_dims=n_channel_dims)
 
     @classmethod
-    def create_voxel_grid(
+    def voxel_grid(
         cls,
         spatial_shape: Sequence[int],
         mask: Optional[Tensor] = None,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> "MappableTensor":
-        """Create a voxel grid with optional mask"""
+        """Create a voxel grid with optional mask.
+
+        The voxel grid is not generated right away, but only when the values
+        are generated.
+
+        Args:
+            spatial_shape: Spatial shape of the created grid.
+            mask: Mask of the grid with shape
+                (*batch_shape, *(1,) * n_channel_dims, *spatial_shape).
+            dtype: Data type of the grid.
+            device: Device of the grid.
+
+        Returns:
+            Mappable tensor representing the voxel grid.
+        """
         return MappableTensor(
             mask=mask,
             n_channel_dims=1,
@@ -174,27 +210,27 @@ class MappableTensor(BaseTensorLikeWrapper):
 
     @property
     def shape(self) -> Tuple[int, ...]:
-        """Shape of the tensor"""
+        """Shape of the mappable tensor"""
         return self._shape
 
     @property
     def spatial_shape(self) -> Tuple[int, ...]:
-        """Shape of the spatial dimensions"""
+        """Spatial shape of the mappable tensor"""
         return get_spatial_shape(self.shape, self._n_channel_dims)
 
     @property
     def channels_shape(self) -> Tuple[int, ...]:
-        """Shape of the channel dimensions"""
+        """Channel shape of the mappable tensor"""
         return get_channels_shape(self.shape, self._n_channel_dims)
 
     @property
     def batch_shape(self) -> Tuple[int, ...]:
-        """Shape of the batch dimension"""
+        """Batch shape of the mappable tensor."""
         return get_batch_shape(self.shape, self._n_channel_dims)
 
     @property
     def mask_shape(self) -> Tuple[int, ...]:
-        """Shape of the mask"""
+        """Shape of the generated mask of the mappable tensor"""
         return reduce_channels_shape_to_ones(self.shape, self._n_channel_dims)
 
     @property
@@ -221,11 +257,14 @@ class MappableTensor(BaseTensorLikeWrapper):
         generate_missing_mask: bool = True,
         cast_mask: bool = False,
     ) -> Tuple[Tensor, Optional[Tensor]]:
-        """Generate values and mask contained by the mappable tensor
+        """Generate values and mask contained by the mappable tensor.
 
         Args:
-            generate_mask: Generate mask of ones if the tensor does not contain an explicit mask
-            cast_mask: Mask is stored as a boolean tensor, cast it to dtype of values if True
+            generate_mask: Generate mask of ones if the tensor does not contain an explicit mask.
+            cast_mask: Mask is stored as a boolean tensor, cast it to dtype of values if True.
+
+        Returns:
+            Tuple of values and mask.
         """
         return self.generate_values(), self.generate_mask(
             generate_missing_mask=generate_missing_mask, cast_mask=cast_mask
@@ -234,7 +273,7 @@ class MappableTensor(BaseTensorLikeWrapper):
     def generate_values(
         self,
     ) -> Tensor:
-        """Generate values contained by the mappable tensor"""
+        """Generate values contained by the mappable tensor."""
         batch_shape, channels_shape, spatial_shape = split_shape(
             self.shape, n_channel_dims=self._n_channel_dims
         )
@@ -284,11 +323,14 @@ class MappableTensor(BaseTensorLikeWrapper):
         generate_missing_mask: bool = True,
         cast_mask: bool = False,
     ) -> Optional[Tensor]:
-        """Generate mask contained by the mappable tensor
+        """Generate mask contained by the mappable tensor.
 
         Args:
-            generate_mask: Generate mask of ones if the tensor does not contain an explicit mask
-            cast_mask: Mask is stored as a boolean tensor, cast it to dtype of values if True
+            generate_mask: Generate mask of ones if the tensor does not contain an explicit mask.
+            cast_mask: Mask is stored as a boolean tensor, cast it to dtype of values if True.
+
+        Returns:
+            Mask of the mappable tensor.
         """
         target_dtype = self.dtype if cast_mask else torch_bool
         if self._mask is not None:
@@ -317,9 +359,9 @@ class MappableTensor(BaseTensorLikeWrapper):
         """Displacements contained by the mappable tensor
 
         The displacements vector might not have the same shape as the mappable
-        tensor, but is brodcastable to it. This is relatively low level, and
-        should be used with caution. The recommended way to access the values
-        is through the `generate_values` method.
+        tensor, but is brodcastable to it. This is a relatively low level
+        property and the recommended way to access the values is through the
+        `generate_values` method.
         """
         return self._displacements
 
@@ -327,7 +369,7 @@ class MappableTensor(BaseTensorLikeWrapper):
     def affine_transformation(self) -> Optional[IAffineTransformation]:
         """Affine transformation on displacements, if available
 
-        This is relatively low level, and should be used with caution.
+        This is relatively low level property, and should be used with caution.
         """
         return self._affine_transformation
 
@@ -336,17 +378,24 @@ class MappableTensor(BaseTensorLikeWrapper):
         """Definition of the grid contained by the tensor, if available
 
         The grid might not have the same shape as the mappable tensor, but is
-        brodcastable to it. This is relatively low level, and should be used
-        with caution.
+        brodcastable to it. This is relatively low level method, and should be
+        used with caution.
         """
         return self._grid
 
     def transform(self, affine_transformation: IAffineTransformation) -> "MappableTensor":
-        """Apply an affine transformation to the last channel dimension of the tensor
+        """Apply an affine transformation to the last channel dimension of the
+        mappable tensor.
 
         The affine transformation is not applied right a way, only the
         composition with the existing affine transformation is stored. The
         transformation is applied when the values are generated.
+
+        Args:
+            affine_transformation: Affine transformation to apply.
+
+        Returns:
+            Transformed mappable tensor.
         """
         n_affine_transformation_input_channels = affine_transformation.channels_shape[1] - 1
         if self.channels_shape[-1] != n_affine_transformation_input_channels:
@@ -553,7 +602,6 @@ class MappableTensor(BaseTensorLikeWrapper):
         return self.__add__(-other)
 
     def __neg__(self) -> "MappableTensor":
-        """Negation of the mappable tensor"""
         return MappableTensor(
             displacements=self._displacements,
             mask=None if self._mask is None else self._mask,
@@ -565,54 +613,16 @@ class MappableTensor(BaseTensorLikeWrapper):
         )
 
     def has_mask(self) -> bool:
-        """Returns whether the tensor has an explicit mask"""
+        """Has the mappable tensor an explicit mask"""
         return self._mask is not None
 
     def clear_mask(self) -> "MappableTensor":
-        """Remove mask from the tensor"""
+        """Clear mask from the mappable tensor"""
         return self.modify_mask(None)
 
-    def as_slice(
-        self, target_shape: Sequence[int]
-    ) -> Optional[Tuple[Union["ellipsis", slice], ...]]:
-        """Reduce the tensor to slice on target shape, if possible"""
-        if self._grid is None or self._displacements is not None:
-            return None
-        transformation_matrix = self._grid.affine_transformation.as_host_matrix()
-        if transformation_matrix is None:
-            return None
-        transformation_matrix = transformation_matrix.squeeze(
-            dim=get_batch_dims(transformation_matrix.ndim, 2)
-            + get_spatial_dims(transformation_matrix.ndim, 2)
-        )
-        if transformation_matrix.ndim != 2:
-            return None
-        scale = diagonal(transformation_matrix[:-1, :-1])
-        if not allclose(
-            diag(scale), transformation_matrix[:-1, :-1], atol=REDUCE_TO_SLICE_TOLERANCE
-        ):
-            return None
-        translation = transformation_matrix[:-1, -1]
-        if (
-            torch_any(translation < -REDUCE_TO_SLICE_TOLERANCE)
-            or (not allclose(translation.round(), translation, atol=REDUCE_TO_SLICE_TOLERANCE))
-            or not allclose(scale.round(), scale, atol=REDUCE_TO_SLICE_TOLERANCE)
-        ):
-            return None
-        scale = torch_round(scale).type(torch_int32)
-        translation = torch_round(translation).type(torch_int32)
-        target_shape_tensor = tensor(target_shape, dtype=torch_int32)
-        shape_tensor = tensor(self.spatial_shape, dtype=torch_int32)
-        slice_ends = (shape_tensor - 1) * scale + translation + 1
-        if torch_any(slice_ends > target_shape_tensor):
-            return None
-        return (...,) + tuple(
-            slice(int(slice_start), int(slice_end), int(step_size))
-            for (slice_start, slice_end, step_size) in zip(translation, slice_ends, scale)
-        )
-
     def reduce(self) -> "MappableTensor":
-        """Reduce the masked tensor to a plain tensor"""
+        """Reduce the masked tensor to a mappable tensor with values and mask
+        stored explicitly."""
         values, mask = self.generate(generate_missing_mask=False, cast_mask=False)
         return mappable(
             values=values,
@@ -623,7 +633,13 @@ class MappableTensor(BaseTensorLikeWrapper):
     def modify_values(
         self, values: Tensor, n_channel_dims: Optional[int] = None
     ) -> "MappableTensor":
-        """Modify values of the tensor"""
+        """Modify values of the mappable tensor.
+
+        Args:
+            values: New values of the mappable tensor. Tensor with shape
+                (*batch_shape, *channels_shape, *spatial_shape).
+            n_channel_dims: Number of channel dimensions of the new values.
+        """
         if n_channel_dims is None:
             n_channel_dims = self.n_channel_dims
         mask = self._mask
@@ -639,13 +655,27 @@ class MappableTensor(BaseTensorLikeWrapper):
         )
 
     def mask_and(self, mask: Optional[Tensor]) -> "MappableTensor":
-        """Combine mask with logical and"""
+        """Combine mask with logical and.
+
+        Args:
+            mask: Mask to combine with the mappable tensor.
+
+        Returns:
+            Mappable tensor with the combined mask.
+        """
         return self.modify_mask(
             combine_optional_masks(self._mask, mask, n_channel_dims=self._n_channel_dims)
         )
 
     def modify_mask(self, mask: Optional[Tensor]) -> "MappableTensor":
-        """Modify mask of the tensor"""
+        """Modify mask of the mappable tensor.
+
+        Args:
+            mask: New mask of the mappable tensor.
+
+        Returns:
+            Mappable tensor with the new mask.
+        """
         return MappableTensor(
             displacements=self._displacements,
             mask=mask,
@@ -668,7 +698,10 @@ class MappableTensor(BaseTensorLikeWrapper):
 def mappable(
     values: Tensor, mask: Optional[Tensor] = None, n_channel_dims: int = 1
 ) -> MappableTensor:
-    """Create a mappable tensor from values and mask"""
+    """Create a mappable tensor from values and mask
+
+    See: `MappableTensor.from_tensor`.
+    """
     return MappableTensor.from_tensor(values, mask=mask, n_channel_dims=n_channel_dims)
 
 
@@ -678,7 +711,13 @@ def voxel_grid(
     dtype: Optional[torch_dtype] = None,
     device: Optional[torch_device] = None,
 ) -> MappableTensor:
-    """Create a voxel grid with optional mask"""
-    return MappableTensor.create_voxel_grid(
+    """Create a voxel grid with optional mask.
+
+    The voxel grid is not generated right away, but only when the values
+    are generated.
+
+    See: `MappableTensor.voxel_grid`.
+    """
+    return MappableTensor.voxel_grid(
         spatial_shape=spatial_shape, mask=mask, dtype=dtype, device=device
     )

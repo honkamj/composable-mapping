@@ -1,4 +1,4 @@
-"""Visualization utilities for composable mapping"""
+"""Visualization utilities for composable mappings."""
 
 from itertools import combinations
 from typing import Any, Mapping, Optional, Sequence, Tuple, Union
@@ -17,10 +17,9 @@ from composable_mapping.composable_mapping import (
     ICoordinateSystemContainer,
 )
 
+from .interface import Number
 from .mappable_tensor import MappableTensor
 from .util import get_spatial_dims, get_spatial_shape, to_numpy
-
-Number = Union[float, int]
 
 
 def obtain_coordinate_mapping_central_planes(

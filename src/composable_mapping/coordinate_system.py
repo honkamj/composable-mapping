@@ -1,5 +1,6 @@
-"""Voxel coordinate system"""
+"""Coordinate system."""
 
+# pylint:disable=too-many-lines
 from abc import ABC, abstractmethod
 from typing import Any, List, Mapping, Optional, Sequence, Tuple, Union, cast, overload
 
@@ -11,6 +12,7 @@ from torch.nn import Module
 
 from .affine_mapping import Affine
 from .composable_mapping import ICoordinateSystemContainer
+from .interface import Number
 from .mappable_tensor import (
     HostAffineTransformation,
     HostDiagonalAffineTransformation,
@@ -30,26 +32,45 @@ from .util import (
     move_channels_last,
 )
 
-Number = Union[float, int]
-
 
 class IReformattingShapeOption(ABC):
-    """Option for determining target shape based on the original shape and downsampling factor"""
+    """Option for determining a reformatted target shape based on an original
+    shape and a downsampling factor."""
 
     @abstractmethod
     def to_target_size(self, original_size: int, downsampling_factor: float) -> int:
-        """Return the target size given the original size and downsampling factor"""
+        """Return a target size given an original size and a downsampling factor.
+
+        Args:
+            original_size: Original size of the dimension.
+            downsampling_factor: Downsampling factor of the dimension during reformatting.
+
+        Returns:
+            Target size of the dimension.
+        """
 
 
 class RetainShapeOption(IReformattingShapeOption):
-    """Option for retaining the original shape"""
+    """Option for retaining an original shape during reformatting."""
 
     def to_target_size(self, original_size: int, downsampling_factor: float) -> int:
         return original_size
 
 
 class FitToFOVOption(IReformattingShapeOption):
-    """Option for reformatting target shape to fit the field of view size"""
+    """Option for reformatting target shape to fit the field of view size.
+
+    Arguments:
+        fitting_method: Method for fitting the field of view size, either "round",
+            "floor", or "ceil".
+        fov_convention: Convention for defining the field of view, either "full_voxels"
+            or "voxel_centers". If voxels are seens as cubes with the value at the
+            center, the convention "full voxels" includes the full cubes in the field
+            of view, while the convention "voxel_centers" includes only the centers.
+            The latter results in a field of view that is one voxel smaller in each
+            dimension. Similar to the align_corners option in
+            torch.nn.functional.grid_sample
+    """
 
     DIVISION_FUNCTIONS = {
         "round": lambda x, y: int(round(x / y)),
@@ -59,9 +80,9 @@ class FitToFOVOption(IReformattingShapeOption):
 
     def __init__(self, fitting_method: str = "round", fov_convention: str = "full_voxels") -> None:
         if fitting_method not in ("round", "floor", "ceil"):
-            raise ValueError(f"Unknown fitting method {fitting_method}")
+            raise ValueError(f"Unknown fitting method ({fitting_method})")
         if fov_convention not in ("full_voxels", "voxel_centers"):
-            raise ValueError(f"Unknown fov convention {fov_convention}")
+            raise ValueError(f"Unknown fov convention ({fov_convention}).")
         self._division_function = self.DIVISION_FUNCTIONS[fitting_method]
         self._fov_convention = fov_convention
 
@@ -70,21 +91,39 @@ class FitToFOVOption(IReformattingShapeOption):
             return self._division_function(original_size, downsampling_factor)
         elif self._fov_convention == "voxel_centers":
             return self._division_function(original_size - 1, downsampling_factor) + 1
-        raise ValueError(f"Unknown fov convention {self._fov_convention}")
+        raise ValueError(f"Unknown fov convention ({self._fov_convention}).")
 
 
 class IReformattingReferenceOption(ABC):
     """Option for defining reference point which will be aligned between the
-    original and the reformatted coordinates"""
+    original and the reformatted coordinates."""
 
     @abstractmethod
     def get_voxel_coordinate(self, size: int) -> float:
-        """Get the voxel coordinate corresponding to the position with the given
-        dimension size"""
+        """Get a voxel coordinate corresponding to the reference position with
+        a given dimension size.
+
+        Args:
+            size: Size of the dimension
+
+        Returns:
+            Voxel coordinate corresponding to the reference position along the dimension.
+        """
 
 
 class ReferenceOption(IReformattingReferenceOption):
-    """Option for defining reformatting reference point"""
+    """Option for defining reformatting reference point.
+
+    Arguments:
+        position: Position of the reference point, either "left", "right", or "center".
+        fov_convention: Convention for defining the field of view, either "full_voxels"
+            or "voxel_centers". If voxels are seens as cubes with the value at the
+            center, the convention "full voxels" includes the full cubes in the field
+            of view, while the convention "voxel_centers" includes only the centers.
+            The latter results in a field of view that is one voxel smaller in each
+            dimension. Similar to the align_corners option in
+            torch.nn.functional.grid_sample
+    """
 
     def __init__(
         self,
@@ -111,20 +150,38 @@ class ReferenceOption(IReformattingReferenceOption):
                 return 0
             if self._position == "right":
                 return size - 1
-        raise ValueError(f"Unknown position {self._position}")
+        raise ValueError(
+            "Unknown position or fov convention " f"({self._position} and {self._fov_convention})"
+        )
 
 
 class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper):
-    """Represents coordinate system between voxel and world coordinates
+    """Represents coordinate system between voxel and world coordinates on a regular grid
+
+    Recommended way to create a coordinate system is to use the factory
+    methods provided as class method of this class:
+    `CoordinateSystem.centered_normalized`,
+    `CoordinateSystem.centered`, `CoordinateSystem.voxel`,
+    `CoordinateSystem.torch_grid_sample`,
+    `CoordinateSystem.from_affine_matrix`,
+    `CoordinateSystem.from_diagonal_affine_matrix`.
 
     Arguments:
         spatial_shape: Spatial shape of the grid
-        to_voxel_coordinates: Affine transformation from world to voxel coordinates,
-            should be inverse of from_voxel_coordinates, can be omitted if
-            from_voxel_coordinates is given
-        from_voxel_coordinates: Affine transformation from voxel to world coordinates,
-            should be inverse of to_voxel_coordinates, can be omitted if
-            to_voxel_coordinates is given
+        to_voxel_coordinates: Affine transformation from world to voxel
+            coordinates. This should be the inverse of from_voxel_coordinates
+            and can be omitted if from_voxel_coordinates is given. This should
+            be a IHostAffineTransformation meaning that the transformation is
+            stored on the host (cpu) until needed on a target device. That is,
+            since the transformation may be used in control flow decisions, and
+            we want to avoid synchronizing the target device with the host.
+        from_voxel_coordinates: Affine transformation from voxel to world
+            coordinates. This should be the inverse of to_voxel_coordinates
+            and can be omitted if to_voxel_coordinates is given. This should
+            be a IHostAffineTransformation meaning that the transformation is
+            stored on the host (cpu) until needed on a target device. That is,
+            since the transformation may be used in control flow decisions, and
+            we want to avoid synchronizing the target device with the host.
     """
 
     def __init__(
@@ -168,31 +225,42 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         )
 
     @classmethod
-    def create_centered_normalized(
+    def centered_normalized(
         cls,
         spatial_shape: Sequence[int],
         voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
-        align_corners: bool = False,
+        fov_convention: str = "full_voxels",
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> "CoordinateSystem":
-        """Create centered normalized coordinate system
+        """Create a centered normalized coordinate system.
 
         The coordinate system is normalized such that the grid just fits into the
         cube from -1 to 1 in each dimension. The grid is centered in the cube.
 
         Args:
-            spatial_shape: Shape of the grid
-            voxel_size: Voxel size of the grid
-            align_corners: Whether to fit the grid into the cube by full voxels or
-                by voxel centers (see similar option in torch.nn.functional.grid_sample)
-            device: Device of the coordinate system
+            spatial_shape: Spatial shape of the grid.
+            voxel_size: Relative voxel size of the grid.
+            fov_convention: Convention for defining the field of view, either "full_voxels"
+                or "voxel_centers". If voxels are seens as cubes with the value at the
+                center, the convention "full voxels" includes the full cubes in the field
+                of view, while the convention "voxel_centers" includes only the centers.
+                The latter results in a field of view that is one voxel smaller in each
+                dimension. Similar to the align_corners option in
+                torch.nn.functional.grid_sample.
+            dtype: Data type of the created coordinate system.
+            device: Device of the created coordinate system.
+
+        Returns:
+            Centered normalized coordinate system.
         """
-        centered = cls.create_centered(spatial_shape, voxel_size, dtype=dtype, device=device)
+        centered = cls.centered(spatial_shape, voxel_size, dtype=dtype, device=device)
         voxel_size = centered.grid_spacing_cpu()
         shape_tensor = voxel_size.new_tensor(spatial_shape)
-        if align_corners:
+        if fov_convention == "voxel_centers":
             shape_tensor -= 1
+        elif fov_convention != "full_voxels":
+            raise ValueError(f"Unknown fov convention {fov_convention}")
         fov_sizes = shape_tensor * voxel_size
         max_fov_size_index = fov_sizes.argmax()
         relative_voxel_sizes = voxel_size / voxel_size[max_fov_size_index]
@@ -204,34 +272,48 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         )
 
     @classmethod
-    def create_centered(
+    def centered(
         cls,
         spatial_shape: Sequence[int],
         voxel_size: Union[Sequence[Number], Number, Tensor] = 1.0,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> "CoordinateSystem":
-        """Create centered coordinate system with given voxel size
+        """Create centered coordinate system with a given voxel size.
 
         Args:
-            spatial_shape: Shape of the grid
-            voxel_size: Voxel size of the grid
-            device: Device of the coordinate system
+            spatial_shape: Spatial shape of the grid.
+            voxel_size: Voxel size of the grid.
+            dtype: Data type of the created coordinate system.
+            device: Device of the created coordinate system.
+
+        Returns:
+            Centered coordinate system.
         """
-        return cls.create_voxel(
+        return cls.voxel(
             spatial_shape, voxel_size=voxel_size, dtype=dtype, device=device
         ).translate_voxel([-(dim_size - 1) / 2 for dim_size in spatial_shape])
 
     @classmethod
-    def create_voxel(
+    def voxel(
         cls,
         spatial_shape: Sequence[int],
         voxel_size: Optional[Union[Tensor, Sequence[Number], Number]] = None,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> "CoordinateSystem":
-        """Create coordinate system corresponding to the voxel coordinates with
-        potential scaling by voxel size"""
+        """Create coordinate system corresponding to the voxel coordinate
+        potentially scaled by the voxel size.
+
+        Args:
+            spatial_shape: Spatial shape of the grid.
+            voxel_size: Voxel size of the grid.
+            dtype: Data type of the created coordinate system.
+            device: Device of the created coordinate system.
+
+        Returns:
+            Voxel coordinate system.
+        """
         return cls.from_diagonal_affine_matrix(
             spatial_shape=spatial_shape,
             diagonal=voxel_size,
@@ -240,19 +322,41 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         )
 
     @classmethod
-    def create_torch_grid_sample(
+    def torch_grid_sample(
         cls,
         spatial_shape: Sequence[int],
-        align_corners: bool = False,
+        fov_convention: str = "full_voxels",
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> "CoordinateSystem":
         """Create coordinate system corresponding to the one used by the
-        torch.nn.functional.grid_sample"""
-        centered = cls.create_centered(spatial_shape, dtype=dtype, device=device)
+        torch.nn.functional.grid_sample.
+
+        The coordinate system is normalized along each dimensions to the range
+        from -1 to 1.
+
+        Args:
+            spatial_shape: Spatial shape of the grid.
+            fov_convention: Convention for defining the field of view, either "full_voxels"
+                or "voxel_centers". If voxels are seens as cubes with the value at the
+                center, the convention "full voxels" includes the full cubes in the field
+                of view, while the convention "voxel_centers" includes only the centers.
+                The latter results in a field of view that is one voxel smaller in each
+                dimension. Similar to the align_corners option in
+                torch.nn.functional.grid_sample.
+            dtype: Data type of the created coordinate system.
+            device: Device of the created coordinate system.
+
+        Returns:
+            Coordinate system corresponding to the one used by the
+            torch.nn.functional.grid_sample.
+        """
+        centered = cls.centered(spatial_shape, dtype=dtype, device=device)
         shape_tensor = tensor(spatial_shape, dtype=centered.dtype, device=torch_device("cpu"))
-        if align_corners:
+        if fov_convention == "voxel_centers":
             shape_tensor -= 1
+        elif fov_convention != "full_voxels":
+            raise ValueError(f"Unknown fov convention {fov_convention}.")
         fov_sizes = shape_tensor
         target_voxel_size = 2 / fov_sizes
         return centered.reformat(
@@ -268,12 +372,22 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         affine_matrix: Tensor,
         device: Optional[torch_device] = None,
     ) -> "CoordinateSystem":
-        """Create coordinate system from affine matrix
+        """Create coordinate system from an affine matrix
 
         Args:
-            spatial_shape: Shape of the grid
-            affine_matrix: Affine matrix
-            device: Device of the coordinate system
+            spatial_shape: Spatial shape of the grid
+            affine_matrix: Affine matrix describing the transformation
+                from voxel to world coordinates. Tensor with shape
+                ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1).
+                The affine matrix tensor should be provided on the host (cpu).
+                That is, since the transformation may be used in control flow
+                decisions, and we want to avoid synchronizing the target device
+                with the host. The matrix is moved to the target device
+                asynchronously, if needed.
+            device: Device of the created coordinate system.
+
+        Returns:
+            Coordinate system with the given affine matrix.
         """
         cls._ensure_tensor_on_host(affine_matrix)
         return CoordinateSystem(
@@ -295,10 +409,24 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     ) -> "CoordinateSystem":
         """Create coordinate system from diagonal affine matrix
 
+        The diagonal and the translation should be provided on the host (cpu).
+        That is, since the transformation may be used in control flow decisions,
+        and we want to avoid synchronizing the target device with the host. The
+        matrix is moved to the target device asynchronously, if needed.
+
         Args:
-            spatial_shape: Shape of the grid
-            affine_matrix: Affine matrix
-            device: Device of the coordinate system
+            spatial_shape: Spatial shape of the created grid
+            diagonal: Diagonal of the affine transformation matrix describing
+                the transformation from voxel to world coordinates. Tensor
+                with shape ([*batch_shape, ]diagonal_length[, *spatial_shape]).
+            translation: Translation of the affine transformation describing
+                the transformation from voxel to world coordinates. Tensor with
+                shape ([*batch_shape, ]n_output_dims[, *spatial_shape]).
+            dtype: Data type of the created coordinate system.
+            device: Device of the created coordinate system.
+
+        Returns:
+            Coordinate system with the given diagonal affine matrix.
         """
         cls._ensure_tensor_on_host(diagonal)
         cls._ensure_tensor_on_host(translation)
@@ -323,22 +451,20 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
 
     @property
     def dtype(self) -> torch_dtype:
-        """Get dtype of the coordinate system"""
         return self.get_buffer("_indicator").dtype
 
     @property
     def device(self) -> torch_device:
-        """Get device of the coordinate system"""
         return self.get_buffer("_indicator").device
 
     @property
     def from_voxel_coordinates(self) -> Affine:
-        """Mapping from voxel to world coordinates"""
+        """Affine mapping from voxel to world coordinates"""
         return Affine(self._from_voxel_coordinates)
 
     @property
     def to_voxel_coordinates(self) -> Affine:
-        """Mapping from world to voxel coordinates"""
+        """Affine mapping from world to voxel coordinates"""
         return Affine(self._to_voxel_coordinates)
 
     @property
@@ -370,14 +496,14 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         return matrix.square().sum(dim=row_dim).sqrt()
 
     def grid_spacing_cpu(self) -> Tensor:
-        """Get grid spacing as CPU tensor"""
+        """Obtain grid spacing as a CPU tensor"""
         diagonal_on_host = self._from_voxel_coordinates.as_host_diagonal()
         if diagonal_on_host is None:
             return self._calculate_voxel_size(self._from_voxel_coordinates.as_host_matrix())
         return diagonal_on_host.generate_diagonal().abs()
 
     def grid_spacing(self) -> Tensor:
-        """Get grid spacing"""
+        """Obtain grid spacing on the target device"""
         diagonal = self._from_voxel_coordinates.as_diagonal()
         if diagonal is None:
             return self._calculate_voxel_size(self._from_voxel_coordinates.as_matrix())
@@ -392,8 +518,23 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         )
 
     def transform_voxel(self, affine_matrix: Tensor) -> "CoordinateSystem":
-        """Transform the coordinates with the given affine matrix in the
-        voxel coordinates before applying the current affine transformation"""
+        """Transform the coordinates with an affine matrix in the
+        voxel coordinates before applying the current affine transformation
+
+        Args:
+            affine_matrix: Affine matrix describing the transformation
+                in the voxel coordinates. Tensor with shape
+                ([*batch_shape, ]n_output_dims + 1, n_spatial_dims + 1).
+                The affine matrix tensor should be provided on the host (cpu).
+                That is, since the transformation may be used in control flow
+                decisions, and we want to avoid synchronizing the target device
+                with the host. The matrix is moved to the target device
+                asynchronously, if needed.
+
+        Returns:
+            Coordinate system with a modified affine transformation from voxel
+            to world coordinates.
+        """
         return CoordinateSystem(
             from_voxel_coordinates=self._from_voxel_coordinates
             @ HostAffineTransformation(affine_matrix, device=self.device),
@@ -405,15 +546,35 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
         translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
     ) -> "CoordinateSystem":
-        """Transform the coordinates with the given diagonal affine matrix in the
-        voxel coordinates (before applying the current affine transformation)"""
-        n_dims = len(self.spatial_shape)
+        """Transform the coordinates with a diagonal affine matrix in the
+        voxel coordinates before applying the current affine transformation.
+
+        The diagonal and the translation should be provided on the host (cpu).
+        That is, since the transformation may be used in control flow decisions,
+        and we want to avoid synchronizing the target device with the host. The
+        matrix is moved to the target device asynchronously, if needed.
+
+        Args:
+            diagonal: Diagonal of the affine transformation matrix with shape
+                ([*batch_shape, ]n_spatial_dims). Can be also
+                given as a number or sequence of numbers. If None, corresponds
+                to the diagonal of ones.
+            translation: Translation of the affine transformation matrix
+                with shape ([*batch_shape, ]n_spatial_dims).
+                Can be also given as a number or sequence of numbers. If None,
+                corresponds to the zero translation.
+
+        Returns:
+            Coordinate system with a modified affine transformation from voxel
+            to world coordinates.
+        """
+        n_spatial_dims = len(self.spatial_shape)
         return CoordinateSystem(
             from_voxel_coordinates=self._from_voxel_coordinates
             @ HostDiagonalAffineTransformation(
                 diagonal=diagonal,
                 translation=translation,
-                matrix_shape=(n_dims + 1, n_dims + 1),
+                matrix_shape=(n_spatial_dims + 1, n_spatial_dims + 1),
                 dtype=self.dtype,
                 device=self.device,
             ),
@@ -421,8 +582,23 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         )
 
     def transform_world(self, affine_matrix: Tensor) -> "CoordinateSystem":
-        """Transform the coordinates with the given affine matrix in the
-        world coordinates (after applying the current affine transformation)"""
+        """Transform the coordinates with an affine matrix in the
+        world coordinates after applying the current affine transformation
+
+        Args:
+            affine_matrix: Affine matrix describing the transformation
+                in the world coordinates. Tensor with shape
+                ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1).
+                The affine matrix tensor should be provided on the host (cpu).
+                That is, since the transformation may be used in control flow
+                decisions, and we want to avoid synchronizing the target device
+                with the host. The matrix is moved to the target device
+                asynchronously, if needed.
+
+        Returns:
+            Coordinate system with a modified affine transformation from voxel
+            to world coordinates.
+        """
         return CoordinateSystem(
             from_voxel_coordinates=HostAffineTransformation(affine_matrix, device=self.device)
             @ self._from_voxel_coordinates,
@@ -436,15 +612,39 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         self,
         diagonal: Optional[Union[Tensor, Sequence[Number], Number]] = None,
         translation: Optional[Union[Tensor, Sequence[Number], Number]] = None,
+        n_output_dims: Optional[int] = None,
     ) -> "CoordinateSystem":
-        """Transform the coordinates with the given diagonal affine matrix in the
-        world coordinates (after applying the current affine transformation)"""
-        n_dims = len(self.spatial_shape)
+        """Transform the coordinates with a diagonal affine matrix in the
+        world coordinates after applying the current affine transformation
+
+        The diagonal and the translation should be provided on the host (cpu).
+        That is, since the transformation may be used in control flow decisions,
+        and we want to avoid synchronizing the target device with the host. The
+        matrix is moved to the target device asynchronously, if needed.
+
+        Args:
+            diagonal: Diagonal of the affine transformation matrix with shape
+                ([*batch_shape, ]diagonal_length). Can be also
+                given as a number or sequence of numbers. If None, corresponds
+                to the diagonal of ones.
+            translation: Translation of the affine transformation matrix
+                with shape ([*batch_shape, ]n_output_dims).
+                Can be also given as a number or sequence of numbers. If None,
+                corresponds to the zero translation.
+            n_output_dims: Number of output dimensions of the transformation.
+
+        Returns:
+            Coordinate system with a modified affine transformation from voxel
+            to world coordinates.
+        """
+        n_input_dims = self._from_voxel_coordinates.channels_shape[0] - 1
+        if n_output_dims is None:
+            n_output_dims = n_input_dims
         return CoordinateSystem(
             from_voxel_coordinates=HostDiagonalAffineTransformation(
                 diagonal=diagonal,
                 translation=translation,
-                matrix_shape=(n_dims + 1, n_dims + 1),
+                matrix_shape=(n_output_dims + 1, n_input_dims + 1),
                 dtype=self.dtype,
                 device=self.device,
             )
@@ -455,22 +655,27 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     def translate_voxel(
         self, translation: Union[Sequence[Number], Number, Tensor]
     ) -> "CoordinateSystem":
-        """Translate the coordinates in the voxel coordinates (before applying
-        the current affine transformation)
+        """Translate the coordinates in the voxel coordinates before applying
+        the current affine transformation
 
         Args:
-            translation: Translation in the voxel coordinates
+            translation: Translation with shape ([*batch_shape, ]n_spatial_dims).
+                Can be also given as a number or sequence of numbers.
+
+        Returns:
+            Coordinate system with translated coordinates.
         """
         return self.transform_voxel_with_diagonal_matrix(translation=translation)
 
     def translate_world(
         self, translation: Union[Sequence[Number], Number, Tensor]
     ) -> "CoordinateSystem":
-        """Translate the coordinates in the world coordinates (after applying
-        the current affine transformation)
+        """Translate the coordinates in the world coordinates after applying
+        the current affine transformation
 
         Args:
-            translation: Translation in the world coordinates
+            translation: Translation with shape ([*batch_shape, ]n_output_dims).
+                Can be also given as a number or sequence of numbers.
         """
         return self.transform_world_with_diagonal_matrix(translation=translation)
 
@@ -482,16 +687,28 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         the current affine transformation)
 
         Args:
-            factor: Factor to multiply the grid spacing
+            factor: Factor to multiply the grid spacing. A tensor with shape
+                ([*batch_shape, ]n_spatial_dims). Can be also given as a number
+                or sequence of numbers.
+
+        Returns:
+            Coordinate system with a modified affine transformation from voxel
+            to world coordinates.
         """
         return self.transform_voxel_with_diagonal_matrix(diagonal=factor)
 
     def multiply_world(self, factor: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
-        """Multiply the coordinates in the world coordinates (after applying
-        the current affine transformation)
+        """Multiply the coordinates in the world coordinates after applying
+        the current affine transformation.
 
         Args:
-            factor: Factor to multiply each dimension of the grid
+            factor: Factor to multiply each dimension of the grid. A tensor with
+                shape ([*batch_shape, ]n_output_dims). Can be also given as a number
+                or sequence of numbers.
+
+        Returns:
+            Coordinate system with a modified affine transformation from voxel
+            to world coordinates.
         """
         return self.transform_world_with_diagonal_matrix(diagonal=factor)
 
@@ -586,36 +803,41 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             ]
         ] = None,
     ) -> "CoordinateSystem":
-        """Reformat the coordinate system
+        """Reformat the coordinate system.
 
-        Note that voxel_size can not be used together with downsampling_factor
-        and upsampling_factor
+        All tensors should be provided on the host (cpu). That is, since the
+        transformation may be used in control flow decisions, and we want to
+        avoid synchronizing the target device with the host. The matrix is moved
+        to the target device asynchronously, if needed.
 
         Args:
-            downsampling_factor: Factor to downsample the grid voxel size, if given
-                as a tensor, it should be on CPU, and have the same dtype as the
-                coordinate system.
-            upsampling_factor: Factor to upsample the grid voxel size, if given
-                as a tensor, it should be on CPU, and have the same dtype as the
-                coordinate system.
-            voxel_size: Voxel size of the grid, if given
-                as a tensor, it should be on CPU, and have the same dtype as the
-                coordinate system.
-            spatial_shape: Defines spatial_shape of the target grid, either given separately for
-                each dimension or as a single value in which case the same value
-                is used for all the dimensions. Defaults to
-                FitToFOVOption("round", "full_voxels")
+            downsampling_factor: Factor to downsample the grid voxel size. A tensor
+                with shape ([*batch_shape, ]n_spatial_dims). Can be also given as a
+                number or sequence of numbers.
+            upsampling_factor: Factor to upsample the grid voxel size. A tensor with
+                shape ([*batch_shape, ]n_spatial_dims). Can be also given as a number
+                or sequence of numbers.
+            voxel_size: Voxel size of the reformatted grid. A tensor with shape
+                ([*batch_shape, ]n_spatial_dims). Can be also given as a number or
+                sequence of numbers.
+            spatial_shape: Defines spatial_shape of the target grid, either
+                given separately for each dimension or as a single value in
+                which case the same value is used for all the dimensions.
+                Defaults to FitToFOVOption("round", "full_voxels")
             reference: Defines the point in the original voxel
                 coordinates which will be aligned with the target reference in
                 the reformatted coordinates. Either given separately for each
                 dimension or as a single value in which case the same value is
-                used for all the dimensions. Defaults to ReferenceOption("left",
+                used for all the dimensions. Defaults to ReferenceOption("center",
                 "full_voxels")
             target_reference: Defaults to reference. Defines the point in the
                 reformatted voxel coordinates which will be aligned with the
                 source reference in the original coordinates. Either given
                 separately for each dimension or as a single value in which case
                 the same value is used for all the dimensions.
+
+        Returns:
+            Reformatted coordinate system.
         """
         original_voxel_size = self.grid_spacing_cpu()
         downsampling_factor = self._as_downsampling_factor(

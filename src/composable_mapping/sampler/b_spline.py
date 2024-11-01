@@ -4,13 +4,28 @@ from typing import Tuple
 
 from torch import Tensor
 
+from composable_mapping.sampler.base import ISeparableKernelSupport
+
 from .base import BaseSeparableSampler, SymmetricPolynomialKernelSupport
 from .interface import LimitDirection
 
 
 class CubicSplineSampler(BaseSeparableSampler):
     """Sampling based on regularly spaced cubic spline control points in voxel
-    coordinates"""
+    coordinates
+
+    Arguments:
+        prefilter: Whether to prefilter the volume before sampling making
+            the sampler an interpolator. Currently not implemented.
+        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
+        convolution_threshold: Maximum allowed difference in coordinates
+            for using convolution-based sampling (the difference might be upper
+            bounded when doing the decision).
+        mask_threshold: Maximum allowed weight for masked regions in a
+            sampled location to still consider it valid (non-masked).
+    """
 
     def __init__(
         self,
@@ -32,15 +47,15 @@ class CubicSplineSampler(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            kernel_support=SymmetricPolynomialKernelSupport(
-                kernel_width=lambda _: 4.0, polynomial_degree=lambda _: 3
-            ),
-            limit_direction=LimitDirection.RIGHT,
+            limit_direction=LimitDirection.right(),
         )
         self._mask_threshold = mask_threshold
         self._prefilter = prefilter
 
-    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
+        return SymmetricPolynomialKernelSupport(kernel_width=4.0, polynomial_degree=3)
+
+    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return self._prefilter
 
     def _kernel_parts(self, coordinates: Tensor) -> Tuple[Tensor, Tensor]:

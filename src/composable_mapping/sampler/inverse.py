@@ -1,6 +1,6 @@
-"""Displacement inversion sampler"""
+"""Samplers for inverting coordinate mappings."""
 
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
 
 from deformation_inversion_layer import (
     DeformationInversionArguments,
@@ -20,9 +20,18 @@ if TYPE_CHECKING:
 
 
 class FixedPointInverseSampler(ISampler):
-    """Displacement field inversion sampler
+    """Displacement field inversion sampler.
 
     Assumes that the sampled data is a displacement field in voxel coordinates.
+
+    Arguments:
+        sampler: Sampler used in sampling the forward displacement field.
+        forward_solver: Forward solver for the fixed-point iteration.
+        backward_solver: Backward solver for the fixed-point iteration.
+        forward_dtype: Data type for the forward solver.
+        backward_dtype: Data type for the backward solver.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
     """
 
     def __init__(
@@ -81,7 +90,11 @@ class FixedPointInverseSampler(ISampler):
         return mappable(inverted_values, mask, n_channel_dims=volume.n_channel_dims)
 
     def derivative(
-        self, spatial_dim: int, limit_direction: LimitDirection = LimitDirection.AVERAGE
+        self,
+        spatial_dim: int,
+        limit_direction: Union[
+            LimitDirection, Callable[[int], LimitDirection]
+        ] = LimitDirection.average(),
     ) -> "ISampler":
         raise NotImplementedError(
             "Derivative sampling is not implemented for the inverse sampler. "

@@ -1,4 +1,4 @@
-"""Functions for handling dense deformations"""
+"""Dense deformations utility functions."""
 
 from typing import List, Optional, Sequence, Tuple
 
@@ -14,17 +14,12 @@ from composable_mapping.util import move_channels_first, move_channels_last
 
 
 def generate_voxel_coordinate_grid(
-    shape: Sequence[int], device: Optional[torch_device] = None, dtype: Optional[torch_dtype] = None
+    spatial_shape: Sequence[int],
+    device: Optional[torch_device] = None,
+    dtype: Optional[torch_dtype] = None,
 ) -> Tensor:
-    """Generate voxel coordinate grid
-
-    Args:
-        shape: Shape of the grid
-        device: Device of the grid
-
-    Returns: Tensor with shape (1, len(shape), dim_1, ..., dim_{len(shape)})
-    """
-    return _generate_voxel_coordinate_grid(shape, device, dtype)
+    """Generate voxel coordinate grid"""
+    return _generate_voxel_coordinate_grid(spatial_shape, device, dtype)
 
 
 def interpolate(
@@ -33,29 +28,20 @@ def interpolate(
     mode: str = "bilinear",
     padding_mode: str = "border",
 ) -> Tensor:
-    """Interpolates in voxel coordinates
+    """Interpolate in voxel coordinates.
 
     Args:
         volume: Tensor with shape
-            (batch_size, [channel_1, ..., channel_n, ]dim_1, ..., dim_{n_dims})
-        grid: Tensor with shape (batch_size, n_dims, *target_shape)
+            (*batch_shape , *channels_shape, *spatial_shape).
+        grid: Tensor with shape (*batch_shape, n_spatial_dims, *target_shape).
 
-    Returns: Tensor with shape (batch_size, channel_1, ..., channel_n, *target_shape)
+    Returns:
+        Tensor with shape (*broadcasted_batch_shape, *channels_shape, *target_shape).
     """
     return _interpolate(volume, grid, mode, padding_mode)
 
 
-def integrate_svf(
-    stationary_velocity_field: Tensor,
-    squarings: int = 7,
-    mode: str = "bilinear",
-    padding_mode: str = "border",
-) -> Tensor:
-    """Integrate stationary velocity field in voxel coordinates"""
-    return _integrate_svf(stationary_velocity_field, squarings, mode, padding_mode)
-
-
-def compute_fov_mask_based_on_bounds(
+def generate_mask_based_on_bounds(
     coordinates: Tensor,
     min_values: Sequence[float],
     max_values: Sequence[float],
@@ -63,15 +49,7 @@ def compute_fov_mask_based_on_bounds(
     inclusive_min: bool = True,
     inclusive_max: bool = True,
 ) -> Tensor:
-    """Calculate mask at coordinates
-
-    Args:
-        coordinates_at_voxel_coordinates: Tensor with shape ([batch_size, ]n_dims, *target_shape)
-        mask: Tensor with shape ([batch_size, ]1, *target_shape)
-        min_values: Values below this are added to the mask
-        max_values: Values above this are added to the mask
-        dtype: Type of the generated mask
-    """
+    """Generate mask based on coordinate bounds"""
     coordinates = move_channels_last(coordinates.detach(), n_channel_dims=n_channel_dims)
     non_blocking = coordinates.device.type != "cpu"
     min_values_tensor = tensor(min_values, dtype=coordinates.dtype).to(
@@ -114,12 +92,14 @@ def _convert_voxel_to_normalized_coordinates(
 
 @script
 def _generate_voxel_coordinate_grid(
-    shape: List[int], device: Optional[torch_device] = None, dtype: Optional[torch_dtype] = None
+    spatial_shape: List[int],
+    device: Optional[torch_device] = None,
+    dtype: Optional[torch_dtype] = None,
 ) -> Tensor:
 
     axes = [
         linspace(start=0, end=int(dim_size) - 1, steps=int(dim_size), device=device, dtype=dtype)
-        for dim_size in shape
+        for dim_size in spatial_shape
     ]
     coordinates = stack(meshgrid(axes, indexing="ij"), dim=0)
     return coordinates[None]
@@ -182,24 +162,3 @@ def _interpolate(volume: Tensor, grid: Tensor, mode: str, padding_mode: str) -> 
         mode=mode,
         padding_mode=padding_mode,
     ).view((-1,) + channel_shape + target_shape)
-
-
-@script
-def _integrate_svf(
-    stationary_velocity_field: Tensor,
-    squarings: int,
-    mode: str,
-    padding_mode: str,
-) -> Tensor:
-    grid = _generate_voxel_coordinate_grid(
-        shape=stationary_velocity_field.shape[2:],
-        device=stationary_velocity_field.device,
-        dtype=stationary_velocity_field.dtype,
-    )
-    integrated = stationary_velocity_field / 2**squarings
-    for _ in range(squarings):
-        integrated = (
-            interpolate(integrated, grid=integrated + grid, mode=mode, padding_mode=padding_mode)
-            + integrated
-        )
-    return integrated

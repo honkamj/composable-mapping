@@ -1,4 +1,4 @@
-"""Core matrix operations for diagonal matrices"""
+"""Core matrix operations for diagonal matrices."""
 
 from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 
@@ -7,6 +7,7 @@ from torch import device as torch_device
 from torch import dtype as torch_dtype
 from torch import get_default_dtype, ones, tensor, zeros
 
+from composable_mapping.interface import Number
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
     broadcast_optional_shapes_in_parts_splitted,
@@ -25,11 +26,24 @@ from .matrix import (
     generate_scale_matrix,
 )
 
-Number = Union[int, float]
-
 
 class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
-    """Definition of a diagonal affine matrix"""
+    """Definition of a diagonal affine matrix
+
+    Arguments:
+        diagonal: Tensor with shape ([*batch_shape, ]diagonal_length[, *spatial_shape]),
+            if None, corresponds to all ones. Can also be given as a sequence of numbers
+            or a single number.
+        translation: Tensor with shape ([*batch_shape, ]n_output_dims[, *spatial_shape]),
+            if None, corresponds to all zeros. Can also be given as a sequence of numbers
+            or a single number.
+        matrix_shape: Shape of the target affine transformation matrix
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape])
+        dtype: Data type of the transformation matrix, needed only if no
+            diagonal or translation is given.
+        device: Device of the transformation matrix, needed only if no
+            diagonal or translation is given.
+    """
 
     def __init__(
         self,
@@ -132,17 +146,17 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
 
     @property
     def dtype(self) -> torch_dtype:
-        """Get the dtype"""
+        """PyTorch data type"""
         return self._dtype
 
     @property
     def device(self) -> torch_device:
-        """Get the device"""
+        """PyTorch device"""
         return self._device
 
     @property
     def diagonal(self) -> Optional[Tensor]:
-        """Get the diagonal
+        """Diagonal of the matrix
 
         Batch and spatial dimensions are not broadcasted to the final matrix shape.
         """
@@ -150,7 +164,7 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
 
     @property
     def translation(self) -> Optional[Tensor]:
-        """Get the translation
+        """Translation of the matrix
 
         Batch and spatial dimensions are not broadcasted to the final matrix shape.
         """
@@ -158,7 +172,7 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
 
     @property
     def shape(self) -> Sequence[int]:
-        """Get the matrix shape"""
+        """Matrix shape"""
         return self._broadcasted_shape
 
     def as_matrix(self) -> Tensor:
@@ -331,7 +345,16 @@ def transform_values_with_diagonal_affine_matrix(
     values: Tensor,
     n_channel_dims: int = 1,
 ) -> Tensor:
-    """Transform values with affine matrix"""
+    """Transform values with a diagonal affine matrix
+
+    Args:
+        matrix_definition: Definition of the diagonal affine matrix.
+        values: Values to transform.
+        n_channel_dims: Number of channel dimensions in the values tensor.
+
+    Returns:
+        Values transformed with the diagonal affine matrix.
+    """
     affine_channels_shape = get_channels_shape(matrix_definition.shape, n_channel_dims=2)
     n_input_dims, n_output_dims = (affine_channels_shape[1] - 1, affine_channels_shape[0] - 1)
     if get_channels_shape(values.shape, n_channel_dims=n_channel_dims)[-1] != n_input_dims:
@@ -359,7 +382,14 @@ def transform_values_with_diagonal_affine_matrix(
 def invert_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> DiagonalAffineMatrixDefinition:
-    """Transform values with affine matrix"""
+    """Invert a diagonal affine matrix
+
+    Args:
+        matrix_definition: Definition of the diagonal affine matrix.
+
+    Returns:
+        Definition of the inverted diagonal affine matrix.
+    """
     affine_channels_shape = get_channels_shape(matrix_definition.shape, n_channel_dims=2)
     if affine_channels_shape[0] != affine_channels_shape[1]:
         raise ValueError("The diagonal matrix must be square.")
@@ -388,7 +418,14 @@ def invert_diagonal_affine_matrix(
 def negate_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> DiagonalAffineMatrixDefinition:
-    """Transform values with affine matrix"""
+    """Negate diagonal affine matrix
+
+    Args:
+        matrix_definition: Definition of the diagonal affine matrix.
+
+    Returns:
+        Definition of the negated diagonal affine matrix.
+    """
     affine_channels_shape = get_channels_shape(matrix_definition.shape, n_channel_dims=2)
     if matrix_definition.translation is not None:
         translation: Optional[Tensor] = -matrix_definition.translation
@@ -413,7 +450,14 @@ def negate_diagonal_affine_matrix(
 def is_identity_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> bool:
-    """Return whether a diagonal matrix is an identity"""
+    """Is the diagonal matrix an identity matrix
+
+    Args:
+        matrix_definition: Definition of the diagonal affine matrix.
+
+    Returns:
+        Whether the diagonal matrix is an identity matrix.
+    """
     if matrix_definition.diagonal is not None:
         if not allclose(
             matrix_definition.diagonal,
@@ -434,7 +478,14 @@ def is_identity_diagonal_affine_matrix(
 def is_zero_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> bool:
-    """Return whether a diagonal matrix is a zero matrix"""
+    """Is the diagonal matrix a zero matrix.
+
+    Args:
+        matrix_definition: Definition of the diagonal affine matrix.
+
+    Returns:
+        Whether the diagonal matrix is a zero matrix.
+    """
     if matrix_definition.diagonal is None:
         return False
     else:
@@ -464,7 +515,15 @@ def compose_diagonal_affine_matrices(
     matrix_definition_1: DiagonalAffineMatrixDefinition,
     matrix_definition_2: DiagonalAffineMatrixDefinition,
 ) -> DiagonalAffineMatrixDefinition:
-    """Compose two diagonal affine matrices"""
+    """Compose two diagonal affine matrices.
+
+    Args:
+        matrix_definition_1: Definition of the first diagonal affine matrix.
+        matrix_definition_2: Definition of the second diagonal affine matrix.
+
+    Returns:
+        Definition of the composed diagonal affine matrix.
+    """
     batch_shape_1, channels_shape_1, spatial_shape_1 = split_shape(
         matrix_definition_1.shape, n_channel_dims=2
     )
@@ -543,7 +602,15 @@ def add_diagonal_affine_matrices(
     matrix_definition_1: DiagonalAffineMatrixDefinition,
     matrix_definition_2: DiagonalAffineMatrixDefinition,
 ) -> DiagonalAffineMatrixDefinition:
-    """Add two diagonal affine matrices"""
+    """Add two diagonal affine matrices.
+
+    Args:
+        matrix_definition_1: Definition of the first diagonal affine matrix.
+        matrix_definition_2: Definition of the second diagonal affine matrix.
+
+    Returns:
+        Definition of the sum of the two diagonal affine matrices.
+    """
     matrix_shape = broadcast_shapes_in_parts_to_single_shape(
         matrix_definition_1.shape, matrix_definition_2.shape, n_channel_dims=2
     )

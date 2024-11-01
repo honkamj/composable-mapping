@@ -1,10 +1,11 @@
-"""Interpolation class wrappers"""
+"""Interpolating samplers."""
 
 from typing import Tuple
 
 from torch import Tensor, ones_like
 
 from composable_mapping.dense_deformation import interpolate
+from composable_mapping.sampler.base import ISeparableKernelSupport
 from composable_mapping.util import (
     avg_pool_nd_function,
     get_batch_shape,
@@ -19,7 +20,18 @@ from .interface import LimitDirection
 
 
 class LinearInterpolator(BaseSeparableSampler):
-    """Linear interpolation in voxel coordinates"""
+    """Linear interpolation in voxel coordinates
+
+    Arguments:
+        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
+        convolution_threshold: Maximum allowed difference in coordinates
+            for using convolution-based sampling (the difference might be upper
+            bounded when doing the decision).
+        mask_threshold: Maximum allowed weight for masked regions in a
+            sampled location to still consider it valid (non-masked).
+    """
 
     def __init__(
         self,
@@ -35,13 +47,13 @@ class LinearInterpolator(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            kernel_support=SymmetricPolynomialKernelSupport(
-                kernel_width=lambda _: 2.0, polynomial_degree=lambda _: 1
-            ),
-            limit_direction=LimitDirection.RIGHT,
+            limit_direction=LimitDirection.right(),
         )
 
-    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
+        return SymmetricPolynomialKernelSupport(kernel_width=2.0, polynomial_degree=1)
+
+    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
@@ -81,7 +93,20 @@ class LinearInterpolator(BaseSeparableSampler):
 
 
 class NearestInterpolator(BaseSeparableSampler):
-    """Nearest neighbour interpolation in voxel coordinates"""
+    """Nearest neighbour interpolation in voxel coordinates.
+
+    Arguments:
+        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
+        convolution_threshold: Maximum allowed difference in coordinates
+            for using convolution-based sampling (the difference might be upper
+            bounded when doing the decision).
+        mask_threshold: Maximum allowed weight for masked regions in a
+            sampled location to still consider it valid (non-masked).
+        limit_direction: How to handle points at equal distances. This
+            option currently applies only to convolution based sampling.
+    """
 
     def __init__(
         self,
@@ -89,7 +114,7 @@ class NearestInterpolator(BaseSeparableSampler):
         mask_extrapolated_regions_for_empty_volume_mask: bool = True,
         convolution_threshold: float = 1e-4,
         mask_threshold: float = 1e-5,
-        limit_direction: LimitDirection = LimitDirection.RIGHT,
+        limit_direction: LimitDirection = LimitDirection.right(),
     ) -> None:
         super().__init__(
             extrapolation_mode=extrapolation_mode,
@@ -98,13 +123,13 @@ class NearestInterpolator(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            kernel_support=SymmetricPolynomialKernelSupport(
-                kernel_width=lambda _: 1.0, polynomial_degree=lambda _: 0
-            ),
             limit_direction=limit_direction,
         )
 
-    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
+        return SymmetricPolynomialKernelSupport(kernel_width=1.0, polynomial_degree=0)
+
+    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
@@ -139,7 +164,18 @@ class NearestInterpolator(BaseSeparableSampler):
 
 
 class BicubicInterpolator(BaseSeparableSampler):
-    """Bicubic interpolation in voxel coordinates"""
+    """Bicubic interpolation in voxel coordinates.
+
+    Arguments:
+        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
+        convolution_threshold: Maximum allowed difference in coordinates
+            for using convolution-based sampling (the difference might be upper
+            bounded when doing the decision).
+        mask_threshold: Maximum allowed weight for masked regions in a
+            sampled location to still consider it valid (non-masked).
+    """
 
     def __init__(
         self,
@@ -155,14 +191,14 @@ class BicubicInterpolator(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            kernel_support=SymmetricPolynomialKernelSupport(
-                kernel_width=lambda _: 4.0, polynomial_degree=lambda _: 3
-            ),
-            limit_direction=LimitDirection.RIGHT,
+            limit_direction=LimitDirection.right(),
         )
         self._mask_threshold = mask_threshold
 
-    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
+        return SymmetricPolynomialKernelSupport(kernel_width=4.0, polynomial_degree=3)
+
+    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
     def _kernel_parts(self, coordinates: Tensor) -> Tuple[Tensor, Tensor]:

@@ -1,17 +1,24 @@
-"""Mask modifiers"""
+"""Composable mappings for modifying masks of the input tensors."""
 
 from typing import Mapping, Sequence
 
 from torch import Tensor
 
 from .composable_mapping import ComposableMapping
-from .dense_deformation import compute_fov_mask_based_on_bounds
+from .dense_deformation import generate_mask_based_on_bounds
 from .mappable_tensor import MappableTensor
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 
 
 class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
-    """Add values to mask based on bounds"""
+    """Modify mask of the input based on bounds
+
+    Arguments.
+        min_values: Minimum values for the mask over each dimension.
+        max_values: Maximum values for the mask over each dimension.
+        inclusive_min: Whether the minimum values are inclusive.
+        inclusive_max: Whether the maximum values are inclusive
+    """
 
     def __init__(
         self,
@@ -38,7 +45,7 @@ class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
 
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
         values = coordinates.generate_values()
-        update_mask = compute_fov_mask_based_on_bounds(
+        update_mask = generate_mask_based_on_bounds(
             coordinates=values,
             n_channel_dims=coordinates.n_channel_dims,
             min_values=self._min_values,
@@ -59,7 +66,7 @@ class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
 
 
 class ClearMask(BaseTensorLikeWrapper, ComposableMapping):
-    """Clear mask"""
+    """Clear mask of the input"""
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}

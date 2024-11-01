@@ -1,4 +1,4 @@
-"""Base classes for composable mapping"""
+"""Composable mapping."""
 
 from abc import ABC, abstractmethod
 from typing import (
@@ -17,6 +17,7 @@ from typing import (
 
 from torch import Tensor
 
+from .interface import Number
 from .mappable_tensor import (
     IAffineTransformation,
     MappableTensor,
@@ -29,7 +30,6 @@ from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 
 if TYPE_CHECKING:
     from .coordinate_system import CoordinateSystem
-Number = Union[int, float]
 
 
 def _as_grid_composable_mapping_if_needed(
@@ -129,40 +129,73 @@ def _composition(
 
 
 class ICoordinateSystemContainer(ABC):
-    """Class holding a unique voxel coordinate system"""
+    """Class holding a unique coordinate system."""
 
     @property
     @abstractmethod
     def coordinate_system(
         self,
     ) -> "CoordinateSystem":
-        """Get voxel coordinate system of the container"""
+        """Coordinate system of the container."""
 
 
 class ComposableMapping(ITensorLike, ABC):
-    """Base class for composable mappings"""
+    """Base class for mappings composable with each other and action on mappable
+    tensors.
+
+    In general a composable mapping is a callable object that takes coordinates
+    as input and returns the mapping evaluated at these coordinates. Composable
+    mappings are generally assumed to be independent over the batch and spatial
+    dimensions of an input.
+
+    As the name suggests, a composable mapping can be additionally composed with
+    other composable mappings. Basic arithmetic operations are also supported
+    between two composable mappings or between a composable mapping and a number
+    or a tensor, both of which return a new composable mapping.
+    """
 
     @abstractmethod
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
-        """Evaluate the mapping at coordinates"""
+        """Evaluate the mapping at coordinates.
+
+        Args:
+            coordinates: Coordinates to evaluate the mapping at with shape
+                ([*batch_shape ,]n_dims[, *spatial_shape]).
+
+        Returns:
+            Mapping evaluated at the coordinates.
+
+        @public
+        """
 
     @abstractmethod
     def invert(self, **arguments) -> "ComposableMapping":
-        """Invert the mapping
+        """Invert the mapping.
 
         Args:
-            inversion_parameters: Possible inversion parameters
+            arguments: Arguments for the inversion.
+
+        Returns:
+            The inverted mapping.
         """
 
     def sample_to(
         self,
         target: ICoordinateSystemContainer,
         *,
-        data_format: Optional[DataFormat] = None,
+        data_format: DataFormat = DataFormat.world_coordinates(),
     ) -> MappableTensor:
-        """Sample the mapping with respect to the target coordinates"""
-        if data_format is None:
-            data_format = DataFormat()
+        """Evaluate the mapping at the coordinates defined by the target.
+
+        Args:
+            target: Target coordinate system (or a container with a coordinate system)
+                defining a grid to evaluate the mapping at.
+            data_format: Data format of the output
+
+        Returns:
+            Mappable tensor containing the values obtained by evaluating the
+            mapping at the coordinates defined by the target.
+        """
         sampled = self(target.coordinate_system.grid())
         if data_format.representation == "displacements":
             sampled = sampled - target.coordinate_system.grid()
@@ -174,10 +207,24 @@ class ComposableMapping(ITensorLike, ABC):
         self,
         target: ICoordinateSystemContainer,
         *,
-        data_format: Optional[DataFormat] = None,
+        data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional["ISampler"] = None,
     ) -> "SamplableVolume":
-        """Resample the deformation to the target coordinate system"""
+        """Resample the mapping at the coordinates defined by the target.
+
+        Args:
+            target: Target coordinate system (or a container with a coordinate system)
+                defining a grid to resample the mapping at.
+            data_format: Data format used as an internal representation of the
+                generated resampled mapping.
+            sampler: Sampler used by the generated resampled mapping. Note that
+                this sampler is not used to resample the mapping, but to sample
+                the generated resampled mapping. If None, the default sampler
+                is used (see `default_sampler`).
+
+        Returns:
+            Resampled mapping.
+        """
         return SamplableVolume(
             data=self.sample_to(
                 target,
@@ -189,11 +236,32 @@ class ComposableMapping(ITensorLike, ABC):
         )
 
     def to_coordinates(self, target: "ICoordinateSystemContainer") -> "GridComposableMapping":
-        """Set a coordinate system for the mapping, no resampling is done"""
+        """Set a coordinate system for the mapping.
+
+        This only changes the coordinate system of the mapping, the mapping itself
+        is not changed. The coordinate system contained by the mapping affects
+        behaviour of some methods such as `GridComposableMapping.sample` and
+        `GridComposableMapping.resample`.
+
+        Args:
+            target: Target coordinate system (or a container with a coordinate system)
+                to set for the mapping.
+
+        Returns:
+            Mapping with the given target coordinate system.
+        """
         return GridComposableMappingDecorator(self, target.coordinate_system)
 
     def as_affine_transformation(self) -> IAffineTransformation:
-        """Obtain the mapping as an affine transformation, if possible"""
+        """Obtain the mapping as an affine transformation on PyTorch tensors, if possible.
+
+        Returns:
+            Affine transformation on PyTorch tensors.
+
+        Raises:
+            NotAffineTransformationError: If the mapping is not an affine transformation on
+                PyTorch tensors.
+        """
         tracer = _AffineTracer()
         traced = self(tracer)
         if isinstance(traced, _AffineTracer):
@@ -203,7 +271,12 @@ class ComposableMapping(ITensorLike, ABC):
         raise NotAffineTransformationError("Could not infer affine transformation")
 
     def as_affine_matrix(self) -> Tensor:
-        """Obtain the mapping as an affine matrix, if possible"""
+        """Obtain the mapping as an affine matrix, if possible.
+
+        Returns:
+            Affine matrix with
+            shape ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+        """
         return self.as_affine_transformation().as_matrix()
 
     __matmul__ = _composition
@@ -228,23 +301,43 @@ class ComposableMapping(ITensorLike, ABC):
 
 
 class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
-    """Base class for composable mappings coupled with a coordinate system"""
+    """Base class for composable mappings coupled with a coordinate system."""
 
     def sample(
         self,
         *,
-        data_format: Optional[DataFormat] = None,
+        data_format: DataFormat = DataFormat.world_coordinates(),
     ) -> MappableTensor:
-        """Sample the mapping with respect to the contained coordinates"""
+        """Evaluate the mapping at the coordinates contained by the mapping.
+
+        Args:
+            data_format: Data format of the output
+
+        Returns:
+            Mappable tensor containing the values obtained by evaluating the
+            mapping at the coordinates contained by the mapping.
+        """
         return self.sample_to(self, data_format=data_format)
 
     def resample(
         self,
         *,
-        data_format: Optional[DataFormat] = None,
+        data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
     ) -> "SamplableVolume":
-        """Resample the deformation with respect to the contained coordinates"""
+        """Resample the mapping at the coordinates contained by the mapping.
+
+        Args:
+            data_format: Data format used as an internal representation of the
+                generated resampled mapping.
+            sampler: Sampler used by the generated resampled mapping. Note that
+                this sampler is not used to resample the mapping, but to sample
+                the generated resampled mapping. If None, the default sampler
+                is used (see `default_sampler`).
+
+        Returns:
+            Resampled mapping.
+        """
         return self.resample_to(
             self,
             data_format=data_format,
@@ -253,7 +346,14 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
 
 
 class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMapping):
-    """Base decorator for composable mappings"""
+    """Decorator for coupling a composable mapping with a coordinate system.
+
+    Args:
+        mapping: Composable mapping.
+        coordinate_system: Coordinate system assigned to the mapping.
+
+    @private
+    """
 
     def __init__(self, mapping: ComposableMapping, coordinate_system: "CoordinateSystem") -> None:
         self._mapping = mapping
@@ -290,7 +390,7 @@ class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMappin
 
 
 class Identity(BaseTensorLikeWrapper, ComposableMapping):
-    """Identity mapping"""
+    """Identity mapping."""
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
@@ -317,7 +417,7 @@ class Identity(BaseTensorLikeWrapper, ComposableMapping):
 
 
 class _Composition(BaseTensorLikeWrapper, ComposableMapping):
-    """Composition of two mappings"""
+    """Composition of two mappings."""
 
     def __init__(self, left_mapping: ComposableMapping, right_mapping: ComposableMapping) -> None:
         self._left_mapping = left_mapping
@@ -353,7 +453,7 @@ class _Composition(BaseTensorLikeWrapper, ComposableMapping):
 
 
 class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
-    """Aritmetic operator of a composable mapping"""
+    """Arithmetic operator on a composable mapping."""
 
     def __init__(
         self,
@@ -413,13 +513,21 @@ class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
 
 
 class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
-    """Continuously defined mapping based on regular grid samples
+    """Mapping defined based on a regular grid of values and a sampler turning the
+    grid values into a continuously defined mapping.
+
+    Recommended way to create a samplable volume is to use the factory
+    function provided in this module or the class method of this class:
+    `samplable_volume`, `SamplableVolume.from_tensor`.
 
     Arguments:
-        data: Regular grid of values defining the deformation, with shape
-            (batch_size, n_dims, dim_1, ..., dim_{n_dims}). The grid should be
-            in voxel coordinates.
-        sampler: Sampler for the grid
+        data: Regular grid of values, with shape
+            (*batch_shape, *channels_shape, *spatial_shape).
+        coordinate_system: Coordinate system describing transformation from the
+            voxel coordinates on the data grid to the world coordinates.
+        data_format: Data format of the grid values.
+        sampler: Sampler turning the grid values into a continuously defined mapping
+            over spatial coordinates.
     """
 
     def __init__(
@@ -427,16 +535,55 @@ class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
         data: MappableTensor,
         coordinate_system: "CoordinateSystem",
         *,
-        data_format: Optional[DataFormat] = None,
+        data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
     ) -> None:
         self._data = data
         self._coordinate_system = coordinate_system
-        self._data_format = DataFormat() if data_format is None else data_format
+        self._data_format = data_format
         self._sampler = get_sampler(sampler)
 
+    def from_tensor(
+        self,
+        data: Tensor,
+        coordinate_system: "CoordinateSystem",
+        *,
+        mask: Optional[Tensor] = None,
+        data_format: DataFormat = DataFormat.world_coordinates(),
+        sampler: Optional[ISampler] = None,
+    ):
+        """Create a samplable volume from a tensor.
+
+        Args:
+            data: Regular grid of values, with shape
+                (*batch_shape, *channels_shape, *spatial_shape).
+            coordinate_system: Coordinate system describing transformation from the
+                voxel coordinates on the data grid to the world coordinates.
+            mask: Mask for the data,
+                with shape (*batch_shape, *(1,) * n_channel_dims, *spatial_shape).
+            data_format: Data format of the grid values.
+            sampler: Sampler turning the grid values into a continuously defined mapping
+                over spatial coordinates.
+
+        Returns:
+            Samplable volume.
+        """
+        return SamplableVolume(
+            data=mappable(data, mask),
+            coordinate_system=coordinate_system,
+            data_format=data_format,
+            sampler=sampler,
+        )
+
     def modify_sampler(self, sampler: ISampler) -> "SamplableVolume":
-        """Modify the sampler of the volume"""
+        """Modify the sampler of the volume.
+
+        Args:
+            sampler: New sampler.
+
+        Returns:
+            Samplable volume with the new sampler.
+        """
         return SamplableVolume(
             data=self._data,
             coordinate_system=self._coordinate_system,
@@ -501,10 +648,13 @@ def samplable_volume(
     coordinate_system: "CoordinateSystem",
     mask: Optional[Tensor] = None,
     *,
-    data_format: Optional[DataFormat] = None,
+    data_format: DataFormat = DataFormat.world_coordinates(),
     sampler: Optional[ISampler] = None,
 ) -> GridComposableMapping:
-    """Create a continuously defined mapping based on regular grid samples"""
+    """Create a samplable volume from a tensor.
+
+    See: `SamplableVolume.from_tensor`.
+    """
     return SamplableVolume(
         data=mappable(data, mask),
         coordinate_system=coordinate_system,
@@ -514,7 +664,8 @@ def samplable_volume(
 
 
 class NotAffineTransformationError(Exception):
-    """Error raised when a composable mapping is not affine"""
+    """Error raised when trying to represent a non-affine composable mapping as
+    an affine transformation."""
 
 
 class _AffineTracer(MappableTensor):
@@ -539,7 +690,7 @@ class _AffineTracer(MappableTensor):
 
 
 class _Stack(BaseTensorLikeWrapper, ComposableMapping):
-    """Stacked mappings"""
+    """Stacked mappings."""
 
     def __init__(self, *mappings: ComposableMapping, channel_index: int) -> None:
         self._mappings = mappings
@@ -576,7 +727,7 @@ class _Stack(BaseTensorLikeWrapper, ComposableMapping):
 
 
 class _Concatenate(BaseTensorLikeWrapper, ComposableMapping):
-    """Concatenated mappings"""
+    """Concatenated mappings."""
 
     def __init__(self, *mappings: ComposableMapping, channel_index: int) -> None:
         self._mappings = mappings
@@ -613,7 +764,16 @@ class _Concatenate(BaseTensorLikeWrapper, ComposableMapping):
 
 
 def stack_mappings(*mappings: ComposableMappingT, channel_index: int = 0) -> ComposableMappingT:
-    """Stack mappings along the channel dimension"""
+    """Stack mappings along a channel dimension.
+
+    Args:
+        mappings: Mappings to stack.
+        channel_index: Channel index along which to stack.
+
+    Returns:
+        A mapping with the output being the outputs of the input mappings
+        stacked along the channel dimension.
+    """
     stacked: ComposableMapping = _Stack(*mappings, channel_index=channel_index)
     for mapping in mappings:
         if isinstance(mapping, GridComposableMapping):
@@ -624,7 +784,16 @@ def stack_mappings(*mappings: ComposableMappingT, channel_index: int = 0) -> Com
 def concatenate_mappings(
     *mappings: ComposableMappingT, channel_index: int = 0
 ) -> ComposableMappingT:
-    """Concatenate mappings along the channel dimension"""
+    """Concatenate mappings along a channel dimension.
+
+    Args:
+        mappings: Mappings to concatenate.
+        channel_index: Channel index along which to concatenate.
+
+    Returns:
+        A mapping with the output being the outputs of the input mappings
+        concatenated along the channel dimension.
+    """
     concatenated: ComposableMapping = _Concatenate(*mappings, channel_index=channel_index)
     for mapping in mappings:
         if isinstance(mapping, GridComposableMapping):

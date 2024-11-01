@@ -1,4 +1,4 @@
-"""Core matrix operations"""
+"""Core affine transformation matrix operations."""
 
 from typing import Sequence
 
@@ -24,9 +24,11 @@ def compose_affine_matrices(
     """Compose two transformation matrices
 
     Args:
-        transformations: Tensors with shape ([batch_size, ]n_dims + 1, n_dims + 1, *)
+        transformations: Tensors with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape])
 
-    Returns: transformation_1: Tensor with shape ([batch_size, ]n_dims + 1, n_dims + 1, *)
+    Returns:
+        Composed transformation matrix.
     """
     if len(transformations) == 0:
         raise ValueError("At least one transformation matrix must be given.")
@@ -37,13 +39,17 @@ def compose_affine_matrices(
 
 
 def embed_matrix(matrix: Tensor, target_shape: Sequence[int]) -> Tensor:
-    """Embed transformation into larger dimensional space
+    """Embed transformation into larger dimensional space.
 
     Args:
-        matrix: Tensor with shape ([batch_size, ]n_dims, n_dims, ...)
-        target_shape: Target matrix shape
+        matrix: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape])
+        target_shape: Target matrix shape in form
+        (n_target_output_dims + 1, n_target_input_dims + 1).
 
-    Returns: Tensor with shape (batch_size, *target_shape, ...)
+    Returns:
+        Embedded matrix with shape
+        ([*batch_shape, ]n_target_output_dims + 1, n_target_input_dims + 1[, *spatial_shape])
     """
     if len(target_shape) != 2:
         raise ValueError("Matrix shape must be two dimensional.")
@@ -98,14 +104,15 @@ def embed_matrix(matrix: Tensor, target_shape: Sequence[int]) -> Tensor:
 
 
 def convert_to_homogenous_coordinates(coordinates: Tensor, dim: int = -1) -> Tensor:
-    """Converts the coordinates to homogenous coordinates
+    """Converts the coordinates to homogenous coordinates.
 
     Args:
         coordinates: Tensor with shape
-            (dim_1, ..., dim_{dim}, ..., dim_{n_dims})
+            (dim_1, ..., dim_{dim}, ..., dim_{n_dims}).
 
-    Returns: Tensor with shape
-        (dim_1, ..., dim_{dim + 1}, ..., dim_{n_dims})
+    Returns:
+        Tensor with shape
+        (dim_1, ..., dim_{dim + 1}, ..., dim_{n_dims}).
     """
     if dim < 0:
         dim = coordinates.ndim + dim
@@ -122,12 +129,14 @@ def convert_to_homogenous_coordinates(coordinates: Tensor, dim: int = -1) -> Ten
 
 
 def generate_translation_matrix(translations: Tensor) -> Tensor:
-    """Generator homogenous translation matrix with given translations
+    """Generator affine translation matrix with given translations.
 
     Args:
-        translations: Tensor with shape (batch_size, n_dims, ...)
+        translations: Tensor with shape
+            ([*batch_shape, ]n_dims[, *spatial_shape]).
 
-    Returns: Tensor with shape (batch_size, n_dims + 1, n_dims + 1, ...)
+    Returns:
+        Translation matrix with shape (batch_size, n_dims + 1, n_dims + 1, ...).
     """
     batch_dimensions_shape, _, spatial_shape = split_shape(translations.shape, n_channel_dims=1)
     channel_dim = get_channel_dims(translations.ndim, n_channel_dims=1)[0]
@@ -152,12 +161,13 @@ def generate_translation_matrix(translations: Tensor) -> Tensor:
 def generate_scale_matrix(
     scales: Tensor,
 ) -> Tensor:
-    """Generator scale matrix from given scales
+    """Generator scale matrix from given scales.
 
     Args:
-        scales: Tensor with shape (batch_size, n_dims, ...)
+        scales: Tensor with shape ([*batch_shape, ]n_dims[, *spatial_shape]).
 
-    Returns: Tensor with shape (batch_size, n_dims, n_dims, ...)
+    Returns:
+        Scale matrix with shape ([*batch_shape, ]n_dims, n_dims[, *spatial_shape]).
     """
     matrix_dims = get_channel_dims(scales.ndim + 1, n_channel_dims=2)
     scales = move_channels_last(scales, n_channel_dims=1)
@@ -165,7 +175,16 @@ def generate_scale_matrix(
 
 
 def invert_matrix(matrix: Tensor) -> Tensor:
-    """Invert a matrix or a batch of matrices"""
+    """Invert an affine matrix.
+
+    Args:
+        matrix: Tensor with shape
+            ([*batch_shape, ]n_dims + 1, n_dims + 1[, *spatial_shape]).
+
+    Returns:
+        Inverted matrix with shape
+        ([*batch_shape, ]n_dims + 1, n_dims + 1[, *spatial_shape]).
+    """
     matrix = move_channels_last(matrix, 2)
     inverted_matrix = inverse(matrix)
     return move_channels_first(inverted_matrix, 2)
@@ -177,6 +196,16 @@ def add_affine_matrices(matrix_1: Tensor, matrix_2: Tensor) -> Tensor:
     The last row of the matrices is not included in the addition
     and is copied from the first matrix, as it should always be
     [0, ..., 0, 1] for affine transformations.
+
+    Args:
+        matrix_1: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+        matrix_2: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+
+    Returns:
+        Sum matrix with shape
+        ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
     """
     matrix_1, matrix_2 = broadcast_tensors_in_parts(
         matrix_1, matrix_2, broadcast_channels=False, n_channel_dims=2
@@ -203,6 +232,16 @@ def substract_affine_matrices(matrix_1: Tensor, matrix_2: Tensor) -> Tensor:
     The last row of the matrices is not included in the subtraction
     and is copied from the first matrix, as it should always be
     [0, ..., 0, 1] for affine transformations.
+
+    Args:
+        matrix_1: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+        matrix_2: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+
+    Returns:
+        Difference matrix with shape
+        ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
     """
     matrix_1, matrix_2 = broadcast_tensors_in_parts(
         matrix_1, matrix_2, broadcast_channels=False, n_channel_dims=2
@@ -228,6 +267,14 @@ def negate_affine_matrix(matrix: Tensor) -> Tensor:
 
     The last row of the matrix is not negated as it should always be
     [0, ..., 0, 1] for affine transformations.
+
+    Args:
+        matrix: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+
+    Returns:
+        Negated matrix with shape
+        ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
     """
     matrix = move_channels_last(matrix, 2)
     negated_matrix = -matrix[..., :-1, :]
@@ -243,7 +290,15 @@ def negate_affine_matrix(matrix: Tensor) -> Tensor:
 
 
 def is_zero_matrix(matrix: Tensor) -> bool:
-    """Return whether a matrix or batch of matrices is a zero matrix"""
+    """Is matrix a zero matrix
+
+    Args:
+        matrix: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+
+    Returns:
+        Whether the matrix is a zero matrix.
+    """
     row_dimension = get_channel_dims(matrix.ndim, n_channel_dims=2)[0]
     return allclose(
         matrix.moveaxis(row_dimension, -1)[..., :-1],
@@ -257,7 +312,15 @@ def is_zero_matrix(matrix: Tensor) -> bool:
 
 
 def is_identity_matrix(matrix: Tensor) -> bool:
-    """Return whether a matrix or batch of matrices is an identity"""
+    """Is a matrix an identity matrix
+
+    Args:
+        matrix: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+
+    Returns:
+        Whether the matrix is an identity matrix.
+    """
     if matrix.size(-2) != matrix.size(-1):
         return False
     n_rows = matrix.size(get_channel_dims(matrix.ndim, n_channel_dims=2)[0])
@@ -278,7 +341,19 @@ def is_identity_matrix(matrix: Tensor) -> bool:
 def transform_values_with_affine_matrix(
     transformation_matrix: Tensor, values: Tensor, n_channel_dims: int = 1
 ) -> Tensor:
-    """Transform values with affine matrix"""
+    """Transform values with affine matrix.
+
+    Args:
+        transformation_matrix: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+        values: Tensor with shape
+            ([*batch_shape, *channels_shape[:-1], ]n_input_dims[, *spatial_shape]).
+        n_channel_dims: Number of channel dimensions in the values tensor.
+
+    Returns:
+        Transformed values with shape
+        ([*batch_shape, *channels_shape[:-1], ]n_output_dims[, *spatial_shape]).
+    """
     values, transformation_matrix = broadcast_tensors_in_parts(
         values, transformation_matrix, broadcast_channels=False, n_channel_dims=(n_channel_dims, 2)
     )
@@ -298,7 +373,15 @@ def transform_values_with_affine_matrix(
 
 
 def clear_translation_from_affine_matrix(matrix: Tensor) -> Tensor:
-    """Clear translation from affine matrix"""
+    """Clear translation from affine matrix
+
+    Args:
+        matrix: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+
+    Returns:
+        Affine matrix with cleared translation.
+    """
     matrix_shape = get_channels_shape(matrix.shape, n_channel_dims=2)
     matrix = move_channels_last(matrix, 2)
     matrix = matrix[..., :-1, :-1]

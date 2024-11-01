@@ -1,4 +1,4 @@
-"""Functionalities for setting the default sampler"""
+"""Functionalities for setting the default sampler."""
 
 from contextlib import ContextDecorator
 from threading import local
@@ -13,7 +13,7 @@ _DEFAULT_SAMPLER_CONTEXT_STACK.stack = []
 
 
 def get_default_sampler() -> ISampler:
-    """Get current default interpolation args"""
+    """Get current default sampler"""
     if _DEFAULT_SAMPLER_CONTEXT_STACK.stack:
         return _DEFAULT_SAMPLER_CONTEXT_STACK.stack[-1]
     if _DEFAULT_SAMPLER is None:
@@ -22,7 +22,7 @@ def get_default_sampler() -> ISampler:
 
 
 def set_default_sampler(sampler: Optional[ISampler]) -> None:
-    """Set default interpolation args"""
+    """Set default sampler"""
     global _DEFAULT_SAMPLER  # pylint: disable=global-statement
     _DEFAULT_SAMPLER = sampler
 
@@ -34,14 +34,18 @@ def clear_default_sampler() -> None:
 
 
 def get_sampler(sampler: Optional[ISampler]) -> ISampler:
-    """Get interpolation args, either from argument or default"""
+    """Get sampler, either from argument or default"""
     return sampler if sampler is not None else get_default_sampler()
 
 
 class default_sampler(  # this is supposed to appear as function - pylint: disable=invalid-name
     ContextDecorator
 ):
-    """Context manager for setting default sampler"""
+    """Context manager for setting default sampler
+
+    Arguments:
+        sampler: Sampler to set as default.
+    """
 
     def __init__(self, sampler: ISampler):
         self.sampler = sampler

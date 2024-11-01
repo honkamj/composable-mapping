@@ -1,8 +1,7 @@
-"""Interface for samplers"""
+"""Interface for samplers."""
 
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
 
 from torch import Tensor
 
@@ -12,18 +11,59 @@ if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
 
 
-class LimitDirection(Enum):
-    """Direction of limit"""
+class LimitDirection:
+    """Direction of a limit.
 
-    LEFT = "left"
-    RIGHT = "right"
-    AVERAGE = "average"
+    Arguments:
+        direction: Direction of the limit. Can be one of "left", "right", or
+            "average".
+    """
+
+    def __init__(self, direction: str) -> None:
+        if direction not in ["left", "right", "average"]:
+            raise ValueError("Invalid direction")
+        self.direction = direction
+
+    @classmethod
+    def left(cls) -> "LimitDirection":
+        """Left limit direction."""
+        return cls("left")
+
+    @classmethod
+    def right(cls) -> "LimitDirection":
+        """Right limit direction."""
+        return cls("right")
+
+    @classmethod
+    def average(cls) -> "LimitDirection":
+        """Average of left and right limit directions."""
+        return cls("average")
+
+    def as_callable(self) -> Callable[[int], "LimitDirection"]:
+        """Limit direction as callable.
+
+        Useful for creating a callable that returns the same limit direction
+        for all dimensions.
+        """
+        return lambda _: self
+
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, LimitDirection):
+            return False
+        return self.direction == value.direction
 
 
 class DataFormat:
-    """Defines data format for sampled volumes"""
+    """Defines data format for sampled volumes.
 
-    def __init__(self, representation: str = "coordinates", coordinate_type: str = "world") -> None:
+    Arguments:
+        representation: Representation of the data. Can be one of "coordinates"
+            or "displacements".
+        coordinate_type: Type of the coordinates. Can be one of "world" or
+            "voxel".
+    """
+
+    def __init__(self, representation: str, coordinate_type: str) -> None:
         if representation not in ["coordinates", "displacements"]:
             raise ValueError("Invalid format")
         if coordinate_type not in ["world", "voxel"]:
@@ -33,22 +73,22 @@ class DataFormat:
 
     @classmethod
     def voxel_displacements(cls) -> "DataFormat":
-        """Voxel displacements data format"""
+        """Voxel displacements data format."""
         return cls(representation="displacements", coordinate_type="voxel")
 
     @classmethod
     def world_displacements(cls) -> "DataFormat":
-        """World displacements data format"""
+        """World displacements data format."""
         return cls(representation="displacements", coordinate_type="world")
 
     @classmethod
     def voxel_coordinates(cls) -> "DataFormat":
-        """Voxel coordinates data format"""
+        """Voxel coordinates data format."""
         return cls(representation="coordinates", coordinate_type="voxel")
 
     @classmethod
     def world_coordinates(cls) -> "DataFormat":
-        """World coordinates data format"""
+        """World coordinates data format."""
         return cls(representation="coordinates", coordinate_type="world")
 
     def __repr__(self) -> str:
@@ -59,25 +99,37 @@ class DataFormat:
 
 
 class ISampler(ABC):
-    """Samples values on regular grid in voxel coordinates"""
+    """Samples values on regular grid in voxel coordinates."""
 
     @abstractmethod
     def __call__(self, volume: MappableTensor, coordinates: MappableTensor) -> MappableTensor:
-        """Sample the volume at coordinates
+        """Sample the volume at coordinates.
 
         Args:
-            volume: Volume to be interpolated
-            coordinates: Interpolation coordinates in voxel coordinates
+            volume: Volume to be sampled over spatial dimensions.
+            coordinates: Coordinates in voxel coordinates.
 
         Returns:
-            Interpolated volume
+            Sampled volume.
         """
 
     @abstractmethod
     def derivative(
-        self, spatial_dim: int, limit_direction: LimitDirection = LimitDirection.AVERAGE
+        self,
+        spatial_dim: int,
+        limit_direction: Union[
+            LimitDirection, Callable[[int], LimitDirection]
+        ] = LimitDirection.average(),
     ) -> "ISampler":
-        """Return sampler for sampling derivatives corresponding to the current sampler"""
+        """Obtain sampler for sampling derivatives corresponding to the current sampler.
+
+        Args:
+            spatial_dim: Spatial dimension along which to compute the derivative.
+            limit_direction: Direction in which to compute the derivative.
+
+        Returns:
+            Sampler for sampling derivatives.
+        """
 
     @abstractmethod
     def inverse(
@@ -86,8 +138,17 @@ class ISampler(ABC):
         data_format: DataFormat,
         arguments: Optional[Mapping[str, Any]] = None,
     ) -> "ISampler":
-        """Return sampler for sampling inverse values corresponding to the
-        current sampler, if available"""
+        """Obtain sampler for sampling inverse values corresponding to the
+        current sampler, if available.
+
+        Args:
+            coordinate_system: Coordinate system of the mapping.
+            data_format: Data format of the sampled volume.
+            arguments: Additional arguments for the inverse.
+
+        Returns:
+            Sampler for sampling inverse values.
+        """
 
     @abstractmethod
     def sample_values(
@@ -95,7 +156,17 @@ class ISampler(ABC):
         volume: Tensor,
         coordinates: Tensor,
     ) -> Tensor:
-        """Interpolate values as tensor"""
+        """Sample values at spatial locations.
+
+        Args:
+            volume: Volume to sample over spatial dimensions
+                with shape (*batch_shape, *channels_shape, *spatial_shape)
+            coordinates: Coordinates in voxel coordinates with shape
+                (*batch_shape, n_spatial_dims, *target_shape).
+
+        Returns:
+            Sampled values with shape (*batch_shape, *channels_shape, *target_shape).
+        """
 
     @abstractmethod
     def sample_mask(
@@ -103,4 +174,11 @@ class ISampler(ABC):
         mask: Tensor,
         coordinates: Tensor,
     ) -> Tensor:
-        """Interpolate mask as tensor"""
+        """Sample mask at spatial locations.
+
+        Args:
+            mask: Mask to sample over spatial dimensions
+                with shape (*batch_shape, *(1,) * n_channel_dims, *spatial_shape).
+            coordinates: Coordinates in voxel coordinates with shape
+                (*batch_shape, n_spatial_dims, *target_shape).
+        """

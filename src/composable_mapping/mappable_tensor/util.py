@@ -10,32 +10,35 @@ from .mappable_tensor import MappableTensor, mappable
 
 
 def concatenate_mappable_tensors(
-    *masked_tensors: MappableTensor, channel_index: int = 0
+    *mappable_tensors: MappableTensor, channel_index: int = 0
 ) -> "MappableTensor":
-    """Concatenate masked tensors along the channel dimension
+    """Concatenate mappable tensors along the channel dimension
 
     Args:
-        masked_tensors: Masked tensors to concatenate
+        mappable_tensors: Masked tensors to concatenate
         channel_index: Index of the channel dimension starting from the first
-            channel dimension
+            channel dimension over which to concatenate.
+
+    Returns:
+        Concatenated masked tensor.
     """
     if not all(
-        masked_tensor.n_channel_dims == masked_tensors[0].n_channel_dims
-        for masked_tensor in masked_tensors[1:]
+        mappable_tensor.n_channel_dims == mappable_tensors[0].n_channel_dims
+        for mappable_tensor in mappable_tensors[1:]
     ):
         raise ValueError("Lengths of channel shapes of masked tensors must be the same")
-    n_channel_dims = len(masked_tensors[0].channels_shape)
+    n_channel_dims = len(mappable_tensors[0].channels_shape)
     concatenation_dim = get_channel_dims(
-        n_total_dims=len(masked_tensors[0].shape),
+        n_total_dims=len(mappable_tensors[0].shape),
         n_channel_dims=n_channel_dims,
     )[channel_index]
     values = cat(
-        [masked_tensor.generate_values() for masked_tensor in masked_tensors],
+        [mappable_tensor.generate_values() for mappable_tensor in mappable_tensors],
         dim=concatenation_dim,
     )
     mask: Optional[Tensor] = None
-    for masked_tensor in masked_tensors:
-        update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
+    for mappable_tensor in mappable_tensors:
+        update_mask = mappable_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
         mask = combine_optional_masks(mask, update_mask, n_channel_dims=n_channel_dims)
     return mappable(
         values=values,
@@ -45,33 +48,36 @@ def concatenate_mappable_tensors(
 
 
 def stack_mappable_tensors(
-    *masked_tensors: MappableTensor, channel_index: int = 0
+    *mappable_tensors: MappableTensor, channel_index: int = 0
 ) -> "MappableTensor":
-    """Concatenate masked tensors along the channel dimension
+    """Stack mappable tensors along the channel dimension.
 
     Args:
-        masked_tensors: Masked tensors to concatenate
+        mappable_tensors: Mappable tensors to concatenate
         channel_index: Index of the channel dimension over which to stack
-            starting from the first channel dimension
+            starting from the first channel dimension over which to stack.
+
+    Returns:
+        Stacked masked tensor.
     """
     if not all(
-        masked_tensor.n_channel_dims == masked_tensors[0].n_channel_dims
-        for masked_tensor in masked_tensors[1:]
+        mappable_tensor.n_channel_dims == mappable_tensors[0].n_channel_dims
+        for mappable_tensor in mappable_tensors[1:]
     ):
         raise ValueError("Lengths of channel shapes of masked tensors must be the same")
-    n_channel_dims = len(masked_tensors[0].channels_shape)
+    n_channel_dims = len(mappable_tensors[0].channels_shape)
     channel_dims = get_channel_dims(
-        n_total_dims=len(masked_tensors[0].shape),
+        n_total_dims=len(mappable_tensors[0].shape),
         n_channel_dims=n_channel_dims,
     )
     stacking_dim = (channel_dims + (channel_dims[-1] + 1,))[channel_index]
     values = stack(
-        [masked_tensor.generate_values() for masked_tensor in masked_tensors],
+        [mappable_tensor.generate_values() for mappable_tensor in mappable_tensors],
         dim=stacking_dim,
     )
     mask: Optional[Tensor] = None
-    for masked_tensor in masked_tensors:
-        update_mask = masked_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
+    for mappable_tensor in mappable_tensors:
+        update_mask = mappable_tensor.generate_mask(generate_missing_mask=False, cast_mask=False)
         if update_mask is not None:
             update_mask = update_mask.unsqueeze(dim=stacking_dim)
             mask = combine_optional_masks(mask, update_mask, n_channel_dims=n_channel_dims + 1)

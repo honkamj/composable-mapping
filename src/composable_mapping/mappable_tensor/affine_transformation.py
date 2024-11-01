@@ -1,4 +1,4 @@
-"""Affine transformation implementations"""
+"""Affine transformation implementations."""
 
 from abc import abstractmethod
 from typing import Mapping, Optional, Sequence, Tuple, Union, overload
@@ -8,6 +8,7 @@ from torch import device as torch_device
 from torch import dtype as torch_dtype
 from torch import ones, zeros
 
+from composable_mapping.interface import Number
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
     are_broadcastable,
@@ -43,8 +44,6 @@ from .matrix import (
     transform_values_with_affine_matrix,
 )
 
-Number = Union[int, float]
-
 
 class IAffineTransformation(ITensorLike):
     """Affine transformation"""
@@ -75,79 +74,124 @@ class IAffineTransformation(ITensorLike):
     def as_matrix(
         self,
     ) -> Tensor:
-        """Return the mapping as matrix"""
+        """Obtain the transformation as the corresponding affine transformation
+        matrix"""
 
     @abstractmethod
     def as_host_matrix(self) -> Optional[Tensor]:
-        """Return detach transformation matrix detached on host (cpu), if available"""
+        """Obtain the transformation as the corresonding affine transformation
+        matrix on host (cpu), if available"""
 
     @abstractmethod
     def as_diagonal(
         self,
     ) -> Optional[DiagonalAffineMatrixDefinition]:
-        """Return the mapping as diagonal matrix, if possible"""
+        """Obtain the transformation as corresponding diagonal affine
+        transformation matrix, if available"""
 
     @abstractmethod
     def as_host_diagonal(
         self,
     ) -> Optional[DiagonalAffineMatrixDefinition]:
-        """Return the mapping as diagonal matrix detached on host (cpu), if available"""
+        """Obtain the mapping as corresponding diagonal affine transformation
+        matrix on host (cpu), if available"""
 
     @abstractmethod
     def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
-        """Evaluate the mapping with values"""
+        """Evaluate the transformation at values
+
+        Args:
+            values: Tensor with shape
+                ([*batch_shape, *channels_shape[:-1], ]n_input_dims[, *spatial_shape])
+            n_channel_dims: Number of channel dimensions in the values tensor
+
+        Returns:
+            Tensor with shape
+                ([*batch_shape, *channels_shape[:-1], ]n_output_dims[, *spatial_shape])
+        """
 
     @abstractmethod
     def get_output_shape(
         self, input_shape: Sequence[int], n_channel_dims: int = 1
     ) -> Tuple[int, ...]:
-        """Return the shape of the output tensor given the input shape
+        """Shape of the output tensor given the input shape
 
-        Raises: RuntimeError if the transformation is not compatible with the input shape
+        Args:
+            input_shape: Shape of the input tensor in form
+                ([*batch_shape, *channels_shape[:-1], ]n_input_dims[, *spatial_shape])
+            n_channel_dims: Number of channel dimensions in the input tensor
+
+        Returns:
+            Shape of the output tensor in form
+                ([*batch_shape, *channels_shape[:-1], ]n_output_dims[, *spatial_shape])
+
+        Raises:
+            RuntimeError if the transformation is not compatible with the input shape
         """
 
     @abstractmethod
     def is_zero(self) -> Optional[bool]:
-        """Return whether the transformation is zero
+        """Return whether the transformation corresponds to zero matrix
 
-        Returns None if the check cannot be done on CPU
+        Returns:
+            None if the check cannot be done on CPU, otherwise bool indicating
+            whether the transformation is zero matrix.
         """
 
     @abstractmethod
     def is_identity(self) -> Optional[bool]:
-        """Return whether the transformation is identity matrix
+        """Return whether the transformation corresponds to identity matrix
 
-        Returns None if the check cannot be done on CPU
+        Returns:
+            None if the check cannot be done on CPU, otherwise bool indicating
+            whether the transformation is identity matrix.
         """
 
     @property
     @abstractmethod
     def shape(self) -> Sequence[int]:
-        """Return shape of the transformation when represented as affine
-        transformation matrix"""
+        """Shape of the transformation when represented as an affine
+        transformation matrix
+
+        The spape is in form
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape])
+        """
 
     @property
     @abstractmethod
     def batch_shape(self) -> Tuple[int, ...]:
-        """Return the shape of the batch dimensions"""
+        """Shape of the batch dimensions"""
 
     @property
     @abstractmethod
     def channels_shape(self) -> Tuple[int, ...]:
-        """Return the shape of the channel dimensions"""
+        """Shape of the channel dimensions"""
 
     @property
     @abstractmethod
     def spatial_shape(self) -> Tuple[int, ...]:
-        """Return the shape of the spatial dimensions"""
+        """Shape of the spatial dimensions"""
 
     @abstractmethod
     def is_composable(self, affine_transformation: "IAffineTransformation") -> bool:
-        """Return whether the transformation is composable with the other transformation"""
+        """Is the transformation composable with the other transformation
+
+        Args:
+            affine_transformation: Transformation to compose with
+
+        Returns:
+            Whether the transformation is composable with the other transformation
+        """
 
     @abstractmethod
     def is_addable(self, affine_transformation: "IAffineTransformation") -> bool:
-        """Return whether the transformation is addable with the other transformation"""
+        """Is the transformation addable with the other transformation
+
+        Args:
+            affine_transformation: Transformation to add with
+
+        Returns:
+            Whether the transformation is addable with the other transformation"""
 
     @abstractmethod
     def broadcast_to_n_output_channels(
@@ -155,15 +199,27 @@ class IAffineTransformation(ITensorLike):
         n_output_channels: int,
     ) -> "IAffineTransformation":
         """Modify the transformation to output n_output_channels channels such that the output
-        would equal broadcasting the original output to have n_output_channels channels."""
+        would equal broadcasting the original output to have n_output_channels channels.
+
+        Args:
+            n_output_channels: Number of output channels
+
+        Returns:
+            Affine transformation with n_output_channels output channels
+        """
 
     @abstractmethod
     def clear_translation(self) -> "IAffineTransformation":
-        """Return the transformation without translation"""
+        """Clear translation from the transformation"""
 
 
 class IHostAffineTransformation(IAffineTransformation):
-    """Host affine transformation"""
+    """Affine transformation for which the matrix is stored on host (cpu) and
+    the matrix on target device is created only when needed.
+
+    Allows to do control flow decisions on host based on the transformation
+    without having to do CPU-GPU synchronization.
+    """
 
     @overload
     def __matmul__(
@@ -212,33 +268,31 @@ class IHostAffineTransformation(IAffineTransformation):
 
     @abstractmethod
     def invert(self) -> "IHostAffineTransformation":
-        """Invert the transformation"""
+        pass
 
     @abstractmethod
     def as_host_matrix(self) -> Tensor:
-        """Return detach transformation matrix detached on host (cpu)"""
+        """Obtain the transformation as the corresonding affine transformation
+        matrix on host (cpu)"""
 
     @abstractmethod
     def clear_translation(self) -> "IHostAffineTransformation":
-        """Return the transformation without translation"""
+        pass
 
 
 class BaseAffineTransformation(IAffineTransformation):
-    """Base affine transformation"""
+    """Base affine transformation implementation"""
 
     @property
     def batch_shape(self) -> Tuple[int, ...]:
-        """Return the shape of the batch dimensions"""
         return get_batch_shape(self.shape, n_channel_dims=2)
 
     @property
     def channels_shape(self) -> Tuple[int, ...]:
-        """Return the shape of the channel dimensions"""
         return get_channels_shape(self.shape, n_channel_dims=2)
 
     @property
     def spatial_shape(self) -> Tuple[int, ...]:
-        """Return the shape of the spatial dimensions"""
         return get_spatial_shape(self.shape, n_channel_dims=2)
 
     def is_composable(self, affine_transformation: "IAffineTransformation") -> bool:
@@ -402,10 +456,11 @@ class BaseAffineTransformation(IAffineTransformation):
 
 
 class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
-    """Represents generic affine transformation
+    """Generic affine transformation
 
     Arguments:
-        transformation_matrix: Tensor with shape ([batch_size, ]n_dims + 1, n_dims + 1, ...)
+        transformation_matrix: Tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape])
     """
 
     def __init__(self, transformation_matrix: Tensor) -> None:
@@ -452,15 +507,16 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
 
 
 class HostAffineTransformation(AffineTransformation, IHostAffineTransformation):
-    """Affine tranformation for which matrix operations are done
-    on host, and the matrix on target device is created only when needed
+    """Affine transformation with the matrix stored on host (cpu) and the matrix
+    on target device created only when needed.
 
-    Allows to do control flow decisions on host without having to do CPU-GPU
-    synchronization.
+    Allows to do control flow decisions on host based on the transformation
+    without having to do CPU-GPU synchronization.
 
     Arguments:
-        transformation_matrix_on_host: Transformation matrix on cpu
-        device: Device to use for the transformation matrix produced by as_matrix method
+        transformation_matrix_on_host: Transformation matrix on cpu, tensor with shape
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape]).
+        device: Device to use for the transformation matrix produced by as_matrix method.
     """
 
     def __init__(
@@ -626,15 +682,21 @@ class BaseDiagonalAffineTransformation(BaseAffineTransformation):
 
 
 class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTransformation):
-    """Represents diagonal affine transformation
+    """Affine transformation representable as a diagonal affine transformation matrix
 
     Arguments:
-        diagonal: Tensor with shape ([batch_size, ]diagonal_length, ...),
-            if None, corresponds to all ones
-        translation: Tensor with shape ([batch_size, ]n_target_dims, ...),
-            if None, corresponds to all zeros
+        diagonal: Tensor with shape ([*batch_shape, ]diagonal_length[, *spatial_shape]),
+            if None, corresponds to all ones. Can also be given as a sequence of numbers
+            or a single number.
+        translation: Tensor with shape ([*batch_shape, ]n_output_dims[, *spatial_shape]),
+            if None, corresponds to all zeros. Can also be given as a sequence of numbers
+            or a single number.
         matrix_shape: Shape of the target affine transformation matrix
-            (n_target_dims + 1, n_source_dims + 1)
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape])
+        dtype: Data type of the transformation matrix, needed only if no
+            diagonal or translation is given.
+        device: Device of the transformation matrix, needed only if no
+            diagonal or translation is given.
     """
 
     def __init__(
@@ -716,11 +778,26 @@ class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTran
 
 
 class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffineTransformation):
-    """Diagonal affine tranformation for which matrix operations are done
-    on host, and the matrix on target device is created only when needed
+    """Affine transformation representable as a diagonal affine transformation matrix
+    with the matrix stored on host (cpu) and the matrix on target device created
+    only when needed.
 
-    Allows to do control flow decisions on host without having to do CPU-GPU
-    synchronization.
+    Allows to do control flow decisions on host based on the transformation
+    without having to do CPU-GPU synchronization.
+
+    Arguments:
+        diagonal: Tensor with shape ([*batch_shape, ]diagonal_length[, *spatial_shape]),
+            if None, corresponds to all ones. Can also be given as a sequence of numbers
+            or a single number.
+        translation: Tensor with shape ([*batch_shape, ]n_output_dims[, *spatial_shape]),
+            if None, corresponds to all zeros. Can also be given as a sequence of numbers
+            or a single number.
+        matrix_shape: Shape of the target affine transformation matrix
+            ([*batch_shape, ]n_output_dims + 1, n_input_dims + 1[, *spatial_shape])
+        dtype: Data type of the transformation matrix, needed only if no
+            diagonal or translation is given.
+        device: Device of the transformation matrix generated by as_matrix and as_diagonal
+            methods.
     """
 
     def __init__(
@@ -848,7 +925,13 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
 
 
 class IdentityAffineTransformation(HostDiagonalAffineTransformation):
-    """Identity affine transformation"""
+    """Identity affine transformation
+
+    Arguments:
+        n_dims: Number of spatial dimensions
+        dtype: Data type of the transformation matrix
+        device: Device of the transformation matrix
+    """
 
     def __init__(
         self,

@@ -1,4 +1,5 @@
-"""Defines a voxel grid with given shape transformed by given affine transformation"""
+"""Defines a voxel grid with given shape transformed by given affine
+transformation."""
 
 from typing import Mapping, Optional, Sequence, Tuple
 
@@ -25,7 +26,13 @@ from .matrix import convert_to_homogenous_coordinates
 
 
 class GridDefinition(BaseTensorLikeWrapper):
-    """Defines a voxel grid with given shape transformed by given affine transformation"""
+    """Defines a voxel grid transformed by an affine transformation.
+
+    Arguments:
+        spatial_shape: Spatial shape of the voxel grid.
+        affine_transformation: Affine transformation to apply to the grid.
+            The transformation should not differ over spatial dimensions.
+    """
 
     def __init__(
         self,
@@ -55,17 +62,17 @@ class GridDefinition(BaseTensorLikeWrapper):
         )
 
     def generate(self) -> Tensor:
-        """Generate the grid"""
+        """Generate the grid as a tensor"""
         if self._affine_transformation.is_zero():
             return zeros(1, dtype=self.dtype, device=self.device).expand(self.shape)
         voxel_grid = generate_voxel_coordinate_grid(
-            shape=self._spatial_shape, device=self.device, dtype=self.dtype
+            spatial_shape=self._spatial_shape, device=self.device, dtype=self.dtype
         )
         return self._affine_transformation(voxel_grid, n_channel_dims=1)
 
     @property
     def affine_transformation(self) -> IAffineTransformation:
-        """Get the affine transformation"""
+        """Affine transformation applied to the voxel grid"""
         return self._affine_transformation
 
     @property
@@ -91,11 +98,11 @@ class GridDefinition(BaseTensorLikeWrapper):
         )
 
     def is_zero(self) -> Optional[bool]:
-        """Check if the grid is zero"""
+        """Is the grid all zeros"""
         return self._affine_transformation.is_zero()
 
     def is_transformable(self, affine_transformation: IAffineTransformation) -> bool:
-        """Check if the grid is transformable by the given affine transformation"""
+        """Is the grid transformable by the given affine transformation"""
         if has_spatial_dims(affine_transformation.shape):
             return False
         if not are_broadcastable(
@@ -107,7 +114,14 @@ class GridDefinition(BaseTensorLikeWrapper):
         )
 
     def broadcast_to_n_channels(self, n_channels: int) -> "GridDefinition":
-        """Broadcast the grid to have the given number of channels"""
+        """Broadcast the grid to have the given number of channels.
+
+        Args:
+            n_channels: Number of channels to broadcast to.
+
+        Returns:
+            GridDefinition with the given number of channels.
+        """
         return GridDefinition(
             spatial_shape=self.spatial_shape,
             affine_transformation=self.affine_transformation.broadcast_to_n_output_channels(
@@ -116,7 +130,14 @@ class GridDefinition(BaseTensorLikeWrapper):
         )
 
     def broadcast_to_spatial_shape(self, spatial_shape: Sequence[int]) -> "GridDefinition":
-        """Broadcast the grid to have the given spatial shape"""
+        """Broadcast the grid to have the given spatial shape.
+
+        Args:
+            spatial_shape: Spatial shape to broadcast to.
+
+        Returns:
+            GridDefinition with the given spatial shape.
+        """
         if not is_broadcastable_to(self.spatial_shape, spatial_shape):
             raise RuntimeError("Can not broadcast to given spatial shape")
         target_spatial_shape = broadcast_shapes(self.spatial_shape, spatial_shape)
@@ -154,7 +175,6 @@ class GridDefinition(BaseTensorLikeWrapper):
         )
 
     def __add__(self, other: "GridDefinition") -> "GridDefinition":
-        """Sum two grids"""
         broadcasted_n_channel_dims = broadcast_shapes(self.channels_shape, other.channels_shape)[-1]
         broadcasted_spatial_shapes = broadcast_shapes(self.spatial_shape, other.spatial_shape)
         self_broadcasted = self.broadcast_to_n_channels(
@@ -170,21 +190,26 @@ class GridDefinition(BaseTensorLikeWrapper):
         )
 
     def transform(self, affine_transformation: IAffineTransformation) -> "GridDefinition":
-        """Transform the grid by the given affine transformation"""
+        """Transform the grid by the given affine transformation.
+
+        Args:
+            affine_transformation: Affine transformation to apply to the grid.
+
+        Returns:
+            GridDefinition with the given affine transformation applied.
+        """
         return GridDefinition(
             spatial_shape=self.spatial_shape,
             affine_transformation=affine_transformation @ self.affine_transformation,
         )
 
     def __neg__(self) -> "GridDefinition":
-        """Negate the grid"""
         return GridDefinition(
             spatial_shape=self.spatial_shape,
             affine_transformation=-self.affine_transformation,
         )
 
     def __sub__(self, other: "GridDefinition") -> "GridDefinition":
-        """Subtract two grids"""
         return self + (-other)
 
     def __repr__(self) -> str:

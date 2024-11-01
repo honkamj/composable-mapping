@@ -47,46 +47,41 @@ if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
 
 
-class IKernelSupport:
+class ISeparableKernelSupport:
     """Interface for defining kernel supports for a kernel and its derivatives"""
 
     @abstractmethod
-    def __call__(
-        self, spatial_dim: int, limit_direction: LimitDirection
-    ) -> Tuple[float, bool, bool]:
-        """Return the kernel size for the convolution and whether min and max
+    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, bool, bool]:
+        """Interpolation kernel support for the convolution and whether min and max
         are inclusive or not"""
 
     @abstractmethod
-    def derivative(self, spatial_dim: int) -> "IKernelSupport":
-        """Return the kernel support function of the derivative kernel"""
+    def derivative(self) -> "ISeparableKernelSupport":
+        """Obtain kernel support function of the derivative kernel"""
 
 
-class SymmetricPolynomialKernelSupport(IKernelSupport):
+class SymmetricPolynomialKernelSupport(ISeparableKernelSupport):
     """Kernel support function for polynomial kernels"""
 
     def __init__(
         self,
-        kernel_width: Callable[[int], float],
-        polynomial_degree: Callable[[int], int],
+        kernel_width: float,
+        polynomial_degree: int,
     ) -> None:
         self._kernel_width = kernel_width
         self._polynomial_degree = polynomial_degree
 
-    def __call__(
-        self, spatial_dim: int, limit_direction: LimitDirection
-    ) -> Tuple[float, bool, bool]:
-        degree = self._polynomial_degree(spatial_dim)
-        if degree < 0:
+    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, bool, bool]:
+        if self._polynomial_degree < 0:
             # kernel is zeros
             return (1.0, True, False)
-        bound_inclusive = degree == 0
-        if limit_direction == LimitDirection.LEFT:
-            return (self._kernel_width(spatial_dim), False, bound_inclusive)
-        if limit_direction == LimitDirection.RIGHT:
-            return (self._kernel_width(spatial_dim), bound_inclusive, False)
-        if limit_direction == LimitDirection.AVERAGE:
-            return (self._kernel_width(spatial_dim), bound_inclusive, bound_inclusive)
+        bound_inclusive = self._polynomial_degree == 0
+        if limit_direction == LimitDirection.left():
+            return (self._kernel_width, False, bound_inclusive)
+        if limit_direction == LimitDirection.right():
+            return (self._kernel_width, bound_inclusive, False)
+        if limit_direction == LimitDirection.average():
+            return (self._kernel_width, bound_inclusive, bound_inclusive)
         raise ValueError("Unknown limit direction")
 
     @staticmethod
@@ -100,18 +95,29 @@ class SymmetricPolynomialKernelSupport(IKernelSupport):
 
         return updated_func
 
-    def derivative(self, spatial_dim: int) -> "SymmetricPolynomialKernelSupport":
+    def derivative(self) -> "SymmetricPolynomialKernelSupport":
         return SymmetricPolynomialKernelSupport(
             kernel_width=self._kernel_width,
-            polynomial_degree=self._update_polynomial_degree_func(
-                spatial_dim, self._polynomial_degree
-            ),
+            polynomial_degree=self._polynomial_degree - 1,
         )
 
 
 class BaseSeparableSampler(ISampler):
     """Base sampler in voxel coordinates which can be implemented as a
-    separable convolution"""
+    separable convolution
+
+    Arguments:
+        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
+        convolution_threshold: Maximum allowed difference in coordinates
+            for using convolution-based sampling (the difference might be upper
+            bounded when doing the decision).
+        mask_threshold: Maximum allowed weight for masked regions in a
+            sampled location to still consider it valid (non-masked).
+        limit_direction: Direction for evaluating the kernel at
+            discontinuous points.
+    """
 
     def __init__(
         self,
@@ -119,8 +125,7 @@ class BaseSeparableSampler(ISampler):
         mask_extrapolated_regions_for_empty_volume_mask: bool,
         convolution_threshold: float,
         mask_threshold: float,
-        kernel_support: IKernelSupport,
-        limit_direction: LimitDirection,
+        limit_direction: Union[LimitDirection, Callable[[int], LimitDirection]],
     ) -> None:
         if extrapolation_mode not in ("zeros", "border", "reflection"):
             raise ValueError("Unknown extrapolation mode")
@@ -130,29 +135,66 @@ class BaseSeparableSampler(ISampler):
         )
         self._convolution_threshold = convolution_threshold
         self._mask_threshold = mask_threshold
-        self._kernel_support = kernel_support
-        self._limit_direction = limit_direction
+        self._limit_direction = (
+            limit_direction.as_callable()
+            if isinstance(limit_direction, LimitDirection)
+            else limit_direction
+        )
 
     @abstractmethod
-    def _interpolating_kernel(self, spatial_dim: int) -> bool:
-        """Return whether the kernel is interpolating or not"""
+    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
+        """Kernel support function for the interpolation kernel
+
+        Args:
+            spatial_dim: Spatial dimension for which to obtain the kernel support
+
+        Returns:
+            Kernel support function for the kernel.
+        """
+
+    @abstractmethod
+    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
+        """Is the kernel is interpolating.
+
+        Args:
+            spatial_dim: Spatial dimension for which to obtain the information.
+
+        Returns:
+            Whether the kernel is interpolating over the specified spatial dimension.
+        """
 
     @abstractmethod
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        """Return the interpolation kernel for the given 1d coordinates with the
-        discontinuous points evaluated as the left limit"""
+        """Evaluate the interpolation kernel for the given 1d coordinates with the
+        discontinuous points evaluated as left limit.
+
+        Args:
+            coordinates: 1d coordinates with shape (n_coordinates,)
+            spatial_dim: Spatial dimension for which to evaluate the kernel
+
+        Returns:
+            Interpolation kernel evaluated at the given coordinates.
+        """
 
     @abstractmethod
     def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        """Return the interpolation kernel for the given 1d coordinates with the
-        discontinuous points evaluated as the right limit"""
+        """Evaluate the interpolation kernel for the given 1d coordinates with the
+        discontinuous points evaluated as right limit.
+
+        Args:
+            coordinates: 1d coordinates with shape (n_coordinates,)
+            spatial_dim: Spatial dimension for which to evaluate the kernel
+
+        Returns:
+            Interpolation kernel evaluated at the given coordinates.
+        """
 
     def _kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        if self._limit_direction == LimitDirection.LEFT:
+        if self._limit_direction(spatial_dim) == LimitDirection.left():
             return self._left_limit_kernel(coordinates, spatial_dim)
-        if self._limit_direction == LimitDirection.RIGHT:
+        if self._limit_direction(spatial_dim) == LimitDirection.right():
             return self._right_limit_kernel(coordinates, spatial_dim)
-        if self._limit_direction == LimitDirection.AVERAGE:
+        if self._limit_direction(spatial_dim) == LimitDirection.average():
             return 0.5 * (
                 self._left_limit_kernel(coordinates, spatial_dim)
                 + self._right_limit_kernel(coordinates, spatial_dim)
@@ -160,18 +202,22 @@ class BaseSeparableSampler(ISampler):
         raise ValueError("Unknown limit direction")
 
     def derivative(
-        self, spatial_dim: int, limit_direction: LimitDirection = LimitDirection.AVERAGE
+        self,
+        spatial_dim: int,
+        limit_direction: Union[
+            LimitDirection, Callable[[int], LimitDirection]
+        ] = LimitDirection.average(),
     ) -> "ISampler":
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
-            left_limit_kernel=lambda coordinates, spatial_dim, _: self._left_limit_kernel(
+            parent_left_limit_kernel=lambda coordinates, spatial_dim, _: self._left_limit_kernel(
                 coordinates, spatial_dim
             ),
-            right_limit_kernel=lambda coordinates, spatial_dim, _: self._right_limit_kernel(
+            parent_right_limit_kernel=lambda coordinates, spatial_dim, _: self._right_limit_kernel(
                 coordinates, spatial_dim
             ),
-            kernel_support=self._kernel_support.derivative(spatial_dim),
-            interpolating_kernel=self._interpolating_kernel,
+            parent_kernel_support=self._kernel_support,
+            parent_is_interpolating_kernel=self._is_interpolating_kernel,
             limit_direction=limit_direction,
             extrapolation_mode=self._extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
@@ -250,7 +296,7 @@ class BaseSeparableSampler(ISampler):
             return None
         interpolating_kernel = tensor(
             [
-                self._interpolating_kernel(flipping_permutation.spatial_permutation[spatial_dim])
+                self._is_interpolating_kernel(flipping_permutation.spatial_permutation[spatial_dim])
                 for spatial_dim in range(n_dims)
             ],
             device=torch_device("cpu"),
@@ -320,8 +366,8 @@ class BaseSeparableSampler(ISampler):
         ):
             kernel_dim = flipping_permutation.spatial_permutation[spatial_dim]
             flip_kernel = kernel_dim in flipping_permutation.flipped_spatial_dims
-            (kernel_width, inclusive_min, inclusive_max) = self._kernel_support(
-                kernel_dim, self._limit_direction
+            (kernel_width, inclusive_min, inclusive_max) = self._kernel_support(kernel_dim)(
+                self._limit_direction(kernel_dim)
             )
             if flip_kernel:
                 inclusive_min, inclusive_max = inclusive_max, inclusive_min
@@ -632,16 +678,35 @@ class BaseSeparableSampler(ISampler):
 
 
 class GenericSeparableDerivativeSampler(BaseSeparableSampler):
-    """Base implementation of a separable derivative sampler"""
+    """Sampler for sampling spatial derivatives of a separable kernel
+    sampler.
+
+    Args:
+        spatial_dim: Spatial dimension over which the derivative is taken.
+        parent_left_limit_kernel: Parent sampler's left limit kernel function.
+        parent_right_limit_kernel: Parent sampler's right limit kernel function.
+        parent_kernel_support: Parent sampler's kernel support function.
+        parent_is_interpolating_kernel: Parent sampler's information on whether the kernel
+            is interpolating.
+        limit_direction: Direction for evaluating the kernel at discontinuous points.
+        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
+        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
+            extrapolated regions when input volume mask is empty.
+        convolution_threshold: Maximum allowed difference in coordinates
+            for using convolution-based sampling.
+        mask_threshold: Maximum allowed weight for masked regions in a
+            sampled location to still consider it valid (non-masked).
+
+    """
 
     def __init__(
         self,
         spatial_dim: int,
-        left_limit_kernel: Callable[[Tensor, int, bool], Tensor],
-        right_limit_kernel: Callable[[Tensor, int, bool], Tensor],
-        kernel_support: IKernelSupport,
-        interpolating_kernel: Callable[[int], bool],
-        limit_direction: LimitDirection,
+        parent_left_limit_kernel: Callable[[Tensor, int, bool], Tensor],
+        parent_right_limit_kernel: Callable[[Tensor, int, bool], Tensor],
+        parent_kernel_support: Callable[[int], ISeparableKernelSupport],
+        parent_is_interpolating_kernel: Callable[[int], bool],
+        limit_direction: Union[LimitDirection, Callable[[int], LimitDirection]],
         extrapolation_mode: str = "border",
         mask_extrapolated_regions_for_empty_volume_mask: bool = True,
         convolution_threshold: float = 1e-4,
@@ -654,23 +719,32 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            kernel_support=kernel_support,
             limit_direction=limit_direction,
         )
         self._spatial_dim = spatial_dim
-        self._parent_left_limit_kernel = left_limit_kernel
-        self._parent_right_limit_kernel = right_limit_kernel
-        self._parent_interpolating_kernel = interpolating_kernel
+        self._parent_left_limit_kernel = parent_left_limit_kernel
+        self._parent_right_limit_kernel = parent_right_limit_kernel
+        self._parent_is_interpolating_kernel = parent_is_interpolating_kernel
+        self._parent_kernel_support = parent_kernel_support
+
+    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
+        if spatial_dim == self._spatial_dim:
+            return self._parent_kernel_support(spatial_dim)
+        return self._parent_kernel_support(spatial_dim).derivative()
 
     def derivative(
-        self, spatial_dim: int, limit_direction: LimitDirection = LimitDirection.AVERAGE
+        self,
+        spatial_dim: int,
+        limit_direction: Union[
+            LimitDirection, Callable[[int], LimitDirection]
+        ] = LimitDirection.average(),
     ) -> "ISampler":
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
-            left_limit_kernel=self._left_limit_kernel_for_derivation,
-            right_limit_kernel=self._right_limit_kernel_for_derivation,
-            kernel_support=self._kernel_support.derivative(spatial_dim),
-            interpolating_kernel=self._interpolating_kernel,
+            parent_left_limit_kernel=self._left_limit_kernel_for_derivation,
+            parent_right_limit_kernel=self._right_limit_kernel_for_derivation,
+            parent_kernel_support=self._kernel_support,
+            parent_is_interpolating_kernel=self._is_interpolating_kernel,
             limit_direction=limit_direction,
             extrapolation_mode=self._extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
@@ -680,10 +754,10 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             mask_threshold=self._mask_threshold,
         )
 
-    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         if spatial_dim == self._spatial_dim:
             return False
-        return self._parent_interpolating_kernel(spatial_dim)
+        return self._parent_is_interpolating_kernel(spatial_dim)
 
     def _derive_function(
         self,
@@ -766,7 +840,16 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
 
 
 class FlippingPermutation:
-    """Class for flipping and permuting coordinates and volumes"""
+    """Class for describing transformations which include flipping and permutation.
+
+    The core idea is that given a coordinate and its transformed counterpart,
+    they should point to the same location in the original volume and the
+    transformed volume, respectively.
+
+    Arguments:
+        spatial_permutation: Permutation of the spatial dimensions.
+        flipped_spatial_dims: Spatial dimensions which are flipped.
+    """
 
     def __init__(
         self, spatial_permutation: Sequence[int], flipped_spatial_dims: Sequence[int]
@@ -776,16 +859,40 @@ class FlippingPermutation:
 
     @staticmethod
     def is_valid_permutation(n_dims: int, spatial_permutation: Sequence[int]) -> bool:
-        """Check if the permutation is valid"""
+        """Check if a permutation is valid
+
+        Args:
+            n_dims: Number of spatial dimensions
+            spatial_permutation: Permutation of the spatial dimensions
+
+        Returns:
+            Whether the permutation is valid.
+        """
         return set(spatial_permutation) == set(range(n_dims))
 
     def permute_sequence(self, sequence: Sequence) -> Tuple:
-        """Permute a sequence"""
+        """Permute a sequence with the spatial permutation.
+
+        Args:
+            sequence: Sequence to permute.
+
+        Returns:
+            Permuted sequence.
+        """
         if len(sequence) != len(self.spatial_permutation):
             raise ValueError("Sequence has wrong length")
         return tuple(sequence[spatial_dim] for spatial_dim in self.spatial_permutation)
 
     def __call__(self, volume: Tensor, n_channel_dims: int) -> Tensor:
+        """Apply the flipping and permutation to a volume.
+
+        Args:
+            volume: Volume to transform.
+            n_channel_dims: Number of channel dimensions in the volume.
+
+        Returns:
+            Transformed volume.
+        """
         spatial_dims = get_spatial_dims(volume.ndim, n_channel_dims=n_channel_dims)
         if self.flipped_spatial_dims:
             flipped_dims = [spatial_dims[spatial_dim] for spatial_dim in self.flipped_spatial_dims]
@@ -817,7 +924,17 @@ class FlippingPermutation:
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
     ) -> IHostAffineTransformation:
-        """Return the transformation corresponding to the flipping and permutation"""
+        """Obtain coordinate transformation corresponding to the flipping and
+        permutation.
+
+        Args:
+            spatial_shape: Shape of the spatial dimensions.
+            dtype: Data type of the generated transformation.
+            device: Device of the generated transformation.
+
+        Returns:
+            Coordinate transformation corresponding to the flipping and permutation.
+        """
         if self.spatial_permutation == tuple(range(len(spatial_shape))):
             if not self.flipped_spatial_dims:
                 return IdentityAffineTransformation(
@@ -836,12 +953,17 @@ class FlippingPermutation:
         matrix: Tensor,
     ) -> Optional["FlippingPermutation"]:
         """Obtain permutation with flipping which turns the affine matrix as
-        close to a diagonal matrix with positive diagonal, if possible
+        close to a diagonal matrix with positive diagonal as possible.
 
-        This does not currently handle zero diagonal elements.
+        If the algorithm is not able to find a valid permutation, None is returned.
+        This could be improved as the current algorithm can not handle zero diagonal elements.
 
         Args:
-            matrix: The affine matrix to normalize with shape (n_dims + 1, n_dims + 1)
+            matrix: The affine matrix to normalize with shape (n_dims + 1, n_dims + 1).
+
+        Returns:
+            Normalizing flipping permutation or None if no valid flipping
+            permutation is found.
         """
         permutation = matrix[:-1, :-1].abs().argmax(dim=0).tolist()
         n_dims = matrix.shape[-1] - 1

@@ -1,4 +1,11 @@
-Possible and relatively easy things to implement:
+
+## API reference
+
+API reference has been generated using [pdoc](https://pdoc.dev/) by running the following command at directory `src`:
+
+    pdoc composable_mapping -o ../docs --docformat google
+
+## TODO
  - Currently conv interpolation works only when grid has same number of spatial dimensions as channels. Other situations could also be implemented as simple broadcasting operation.
  - Sampling Jacobians of arbitrary mappings. The code base has been designed such that this would be relatively easy to implement.
    - One could implement a generic implementation using torch.func.vjp.
