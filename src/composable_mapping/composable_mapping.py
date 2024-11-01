@@ -295,6 +295,9 @@ class ComposableMapping(ITensorLike, ABC):
     __rtruediv__ = _generate_bivariate_arithmetic_operator(
         lambda x, y: y / x, lambda x, y: y / x, _bivariate_arithmetic_operator_template
     )
+    __pow__ = _generate_bivariate_arithmetic_operator(
+        lambda x, y: x**y, lambda x, y: x ** (1 / y), _bivariate_arithmetic_operator_template
+    )
     __neg__ = _generate_univariate_arithmetic_operator(
         lambda x: -x, lambda x: -x, _univariate_arithmetic_operator_template
     )

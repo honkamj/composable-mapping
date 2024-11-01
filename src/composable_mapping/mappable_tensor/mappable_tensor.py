@@ -433,6 +433,94 @@ class MappableTensor(BaseTensorLikeWrapper):
             grid=grid,
         )
 
+    def __rpow__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, MappableTensor):
+            return other.__pow__(self)
+        if isinstance(other, (int, float)):
+            return self._rpow_scalar(other)
+        if isinstance(other, Tensor):
+            return self._rpow_tensor(other)
+        return NotImplemented
+
+    def _rpow_tensor(self, other: Tensor) -> "MappableTensor":
+        if other.ndim > 1:
+            raise ValueError(
+                "Power is ambigous since n_channel_dims is not specified. "
+                "Consider exponentiating with a MappableTensor instead."
+            )
+        other = broadcast_to_in_parts(
+            other,
+            batch_shape=self.batch_shape,
+            channels_shape=self.channels_shape,
+            spatial_shape=self.spatial_shape,
+            n_channel_dims=1,
+        )
+        return mappable(
+            values=other ** self.generate_values(),
+            mask=self._mask,
+            n_channel_dims=self._n_channel_dims,
+        )
+
+    def _rpow_scalar(self, other: Number) -> "MappableTensor":
+        return mappable(
+            values=other ** self.generate_values(),
+            mask=self._mask,
+            n_channel_dims=self._n_channel_dims,
+        )
+
+    def __pow__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, MappableTensor):
+            return self._pow_mappable_tensor(other)
+        if isinstance(other, (int, float)):
+            return self._pow_scalar(other)
+        if isinstance(other, Tensor):
+            return self._pow_tensor(other)
+        return NotImplemented
+
+    def _pow_mappable_tensor(self, other: "MappableTensor") -> "MappableTensor":
+        self_values, self_mask = self.generate(generate_missing_mask=False, cast_mask=False)
+        other_values, other_mask = other.generate(generate_missing_mask=False, cast_mask=False)
+        mask = combine_optional_masks(
+            self_mask,
+            other_mask,
+            n_channel_dims=(self.n_channel_dims, other.n_channel_dims),
+        )
+        n_channel_dims = max(self.n_channel_dims, other.n_channel_dims)
+        self_values, other_values = broadcast_tensors_in_parts(
+            self_values, other_values, n_channel_dims=(self.n_channel_dims, other.n_channel_dims)
+        )
+        return mappable(
+            values=self_values**other_values,
+            mask=mask,
+            n_channel_dims=n_channel_dims,
+        )
+
+    def _pow_scalar(self, other: Number) -> "MappableTensor":
+        return mappable(
+            values=self.generate_values() ** other,
+            mask=self._mask,
+            n_channel_dims=self._n_channel_dims,
+        )
+
+    def _pow_tensor(self, other: Tensor) -> "MappableTensor":
+        if other.ndim > 1:
+            raise ValueError(
+                "Power is ambigous since n_channel_dims is not specified. "
+                "Consider exponentiating with a MappableTensor instead."
+            )
+        other = broadcast_to_in_parts(
+            other,
+            batch_shape=self.batch_shape,
+            channels_shape=self.channels_shape,
+            spatial_shape=self.spatial_shape,
+            n_channel_dims=1,
+        )
+        return mappable(
+            values=self.generate_values() ** other,
+            mask=self._mask,
+            n_channel_dims=self._n_channel_dims,
+        )
+
     def __rtruediv__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
         if isinstance(other, (MappableTensor, Tensor, int, float)):
             return self._reciprocal().__mul__(other)
