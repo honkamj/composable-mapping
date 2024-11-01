@@ -27,6 +27,7 @@ from composable_mapping.mappable_tensor.affine_transformation import (
 from composable_mapping.sampler.base import (
     BaseSeparableSampler,
     FlippingPermutation,
+    ISeparableKernelSupport,
     SymmetricPolynomialKernelSupport,
 )
 from composable_mapping.sampler.interface import LimitDirection
@@ -99,14 +100,16 @@ class _NonSymmetricInterpolator(BaseSeparableSampler):
             mask_extrapolated_regions_for_empty_volume_mask=True,
             convolution_threshold=1e-4,
             mask_threshold=1e-5,
-            kernel_support=SymmetricPolynomialKernelSupport(
-                kernel_width=lambda spatial_dim: [4, 5, 6][spatial_dim],
-                polynomial_degree=lambda spatial_dim: 1,
-            ),
-            limit_direction=LimitDirection.LEFT,
+            limit_direction=LimitDirection.left(),
         )
 
-    def _interpolating_kernel(self, spatial_dim: int) -> bool:
+    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
+        return SymmetricPolynomialKernelSupport(
+            kernel_width=[4, 5, 6][spatial_dim],
+            polynomial_degree=1,
+        )
+
+    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return False
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
@@ -171,7 +174,7 @@ class InterpolatorTest(TestCase):
     def test_positive_slightly_shifted_voxel_grid_consistency(self):
         """Test interpolator with a slightly shifted voxel grid"""
         grid = (
-            CoordinateSystem.create_voxel(
+            CoordinateSystem.voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
@@ -201,7 +204,7 @@ class InterpolatorTest(TestCase):
     def test_negative_slightly_shifted_voxel_grid_consistency(self):
         """Test interpolator with a slightly shifted voxel grid"""
         grid = (
-            CoordinateSystem.create_voxel(
+            CoordinateSystem.voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
@@ -224,7 +227,7 @@ class InterpolatorTest(TestCase):
 
     def test_strided_grid_consistency(self):
         """Test interpolator with a strided voxel grid"""
-        grid = CoordinateSystem.create_voxel(
+        grid = CoordinateSystem.voxel(
             spatial_shape=(3, 4),
             voxel_size=(2.0, 2.0),
             dtype=float32,
@@ -251,7 +254,7 @@ class InterpolatorTest(TestCase):
     def test_strided_and_shifted_grid_consistency(self):
         """Test interpolator with a strided and shited grid"""
         grid = (
-            CoordinateSystem.create_voxel(
+            CoordinateSystem.voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
@@ -270,7 +273,7 @@ class InterpolatorTest(TestCase):
     def test_strided_and_shifted_grid_consistency_with_extrapolation(self):
         """Test interpolator with an extrapolating grid"""
         grid = (
-            CoordinateSystem.create_voxel(
+            CoordinateSystem.voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
@@ -357,7 +360,7 @@ class InterpolatorTest(TestCase):
     def test_upsampling_consistency(self):
         """Test interpolator with a voxel grid"""
         grid = (
-            CoordinateSystem.create_voxel(
+            CoordinateSystem.voxel(
                 spatial_shape=(3, 4),
                 voxel_size=(1.0, 1.0),
                 dtype=float32,
@@ -382,7 +385,7 @@ class InterpolatorTest(TestCase):
     def test_upsampling_consistency_with_extrapolation(self):
         """Test interpolator with a voxel grid"""
         grid = (
-            CoordinateSystem.create_voxel(
+            CoordinateSystem.voxel(
                 spatial_shape=(8, 9),
                 voxel_size=(1.0, 1.0),
                 dtype=float32,
