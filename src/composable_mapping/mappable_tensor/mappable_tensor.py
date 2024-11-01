@@ -119,8 +119,8 @@ class MappableTensor(BaseTensorLikeWrapper):
     ) -> "MappableTensor":
         """Create a voxel grid with optional mask.
 
-        The voxel grid is not generated right away, but only when the values
-        are generated.
+        The voxel grid is not generated explicitly right away, but only when the
+        values are generated.
 
         Args:
             spatial_shape: Spatial shape of the created grid.
@@ -801,8 +801,8 @@ def voxel_grid(
 ) -> MappableTensor:
     """Create a voxel grid with optional mask.
 
-    The voxel grid is not generated right away, but only when the values
-    are generated.
+    The voxel grid is not generated explicitly right away, but only when the
+    values are generated.
 
     See: `MappableTensor.voxel_grid`.
     """
