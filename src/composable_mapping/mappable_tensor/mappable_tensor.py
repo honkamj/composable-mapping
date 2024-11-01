@@ -24,6 +24,7 @@ from composable_mapping.util import (
 )
 
 from .affine_transformation import (
+    DiagonalAffineTransformation,
     HostDiagonalAffineTransformation,
     IAffineTransformation,
     IdentityAffineTransformation,
@@ -576,7 +577,7 @@ class MappableTensor(BaseTensorLikeWrapper):
                 "Multiply a MappableTensor instead or apply an affine transformation."
             )
         n_dims = self.channels_shape[-1]
-        affine = HostDiagonalAffineTransformation(
+        affine = DiagonalAffineTransformation(
             diagonal=other,
             matrix_shape=(n_dims + 1, n_dims + 1),
             dtype=self.dtype,
@@ -628,7 +629,7 @@ class MappableTensor(BaseTensorLikeWrapper):
                 "Add a MappableTensor instead or apply an affine transformation."
             )
         n_dims = self.channels_shape[-1]
-        affine = HostDiagonalAffineTransformation(
+        affine = DiagonalAffineTransformation(
             translation=other,
             matrix_shape=(n_dims + 1, n_dims + 1),
             dtype=self.dtype,
