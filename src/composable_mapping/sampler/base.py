@@ -772,7 +772,7 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         _output, derivatives = vjp(
             partial_kernel_function,
             inputs=coordinates,
-            v=ones(coordinates.shape),
+            v=ones(coordinates.shape, device=coordinates.device, dtype=coordinates.dtype),
             create_graph=needs_derivatives,
         )
         return derivatives

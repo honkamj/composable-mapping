@@ -18,6 +18,7 @@ from .affine_mapping import Affine, affine, diagonal_affine
 from .composable_mapping import (
     ComposableMapping,
     GridComposableMapping,
+    Identity,
     SamplableVolume,
     concatenate_mappings,
     samplable_volume,
@@ -80,6 +81,7 @@ __all__ = [
     "GenericSeparableDerivativeSampler",
     "GridComposableMapping",
     "GridVisualizationArguments",
+    "Identity",
     "ISampler",
     "ImageVisualizationArguments",
     "ITensorLike",
