@@ -210,12 +210,8 @@ class BaseSeparableSampler(ISampler):
     ) -> "GenericSeparableDerivativeSampler":
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
-            parent_left_limit_kernel=lambda coordinates, spatial_dim, _: self._left_limit_kernel(
-                coordinates, spatial_dim
-            ),
-            parent_right_limit_kernel=lambda coordinates, spatial_dim, _: self._right_limit_kernel(
-                coordinates, spatial_dim
-            ),
+            parent_left_limit_kernel=self._left_limit_kernel,
+            parent_right_limit_kernel=self._right_limit_kernel,
             parent_kernel_support=self._kernel_support,
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
             limit_direction=limit_direction,
@@ -702,8 +698,8 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
     def __init__(
         self,
         spatial_dim: int,
-        parent_left_limit_kernel: Callable[[Tensor, int, bool], Tensor],
-        parent_right_limit_kernel: Callable[[Tensor, int, bool], Tensor],
+        parent_left_limit_kernel: Callable[[Tensor, int], Tensor],
+        parent_right_limit_kernel: Callable[[Tensor, int], Tensor],
         parent_kernel_support: Callable[[int], ISeparableKernelSupport],
         parent_is_interpolating_kernel: Callable[[int], bool],
         limit_direction: Union[LimitDirection, Callable[[int], LimitDirection]],
@@ -741,8 +737,8 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
     ) -> "GenericSeparableDerivativeSampler":
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
-            parent_left_limit_kernel=self._left_limit_kernel_for_derivation,
-            parent_right_limit_kernel=self._right_limit_kernel_for_derivation,
+            parent_left_limit_kernel=self._left_limit_kernel,
+            parent_right_limit_kernel=self._right_limit_kernel,
             parent_kernel_support=self._kernel_support,
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
             limit_direction=limit_direction,
@@ -761,63 +757,39 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
 
     def _derive_function(
         self,
-        kernel_function: Callable[[Tensor, int, bool], Tensor],
+        kernel_function: Callable[[Tensor, int], Tensor],
         coordinates: Tensor,
         spatial_dim: int,
-        needs_derivatives: bool,
     ) -> Tensor:
         def partial_kernel_function(coordinates: Tensor) -> Tensor:
-            return -kernel_function(coordinates, spatial_dim, True)
+            return -kernel_function(coordinates, spatial_dim)
 
         _output, derivatives = vjp(
             partial_kernel_function,
             inputs=coordinates,
             v=ones(coordinates.shape, device=coordinates.device, dtype=coordinates.dtype),
-            create_graph=needs_derivatives,
+            create_graph=coordinates.requires_grad,
         )
         return derivatives
 
-    def _kernel_for_derivation(
+    def _kernel_derivative(
         self,
-        kernel_function: Callable[[Tensor, int, bool], Tensor],
+        kernel_function: Callable[[Tensor, int], Tensor],
         coordinates: Tensor,
         spatial_dim: int,
-        needs_derivatives: bool,
     ) -> Tensor:
         if spatial_dim == self._spatial_dim:
-            return self._derive_function(
-                kernel_function, coordinates, spatial_dim, needs_derivatives=needs_derivatives
-            )
-        return kernel_function(coordinates, spatial_dim, needs_derivatives)
-
-    def _left_limit_kernel_for_derivation(
-        self, coordinates: Tensor, spatial_dim: int, needs_derivatives: bool
-    ) -> Tensor:
-        return self._kernel_for_derivation(
-            kernel_function=self._parent_left_limit_kernel,
-            coordinates=coordinates,
-            spatial_dim=spatial_dim,
-            needs_derivatives=needs_derivatives,
-        )
-
-    def _right_limit_kernel_for_derivation(
-        self, coordinates: Tensor, spatial_dim: int, needs_derivatives: bool
-    ) -> Tensor:
-        return self._kernel_for_derivation(
-            kernel_function=self._parent_right_limit_kernel,
-            coordinates=coordinates,
-            spatial_dim=spatial_dim,
-            needs_derivatives=needs_derivatives,
-        )
+            return self._derive_function(kernel_function, coordinates, spatial_dim)
+        return kernel_function(coordinates, spatial_dim)
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return self._left_limit_kernel_for_derivation(
-            coordinates, spatial_dim, needs_derivatives=False
+        return self._kernel_derivative(
+            self._parent_left_limit_kernel, coordinates=coordinates, spatial_dim=spatial_dim
         )
 
     def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return self._right_limit_kernel_for_derivation(
-            coordinates, spatial_dim, needs_derivatives=False
+        return self._kernel_derivative(
+            self._parent_right_limit_kernel, coordinates=coordinates, spatial_dim=spatial_dim
         )
 
     def sample_values(

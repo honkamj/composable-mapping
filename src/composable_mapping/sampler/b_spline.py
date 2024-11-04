@@ -61,25 +61,25 @@ class CubicSplineSampler(BaseSeparableSampler):
     def _kernel_parts(self, coordinates: Tensor) -> Tuple[Tensor, Tensor]:
         abs_coordinates = coordinates.abs()
         center_part = 2 / 3 + (0.5 * abs_coordinates - 1) * abs_coordinates**2
-        surrounding_parts = -((abs_coordinates - 2) ** 3) / 6
-        return center_part, surrounding_parts
+        surrounding_part = -((abs_coordinates - 2) ** 3) / 6
+        return center_part, surrounding_part
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_parts = self._kernel_parts(coordinates)
+        center_part, surrounding_part = self._kernel_parts(coordinates)
         return (
-            surrounding_parts * ((coordinates > -2) & (coordinates <= 1))
+            surrounding_part * ((coordinates > -2) & (coordinates <= -1))
             + center_part * ((coordinates > -1) & (coordinates <= 0))
             + center_part * ((coordinates > 0) & (coordinates <= 1))
-            + surrounding_parts * ((coordinates > 1) & (coordinates <= 2))
+            + surrounding_part * ((coordinates > 1) & (coordinates <= 2))
         )
 
     def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_parts = self._kernel_parts(coordinates)
+        center_part, surrounding_part = self._kernel_parts(coordinates)
         return (
-            surrounding_parts * ((coordinates >= -2) & (coordinates < 1))
+            surrounding_part * ((coordinates >= -2) & (coordinates < -1))
             + center_part * ((coordinates >= -1) & (coordinates < 0))
             + center_part * ((coordinates >= 0) & (coordinates < 1))
-            + surrounding_parts * ((coordinates >= 1) & (coordinates < 2))
+            + surrounding_part * ((coordinates >= 1) & (coordinates < 2))
         )
 
     def sample_values(

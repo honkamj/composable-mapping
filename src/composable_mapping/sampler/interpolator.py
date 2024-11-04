@@ -205,27 +205,27 @@ class BicubicInterpolator(BaseSeparableSampler):
         abs_coordinates = coordinates.abs()
         alpha = -0.75
         center_part = (alpha + 2) * abs_coordinates**3 - (alpha + 3) * abs_coordinates**2 + 1
-        surrounding_parts = alpha * (
+        surrounding_part = alpha * (
             abs_coordinates**3 - 5 * abs_coordinates**2 + 8 * abs_coordinates - 4
         )
-        return center_part, surrounding_parts
+        return center_part, surrounding_part
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_parts = self._kernel_parts(coordinates)
+        center_part, surrounding_part = self._kernel_parts(coordinates)
         return (
-            surrounding_parts * ((coordinates > -2) & (coordinates <= -1))
+            surrounding_part * ((coordinates > -2) & (coordinates <= -1))
             + center_part * ((coordinates > -1) & (coordinates <= 0))
             + center_part * ((coordinates > 0) & (coordinates <= 1))
-            + surrounding_parts * ((coordinates > 1) & (coordinates <= 2))
+            + surrounding_part * ((coordinates > 1) & (coordinates <= 2))
         )
 
     def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_parts = self._kernel_parts(coordinates)
+        center_part, surrounding_part = self._kernel_parts(coordinates)
         return (
-            surrounding_parts * ((coordinates >= -2) & (coordinates < -1))
+            surrounding_part * ((coordinates >= -2) & (coordinates < -1))
             + center_part * ((coordinates >= -1) & (coordinates < 0))
             + center_part * ((coordinates >= 0) & (coordinates < 1))
-            + surrounding_parts * ((coordinates >= 1) & (coordinates < 2))
+            + surrounding_part * ((coordinates >= 1) & (coordinates < 2))
         )
 
     def sample_values(
