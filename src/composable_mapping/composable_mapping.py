@@ -519,7 +519,7 @@ class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
     """Mapping defined based on a regular grid of values and a sampler turning the
     grid values into a continuously defined mapping.
 
-    Recommended way to create a samplable volume is to use the factory
+    The easiest way to create a samplable volume is to use the factory
     function provided in this module or the class method of this class:
     `samplable_volume`, `SamplableVolume.from_tensor`.
 
@@ -541,6 +541,12 @@ class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
         data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
     ) -> None:
+        if coordinate_system.spatial_shape != data.spatial_shape:
+            raise ValueError(
+                "Coordinate system spatial shape must match the data spatial shape. "
+                f"Coordinate system spatial shape: {coordinate_system.spatial_shape}, "
+                f"data spatial shape: {data.spatial_shape}."
+            )
         self._data = data
         self._coordinate_system = coordinate_system
         self._data_format = data_format
