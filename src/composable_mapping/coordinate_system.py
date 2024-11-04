@@ -721,21 +721,17 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         *,
         downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
-        spatial_shape: Optional[
-            Union[
-                Sequence[Union[IReformattingShapeOption, int]],
-                IReformattingShapeOption,
-                int,
-                Tensor,
-            ]
-        ] = None,
-        reference: Optional[
-            Union[
-                Sequence[Union[IReformattingReferenceOption, Number]],
-                IReformattingReferenceOption,
-                Number,
-            ]
-        ] = None,
+        spatial_shape: Union[
+            Sequence[Union[IReformattingShapeOption, int]],
+            IReformattingShapeOption,
+            int,
+            Tensor,
+        ] = FitToFOVOption(fitting_method="round", fov_convention="full_voxels"),
+        reference: Union[
+            Sequence[Union[IReformattingReferenceOption, Number]],
+            IReformattingReferenceOption,
+            Number,
+        ] = ReferenceOption(position="center"),
         target_reference: Optional[
             Union[
                 Sequence[Union[IReformattingReferenceOption, Number]],
@@ -750,21 +746,17 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         self,
         *,
         voxel_size: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
-        spatial_shape: Optional[
-            Union[
-                Sequence[Union[IReformattingShapeOption, int]],
-                IReformattingShapeOption,
-                int,
-                Tensor,
-            ]
-        ] = None,
-        reference: Optional[
-            Union[
-                Sequence[Union[IReformattingReferenceOption, Number]],
-                IReformattingReferenceOption,
-                Number,
-            ]
-        ] = None,
+        spatial_shape: Union[
+            Sequence[Union[IReformattingShapeOption, int]],
+            IReformattingShapeOption,
+            int,
+            Tensor,
+        ] = FitToFOVOption(fitting_method="round", fov_convention="full_voxels"),
+        reference: Union[
+            Sequence[Union[IReformattingReferenceOption, Number]],
+            IReformattingReferenceOption,
+            Number,
+        ] = ReferenceOption(position="center"),
         target_reference: Optional[
             Union[
                 Sequence[Union[IReformattingReferenceOption, Number]],
@@ -780,21 +772,17 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
-        spatial_shape: Optional[
-            Union[
-                Sequence[Union[IReformattingShapeOption, int]],
-                IReformattingShapeOption,
-                int,
-                Tensor,
-            ]
-        ] = None,
-        reference: Optional[
-            Union[
-                Sequence[Union[IReformattingReferenceOption, Number]],
-                IReformattingReferenceOption,
-                Number,
-            ]
-        ] = None,
+        spatial_shape: Union[
+            Sequence[Union[IReformattingShapeOption, int]],
+            IReformattingShapeOption,
+            int,
+            Tensor,
+        ] = FitToFOVOption(fitting_method="round", fov_convention="full_voxels"),
+        reference: Union[
+            Sequence[Union[IReformattingReferenceOption, Number]],
+            IReformattingReferenceOption,
+            Number,
+        ] = ReferenceOption(position="center"),
         target_reference: Optional[
             Union[
                 Sequence[Union[IReformattingReferenceOption, Number]],
@@ -843,11 +831,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         downsampling_factor = self._as_downsampling_factor(
             original_voxel_size, downsampling_factor, upsampling_factor, voxel_size
         )
-        if spatial_shape is None:
-            spatial_shape = FitToFOVOption(fitting_method="round", fov_convention="full_voxels")
         target_shape = self._get_target_shape(downsampling_factor, spatial_shape)
-        if reference is None:
-            reference = ReferenceOption(position="center")
         source_reference_in_voxel_coordinates = original_voxel_size.new_tensor(
             self._get_reference_in_voxel_coordinates(reference, self._spatial_shape)
         )

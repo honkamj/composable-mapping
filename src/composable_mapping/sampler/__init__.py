@@ -11,6 +11,7 @@ from .default import (
 )
 from .interface import DataFormat, ISampler, LimitDirection
 from .interpolator import BicubicInterpolator, LinearInterpolator, NearestInterpolator
+from .scaling_and_squaring import ScalingAndSquaring
 
 __all__ = [
     "BaseSeparableSampler",
@@ -22,6 +23,7 @@ __all__ = [
     "LimitDirection",
     "LinearInterpolator",
     "NearestInterpolator",
+    "ScalingAndSquaring",
     "clear_default_sampler",
     "default_sampler",
     "get_default_sampler",

@@ -169,7 +169,7 @@ class ComposableMapping(ITensorLike, ABC):
         """
 
     @abstractmethod
-    def invert(self, **arguments) -> "ComposableMapping":
+    def invert(self) -> "ComposableMapping":
         """Invert the mapping.
 
         Args:
@@ -182,7 +182,6 @@ class ComposableMapping(ITensorLike, ABC):
     def sample_to(
         self,
         target: ICoordinateSystemContainer,
-        *,
         data_format: DataFormat = DataFormat.world_coordinates(),
     ) -> MappableTensor:
         """Evaluate the mapping at the coordinates defined by the target.
@@ -206,7 +205,6 @@ class ComposableMapping(ITensorLike, ABC):
     def resample_to(
         self,
         target: ICoordinateSystemContainer,
-        *,
         data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional["ISampler"] = None,
     ) -> "SamplableVolume":
@@ -306,9 +304,12 @@ class ComposableMapping(ITensorLike, ABC):
 class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
     """Base class for composable mappings coupled with a coordinate system."""
 
+    @abstractmethod
+    def invert(self) -> "GridComposableMapping":
+        pass
+
     def sample(
         self,
-        *,
         data_format: DataFormat = DataFormat.world_coordinates(),
     ) -> MappableTensor:
         """Evaluate the mapping at the coordinates contained by the mapping.
@@ -324,7 +325,6 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
 
     def resample(
         self,
-        *,
         data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
     ) -> "SamplableVolume":
@@ -376,7 +376,7 @@ class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMappin
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
         return self._mapping(coordinates)
 
-    def invert(self, **arguments) -> ComposableMapping:
+    def invert(self, **arguments) -> GridComposableMapping:
         return GridComposableMappingDecorator(
             self._mapping.invert(**arguments), self._coordinate_system
         )
@@ -537,7 +537,6 @@ class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
         self,
         data: MappableTensor,
         coordinate_system: "CoordinateSystem",
-        *,
         data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
     ) -> None:
@@ -556,7 +555,6 @@ class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
         self,
         data: Tensor,
         coordinate_system: "CoordinateSystem",
-        *,
         mask: Optional[Tensor] = None,
         data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
@@ -635,7 +633,7 @@ class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
             sampled = self._coordinate_system.from_voxel_coordinates(sampled)
         return sampled
 
-    def invert(self, **arguments) -> ComposableMapping:
+    def invert(self, **arguments) -> "SamplableVolume":
         return SamplableVolume(
             data=self._data,
             coordinate_system=self._coordinate_system,
@@ -656,7 +654,6 @@ def samplable_volume(
     data: Tensor,
     coordinate_system: "CoordinateSystem",
     mask: Optional[Tensor] = None,
-    *,
     data_format: DataFormat = DataFormat.world_coordinates(),
     sampler: Optional[ISampler] = None,
 ) -> GridComposableMapping:

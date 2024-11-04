@@ -7,6 +7,7 @@ from torch import Tensor
 from composable_mapping.mappable_tensor import MappableTensor, voxel_grid
 from composable_mapping.util import get_spatial_shape
 
+from .default import get_sampler
 from .interface import DataFormat, ISampler, LimitDirection
 
 if TYPE_CHECKING:
@@ -29,12 +30,12 @@ class ScalingAndSquaring(ISampler):
 
     def __init__(
         self,
-        sampler: ISampler,
-        steps: int,
+        steps: int = 7,
+        sampler: Optional[ISampler] = None,
         inverse: bool = False,
         mask_extrapolated_regions_for_empty_volume_mask: bool = True,
     ) -> None:
-        self._sampler = sampler
+        self._sampler = get_sampler(sampler)
         self._steps = steps
         self._inverse = inverse
         self._mask_extrapolated_regions_for_empty_volume_mask = (
@@ -66,7 +67,9 @@ class ScalingAndSquaring(ISampler):
         arguments: Optional[Mapping[str, Any]] = None,
     ) -> ISampler:
         if data_format.coordinate_type == "voxel" and data_format.representation == "displacements":
-            return ScalingAndSquaring(self._sampler, self._steps, inverse=not self._inverse)
+            return ScalingAndSquaring(
+                steps=self._steps, sampler=self._sampler, inverse=not self._inverse
+            )
         raise ValueError(
             "The sampler has been currently implemented only for voxel displacements data format."
         )
