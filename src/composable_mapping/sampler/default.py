@@ -22,7 +22,11 @@ def get_default_sampler() -> ISampler:
 
 
 def set_default_sampler(sampler: Optional[ISampler]) -> None:
-    """Set default sampler"""
+    """Set default sampler
+
+    Args:
+        sampler: Sampler to set as default.
+    """
     global _DEFAULT_SAMPLER  # pylint: disable=global-statement
     _DEFAULT_SAMPLER = sampler
 

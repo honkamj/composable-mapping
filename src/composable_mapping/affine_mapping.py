@@ -14,6 +14,7 @@ from .mappable_tensor import (
     IdentityAffineTransformation,
     MappableTensor,
 )
+from .sampler.interface import DataFormat
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 
 
@@ -103,6 +104,10 @@ class Affine(BaseTensorLikeWrapper, ComposableMapping):
             Identity affine mapping.
         """
         return cls(IdentityAffineTransformation(n_dims, dtype=dtype, device=device))
+
+    @property
+    def default_sampling_data_format(self) -> DataFormat:
+        return DataFormat.voxel_displacements()
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
         return masked_coordinates.transform(self.transformation)
