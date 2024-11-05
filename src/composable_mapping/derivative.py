@@ -4,7 +4,7 @@ from typing import Optional
 
 from .composable_mapping import GridComposableMapping, ICoordinateSystemContainer
 from .mappable_tensor import MappableTensor, stack_mappable_tensors
-from .sampler import ISampler, LimitDirection, get_sampler
+from .sampler import DataFormat, ISampler, LimitDirection, get_sampler
 
 
 def estimate_spatial_derivatives(
@@ -37,6 +37,7 @@ def estimate_spatial_derivatives(
     return (
         mapping.resample_to(
             mapping,
+            data_format=DataFormat.world_coordinates(),
             sampler=sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
         ).sample_to(target)
         / target.coordinate_system.grid_spacing()[spatial_dim]
@@ -70,6 +71,7 @@ def estimate_spatial_jacobian_matrices(
         sampler = get_sampler(sampler)
     resampled_mapping = mapping.resample_to(
         mapping,
+        data_format=DataFormat.world_coordinates(),
     )
     grid_spacing = target.coordinate_system.grid_spacing()
     n_dims = len(target.coordinate_system.spatial_shape)
