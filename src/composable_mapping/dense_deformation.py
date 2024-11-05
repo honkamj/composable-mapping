@@ -10,7 +10,7 @@ from torch import ge, gt, le, linspace, lt, meshgrid, stack, tensor
 from torch.jit import script
 from torch.nn.functional import grid_sample
 
-from composable_mapping.util import move_channels_first, move_channels_last
+from .util import move_channels_first, move_channels_last
 
 
 def generate_voxel_coordinate_grid(

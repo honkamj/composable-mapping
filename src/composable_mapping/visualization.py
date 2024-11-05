@@ -11,14 +11,14 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import ones, tensor
 
-from composable_mapping.composable_mapping import (
+from .composable_mapping import (
     ComposableMapping,
     GridComposableMapping,
     ICoordinateSystemContainer,
 )
-
 from .interface import Number
 from .mappable_tensor import MappableTensor
+from .sampler import DataFormat
 from .util import get_spatial_dims, get_spatial_shape, to_numpy
 
 
@@ -280,7 +280,7 @@ def visualize_as_deformed_grid(
     arguments: Optional[GridVisualizationArguments] = None,
 ):
     """Visualize a grid mapping as a grid"""
-    return visualize_grid(mapping.sample(), arguments=arguments)
+    return visualize_to_as_deformed_grid(mapping, target=mapping, arguments=arguments)
 
 
 def visualize_to_as_deformed_grid(
@@ -289,4 +289,6 @@ def visualize_to_as_deformed_grid(
     arguments: Optional[GridVisualizationArguments] = None,
 ):
     """Visualize a mapping to a target coordinate system as a grid"""
-    return visualize_grid(mapping.sample_to(target), arguments=arguments)
+    return visualize_grid(
+        mapping.sample_to(target, data_format=DataFormat.world_coordinates()), arguments=arguments
+    )
