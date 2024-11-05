@@ -88,7 +88,7 @@ class GridVisualizationArguments:
         self,
         batch_index: int = 0,
         figure_height: Number = 5,
-        emphasize_every_nth_line: Optional[Tuple[int, int]] = None,
+        emphasize_every_nth_line: Optional[Tuple[int, int]] = (5, 2),
         plot_kwargs: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.batch_index = batch_index
