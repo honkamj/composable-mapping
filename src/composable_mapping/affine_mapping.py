@@ -6,14 +6,14 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 
-from .composable_mapping import ComposableMapping
-from .mappable_tensor import (
+from .affine_transformation import (
     AffineTransformation,
     DiagonalAffineTransformation,
     IAffineTransformation,
     IdentityAffineTransformation,
-    MappableTensor,
 )
+from .composable_mapping import ComposableMapping
+from .mappable_tensor import MappableTensor
 from .sampler.interface import DataFormat
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 

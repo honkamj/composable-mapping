@@ -17,9 +17,9 @@ from typing import (
 
 from torch import Tensor
 
+from .affine_transformation import IAffineTransformation
 from .interface import Number
 from .mappable_tensor import (
-    IAffineTransformation,
     MappableTensor,
     concatenate_mappable_tensors,
     mappable,

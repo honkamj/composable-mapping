@@ -11,15 +11,14 @@ from torch import empty, tensor
 from torch.nn import Module
 
 from .affine_mapping import Affine
-from .composable_mapping import ICoordinateSystemContainer
-from .interface import Number
-from .mappable_tensor import (
+from .affine_transformation import (
     HostAffineTransformation,
     HostDiagonalAffineTransformation,
     IHostAffineTransformation,
-    MappableTensor,
-    voxel_grid,
 )
+from .composable_mapping import ICoordinateSystemContainer
+from .interface import Number
+from .mappable_tensor import MappableTensor, voxel_grid
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 from .util import (
     broadcast_shapes_in_parts_splitted,

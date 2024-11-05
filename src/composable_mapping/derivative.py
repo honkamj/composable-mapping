@@ -2,46 +2,18 @@
 
 from typing import Optional
 
+from torch import matmul
+
 from .composable_mapping import GridComposableMapping, ICoordinateSystemContainer
 from .mappable_tensor import MappableTensor, stack_mappable_tensors
 from .sampler import DataFormat, ISampler, LimitDirection, get_sampler
-
-
-def estimate_spatial_derivatives(
-    mapping: GridComposableMapping,
-    spatial_dim: int,
-    target: Optional[ICoordinateSystemContainer] = None,
-    limit_direction: LimitDirection = LimitDirection.average(),
-    sampler: Optional[ISampler] = None,
-) -> MappableTensor:
-    """Estimate spatial derivatives of a grid composable mapping.
-
-    Derivatives are computed with respect to space rotated according to the
-    coordinate system of the target.
-
-    Args:
-        mapping: Grid composable mapping
-        spatial_dim: Spatial dimension along which to compute the derivative
-        target: Target locations at which to estimate the derivative.
-        limit_direction: Direction in which to compute the derivative
-        sampler: Sampler to use for the derivative estimation, e.g. LinearInterpolator
-            corresponds to finite differences.
-
-    Returns:
-        MappableTensor with the estimated derivatives over spatial locations.
-    """
-    if target is None:
-        target = mapping.coordinate_system
-    if sampler is None:
-        sampler = get_sampler(sampler)
-    return (
-        mapping.resample_to(
-            mapping,
-            data_format=DataFormat.world_coordinates(),
-            sampler=sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
-        ).sample_to(target)
-        / target.coordinate_system.grid_spacing()[spatial_dim]
-    )
+from .util import (
+    broadcast_tensors_in_parts,
+    get_batch_shape,
+    move_channels_first,
+    move_channels_last,
+    split_shape,
+)
 
 
 def estimate_spatial_jacobian_matrices(
@@ -50,15 +22,17 @@ def estimate_spatial_jacobian_matrices(
     limit_direction: LimitDirection = LimitDirection.average(),
     sampler: Optional[ISampler] = None,
 ) -> MappableTensor:
-    """Estimate spatial Jacobian matrices of a grid composable mapping
+    """Estimate spatial Jacobian matrices of a grid composable mapping.
 
-    Jacobian matrices are computed with respect to space rotated according to the
-    coordinate system of the target.
+    Estimation is done based on samples of the mapping at the grid defined by
+    the coordinate system of the mapping.
 
     Args:
         mapping: Grid composable mapping to estimate the Jacobian matrices for.
         target: Target locations at which to estimate the Jacobian matrices.
-        limit_direction: Direction in which to compute the derivatives.
+        limit_direction: Direction in which to compute the derivatives, e.g. average
+            and LinearInterpolator corresponds to central finite differences when
+            estimated at the grid points.
         sampler: Sampler to use for the derivative estimation, e.g. LinearInterpolator
             corresponds to finite differences.
 
@@ -73,15 +47,63 @@ def estimate_spatial_jacobian_matrices(
         mapping,
         data_format=DataFormat.world_coordinates(),
     )
-    grid_spacing = target.coordinate_system.grid_spacing()
     n_dims = len(target.coordinate_system.spatial_shape)
-    return stack_mappable_tensors(
+    sampled_jacobians = stack_mappable_tensors(
         *(
             resampled_mapping.modify_sampler(
                 sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
             ).sample_to(target)
-            / grid_spacing[spatial_dim]
             for spatial_dim in range(n_dims)
         ),
         channel_index=-1,
+    )
+    jacobian_matrices, jacobians_mask = sampled_jacobians.generate()
+    target_jacobian_matrix_shape = sampled_jacobians.channels_shape[:-1] + (
+        len(target.coordinate_system.spatial_shape),
+    )
+    jacobian_matrices = jacobian_matrices.reshape(
+        sampled_jacobians.batch_shape
+        + (-1, sampled_jacobians.channels_shape[-1])
+        + sampled_jacobians.spatial_shape
+    )
+    coordinate_system_affine_transformation = (
+        target.coordinate_system.to_voxel_coordinates.as_affine_transformation()
+    )
+    coordinate_system_diagonal_affine_matrix = coordinate_system_affine_transformation.as_diagonal()
+    if coordinate_system_diagonal_affine_matrix is None:
+        coordinate_system_affine_matrix = coordinate_system_affine_transformation.as_matrix()
+        jacobian_matrices, coordinate_system_affine_matrix = broadcast_tensors_in_parts(
+            jacobian_matrices,
+            coordinate_system_affine_matrix,
+            broadcast_channels=False,
+            n_channel_dims=(2, 2),
+        )
+        composed_jacobian_matrices = move_channels_first(
+            matmul(
+                move_channels_last(jacobian_matrices, n_channel_dims=2),
+                move_channels_last(coordinate_system_affine_matrix, n_channel_dims=2)[
+                    ..., :-1, :-1
+                ],
+            ),
+            n_channel_dims=2,
+        )
+    else:
+        jacobian_matrices, coordinate_system_diagonal = broadcast_tensors_in_parts(
+            jacobian_matrices,
+            coordinate_system_diagonal_affine_matrix.generate_diagonal(),
+            broadcast_channels=False,
+            n_channel_dims=(2, 1),
+        )
+        n_batch_dims = len(get_batch_shape(coordinate_system_diagonal.shape, n_channel_dims=1))
+        composed_jacobian_matrices = (
+            jacobian_matrices * coordinate_system_diagonal[n_batch_dims * (slice(None),) + (None,)]
+        )
+    batch_shape, _, spatial_shape = split_shape(jacobian_matrices.shape, n_channel_dims=2)
+    composed_jacobian_matrices = composed_jacobian_matrices.reshape(
+        batch_shape + target_jacobian_matrix_shape + spatial_shape
+    )
+    return MappableTensor(
+        composed_jacobian_matrices,
+        mask=jacobians_mask,
+        n_channel_dims=sampled_jacobians.n_channel_dims,
     )

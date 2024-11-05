@@ -24,15 +24,14 @@ from torch import empty, linspace, long, ones, tensor, zeros
 from torch.autograd.functional import vjp
 from torch.nn.functional import conv1d, conv_transpose1d
 
-from composable_mapping.mappable_tensor import (
+from composable_mapping.affine_transformation import (
     DiagonalAffineMatrixDefinition,
     HostAffineTransformation,
     HostDiagonalAffineTransformation,
     IdentityAffineTransformation,
     IHostAffineTransformation,
-    MappableTensor,
-    mappable,
 )
+from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import (
     crop_and_then_pad_spatial,
     get_spatial_dims,

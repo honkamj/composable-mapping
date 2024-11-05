@@ -5,9 +5,7 @@ from unittest import TestCase
 from torch import eye, float32, randn
 from torch.testing import assert_close
 
-from composable_mapping.mappable_tensor.affine_transformation import (
-    AffineTransformation,
-)
+from composable_mapping.affine_transformation import AffineTransformation
 from composable_mapping.mappable_tensor.grid import GridDefinition
 from composable_mapping.mappable_tensor.mappable_tensor import MappableTensor
 from composable_mapping.util import (

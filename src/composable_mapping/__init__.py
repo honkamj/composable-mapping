@@ -30,7 +30,7 @@ from .coordinate_system import (
     ReferenceOption,
     RetainShapeOption,
 )
-from .derivative import estimate_spatial_derivatives, estimate_spatial_jacobian_matrices
+from .derivative import estimate_spatial_jacobian_matrices
 from .interface import Number
 from .mappable_tensor import (
     MappableTensor,
@@ -97,12 +97,12 @@ __all__ = [
     "SamplableVolume",
     "ScalingAndSquaring",
     "affine",
+    "affine_transformation",
     "clear_default_sampler",
     "concatenate_mappings",
     "concatenate_mappable_tensors",
     "default_sampler",
     "diagonal_affine",
-    "estimate_spatial_derivatives",
     "estimate_spatial_jacobian_matrices",
     "get_default_sampler",
     "get_sampler",

@@ -8,6 +8,12 @@ from torch import device as torch_device
 from torch import dtype as torch_dtype
 from torch import ones, zeros
 
+from composable_mapping.affine_transformation import (
+    DiagonalAffineTransformation,
+    HostDiagonalAffineTransformation,
+    IAffineTransformation,
+    IdentityAffineTransformation,
+)
 from composable_mapping.interface import Number
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
@@ -23,12 +29,6 @@ from composable_mapping.util import (
     split_shape,
 )
 
-from .affine_transformation import (
-    DiagonalAffineTransformation,
-    HostDiagonalAffineTransformation,
-    IAffineTransformation,
-    IdentityAffineTransformation,
-)
 from .grid import GridDefinition
 
 REDUCE_TO_SLICE_TOLERANCE = 1e-5

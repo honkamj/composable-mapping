@@ -20,9 +20,9 @@ from composable_mapping import (
     mappable,
     voxel_grid,
 )
-from composable_mapping.mappable_tensor import HostAffineTransformation
-from composable_mapping.mappable_tensor.affine_transformation import (
+from composable_mapping.affine_transformation import (
     AffineTransformation,
+    HostAffineTransformation,
 )
 from composable_mapping.sampler.base import (
     BaseSeparableSampler,

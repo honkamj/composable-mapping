@@ -1,4 +1,4 @@
-"""Affine transformation implementations."""
+"""Affine transformations on PyTorch tensors."""
 
 from abc import abstractmethod
 from typing import Mapping, Optional, Sequence, Tuple, Union, overload

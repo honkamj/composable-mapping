@@ -7,6 +7,14 @@ from torch import Tensor, broadcast_shapes, cat
 from torch import device as torch_device
 from torch import diag, tensor, zeros
 
+from composable_mapping.affine_transformation import (
+    HostAffineTransformation,
+    HostDiagonalAffineTransformation,
+    IAffineTransformation,
+)
+from composable_mapping.affine_transformation.matrix import (
+    convert_to_homogenous_coordinates,
+)
 from composable_mapping.dense_deformation import generate_voxel_coordinate_grid
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
@@ -16,13 +24,6 @@ from composable_mapping.util import (
     has_spatial_dims,
     is_broadcastable_to,
 )
-
-from .affine_transformation import (
-    HostAffineTransformation,
-    HostDiagonalAffineTransformation,
-    IAffineTransformation,
-)
-from .matrix import convert_to_homogenous_coordinates
 
 
 class GridDefinition(BaseTensorLikeWrapper):

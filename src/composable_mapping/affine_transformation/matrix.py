@@ -1,4 +1,4 @@
-"""Core affine transformation matrix operations."""
+"""Core matrix operations for generic affine transformations."""
 
 from typing import Sequence
 

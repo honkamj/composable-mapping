@@ -1,4 +1,4 @@
-"""Core matrix operations for diagonal matrices."""
+"""Core matrix operations for diagonal affine transformations."""
 
 from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 
