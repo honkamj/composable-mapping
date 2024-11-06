@@ -656,12 +656,13 @@ class BaseSeparableSampler(ISampler):
         if data_format.coordinate_type == "voxel" and data_format.representation == "displacements":
             if arguments is None:
                 arguments = {}
+            fixed_point_inversion_arguments = arguments.get("fixed_point_inversion_arguments", {})
             return FixedPointInverseSampler(
                 self,
-                forward_solver=arguments.get("forward_solver"),
-                backward_solver=arguments.get("backward_solver"),
-                forward_dtype=arguments.get("forward_dtype"),
-                backward_dtype=arguments.get("backward_dtype"),
+                forward_solver=fixed_point_inversion_arguments.get("forward_solver"),
+                backward_solver=fixed_point_inversion_arguments.get("backward_solver"),
+                forward_dtype=fixed_point_inversion_arguments.get("forward_dtype"),
+                backward_dtype=fixed_point_inversion_arguments.get("backward_dtype"),
                 mask_extrapolated_regions_for_empty_volume_mask=(
                     self._mask_extrapolated_regions_for_empty_volume_mask
                 ),
