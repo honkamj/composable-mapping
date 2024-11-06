@@ -1,6 +1,6 @@
 """Affine transformation acting on mappable tensors."""
 
-from typing import Mapping, Optional, Sequence
+from typing import Mapping, Optional, Sequence, cast
 
 from torch import Tensor
 from torch import device as torch_device
@@ -121,9 +121,7 @@ class Affine(BaseTensorLikeWrapper, ComposableMapping):
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "Affine":
-        if not isinstance(children["transformation"], IAffineTransformation):
-            raise ValueError("Child of a composable affine must be an affine transformation")
-        return Affine(children["transformation"])
+        return Affine(cast(IAffineTransformation, children["transformation"]))
 
     def invert(self, **arguments) -> ComposableMapping:
         return Affine(self.transformation.invert())

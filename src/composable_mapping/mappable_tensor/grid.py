@@ -1,7 +1,7 @@
 """Defines a voxel grid with given shape transformed by given affine
 transformation."""
 
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Tuple, cast
 
 from torch import Tensor, broadcast_shapes, cat
 from torch import device as torch_device
@@ -53,13 +53,9 @@ class GridDefinition(BaseTensorLikeWrapper):
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "GridDefinition":
-        if "affine_transformation" in children or not isinstance(
-            children["affine_transformation"], IAffineTransformation
-        ):
-            raise ValueError("Invalid children for grid")
         return GridDefinition(
             spatial_shape=self._spatial_shape,
-            affine_transformation=children["affine_transformation"],
+            affine_transformation=cast(IAffineTransformation, children["affine_transformation"]),
         )
 
     def generate(self) -> Tensor:

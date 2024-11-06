@@ -1,6 +1,16 @@
 """Core mappable tensor class and related functions."""
 
-from typing import Dict, Literal, Mapping, Optional, Sequence, Tuple, Union, overload
+from typing import (
+    Dict,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    cast,
+    overload,
+)
 
 from torch import Tensor
 from torch import bool as torch_bool
@@ -185,19 +195,15 @@ class MappableTensor(BaseTensorLikeWrapper):
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "MappableTensor":
+        affine_transformation: Optional[IAffineTransformation]
         if "affine_transformation" in children:
-            if not isinstance(children["affine_transformation"], IAffineTransformation):
-                raise ValueError("Invalid children for mappable tensor")
-            affine_transformation: Optional[IAffineTransformation] = children[
-                "affine_transformation"
-            ]
+            affine_transformation = cast(IAffineTransformation, children["affine_transformation"])
 
         else:
             affine_transformation = None
+        grid: Optional[GridDefinition]
         if "grid" in children:
-            if not isinstance(children["grid"], GridDefinition):
-                raise ValueError("Invalid children for mappable tensor")
-            grid: Optional[GridDefinition] = children["grid"]
+            grid = cast(GridDefinition, children["grid"])
         else:
             grid = None
         return MappableTensor(

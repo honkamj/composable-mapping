@@ -1,7 +1,7 @@
 """Affine transformations on PyTorch tensors."""
 
 from abc import abstractmethod
-from typing import Mapping, Optional, Sequence, Tuple, Union, overload
+from typing import Mapping, Optional, Sequence, Tuple, Union, cast, overload
 
 from torch import Tensor, broadcast_shapes
 from torch import device as torch_device
@@ -730,9 +730,9 @@ class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTran
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "DiagonalAffineTransformation":
-        if not isinstance(children["matrix_definition"], DiagonalAffineMatrixDefinition):
-            raise ValueError("Invalid children for DiagonalAffineTransformation")
-        return self.from_definition(children["matrix_definition"])
+        return self.from_definition(
+            cast(DiagonalAffineMatrixDefinition, children["matrix_definition"])
+        )
 
     @property
     def shape(self) -> Sequence[int]:
@@ -832,10 +832,8 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
     ) -> "HostDiagonalAffineTransformation":
-        if not isinstance(children["matrix_definition"], DiagonalAffineMatrixDefinition):
-            raise ValueError("Invalid children for HostDiagonalAffineTransformation")
         return HostDiagonalAffineTransformation.from_definition(
-            children["matrix_definition"], self.device
+            cast(DiagonalAffineMatrixDefinition, children["matrix_definition"]), self.device
         )
 
     def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
