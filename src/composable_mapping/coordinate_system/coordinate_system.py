@@ -1,7 +1,5 @@
-"""Coordinate system."""
+"""Coordinate system defining locations on voxel grid in world coordinates."""
 
-# pylint:disable=too-many-lines
-from abc import ABC, abstractmethod
 from typing import Any, List, Mapping, Optional, Sequence, Tuple, Union, cast, overload
 
 from torch import Tensor
@@ -10,148 +8,32 @@ from torch import dtype as torch_dtype
 from torch import empty, tensor
 from torch.nn import Module
 
-from .affine_mapping import Affine
-from .affine_transformation import (
+from composable_mapping.affine_mapping import Affine
+from composable_mapping.affine_transformation import (
     HostAffineTransformation,
     HostDiagonalAffineTransformation,
     IHostAffineTransformation,
 )
-from .composable_mapping import ICoordinateSystemContainer
-from .interface import Number
-from .mappable_tensor import MappableTensor, voxel_grid
-from .tensor_like import BaseTensorLikeWrapper, ITensorLike
-from .util import (
+from composable_mapping.composable_mapping import ICoordinateSystemContainer
+from composable_mapping.interface import Number
+from composable_mapping.mappable_tensor import MappableTensor, voxel_grid
+from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.util import (
     broadcast_shapes_in_parts_splitted,
     broadcast_tensors_in_parts,
     broadcast_to_in_parts,
-    ceildiv,
     get_channel_dims,
     get_channels_shape,
     get_spatial_shape,
     move_channels_last,
 )
 
-
-class IReformattingShapeOption(ABC):
-    """Option for determining a reformatted target shape based on an original
-    shape and a downsampling factor."""
-
-    @abstractmethod
-    def to_target_size(self, original_size: int, downsampling_factor: float) -> int:
-        """Return a target size given an original size and a downsampling factor.
-
-        Args:
-            original_size: Original size of the dimension.
-            downsampling_factor: Downsampling factor of the dimension during reformatting.
-
-        Returns:
-            Target size of the dimension.
-        """
-
-
-class RetainShapeOption(IReformattingShapeOption):
-    """Option for retaining an original shape during reformatting."""
-
-    def to_target_size(self, original_size: int, downsampling_factor: float) -> int:
-        return original_size
-
-
-class FitToFOVOption(IReformattingShapeOption):
-    """Option for reformatting target shape to fit the field of view size.
-
-    Arguments:
-        fitting_method: Method for fitting the field of view size, either "round",
-            "floor", or "ceil".
-        fov_convention: Convention for defining the field of view, either "full_voxels"
-            or "voxel_centers". If voxels are seens as cubes with the value at the
-            center, the convention "full voxels" includes the full cubes in the field
-            of view, while the convention "voxel_centers" includes only the centers.
-            The latter results in a field of view that is one voxel smaller in each
-            dimension. Similar to the align_corners option in
-            torch.nn.functional.grid_sample
-    """
-
-    DIVISION_FUNCTIONS = {
-        "round": lambda x, y: int(round(x / y)),
-        "floor": lambda x, y: int(x // y),
-        "ceil": lambda x, y: int(ceildiv(x, y)),
-    }
-
-    def __init__(self, fitting_method: str = "round", fov_convention: str = "full_voxels") -> None:
-        if fitting_method not in ("round", "floor", "ceil"):
-            raise ValueError(f"Unknown fitting method ({fitting_method})")
-        if fov_convention not in ("full_voxels", "voxel_centers"):
-            raise ValueError(f"Unknown fov convention ({fov_convention}).")
-        self._division_function = self.DIVISION_FUNCTIONS[fitting_method]
-        self._fov_convention = fov_convention
-
-    def to_target_size(self, original_size: int, downsampling_factor: float) -> int:
-        if self._fov_convention == "full_voxels":
-            return self._division_function(original_size, downsampling_factor)
-        elif self._fov_convention == "voxel_centers":
-            return self._division_function(original_size - 1, downsampling_factor) + 1
-        raise ValueError(f"Unknown fov convention ({self._fov_convention}).")
-
-
-class IReformattingReferenceOption(ABC):
-    """Option for defining reference point which will be aligned between the
-    original and the reformatted coordinates."""
-
-    @abstractmethod
-    def get_voxel_coordinate(self, size: int) -> float:
-        """Get a voxel coordinate corresponding to the reference position with
-        a given dimension size.
-
-        Args:
-            size: Size of the dimension
-
-        Returns:
-            Voxel coordinate corresponding to the reference position along the dimension.
-        """
-
-
-class ReferenceOption(IReformattingReferenceOption):
-    """Option for defining reformatting reference point.
-
-    Arguments:
-        position: Position of the reference point, either "left", "right", or "center".
-        fov_convention: Convention for defining the field of view, either "full_voxels"
-            or "voxel_centers". If voxels are seens as cubes with the value at the
-            center, the convention "full voxels" includes the full cubes in the field
-            of view, while the convention "voxel_centers" includes only the centers.
-            The latter results in a field of view that is one voxel smaller in each
-            dimension. Similar to the align_corners option in
-            torch.nn.functional.grid_sample
-    """
-
-    def __init__(
-        self,
-        position: str = "left",
-        fov_convention: str = "full_voxels",
-    ) -> None:
-        if position not in ("left", "right", "center"):
-            raise ValueError(f"Unknown position {position}")
-        if fov_convention not in ("full_voxels", "voxel_centers"):
-            raise ValueError(f"Unknown fov convention {fov_convention}")
-        self._position = position
-        self._fov_convention = fov_convention
-
-    def get_voxel_coordinate(self, size: int) -> float:
-        if self._position == "center":
-            return (size - 1) / 2
-        if self._fov_convention == "full_voxels":
-            if self._position == "left":
-                return -0.5
-            if self._position == "right":
-                return size - 0.5
-        elif self._fov_convention == "voxel_centers":
-            if self._position == "left":
-                return 0
-            if self._position == "right":
-                return size - 1
-        raise ValueError(
-            "Unknown position or fov convention " f"({self._position} and {self._fov_convention})"
-        )
+from .reformatting_reference import Center, ReformattingReference
+from .reformatting_spatial_shape import (
+    OriginalFOV,
+    OriginalShape,
+    ReformattingSpatialShape,
+)
 
 
 class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper):
@@ -266,8 +148,8 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         target_voxel_size = 2 / fov_sizes[max_fov_size_index] * relative_voxel_sizes
         return centered.reformat(
             voxel_size=target_voxel_size,
-            reference=ReferenceOption(position="center"),
-            spatial_shape=RetainShapeOption(),
+            reference=Center(),
+            spatial_shape=OriginalShape(),
         )
 
     @classmethod
@@ -360,8 +242,8 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         target_voxel_size = 2 / fov_sizes
         return centered.reformat(
             voxel_size=target_voxel_size,
-            reference=ReferenceOption(position="center"),
-            spatial_shape=RetainShapeOption(),
+            reference=Center(),
+            spatial_shape=OriginalShape(),
         )
 
     @classmethod
@@ -721,20 +603,20 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         downsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         spatial_shape: Union[
-            Sequence[Union[IReformattingShapeOption, int]],
-            IReformattingShapeOption,
+            Sequence[Union[ReformattingSpatialShape, int]],
+            ReformattingSpatialShape,
             int,
             Tensor,
-        ] = FitToFOVOption(fitting_method="round", fov_convention="full_voxels"),
+        ] = OriginalFOV(fitting_method="round", fov_convention="full_voxels"),
         reference: Union[
-            Sequence[Union[IReformattingReferenceOption, Number]],
-            IReformattingReferenceOption,
+            Sequence[Union[ReformattingReference, Number]],
+            ReformattingReference,
             Number,
-        ] = ReferenceOption(position="center"),
+        ] = Center(),
         target_reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, Number]],
-                IReformattingReferenceOption,
+                Sequence[Union[ReformattingReference, Number]],
+                ReformattingReference,
                 Number,
             ]
         ] = None,
@@ -746,20 +628,20 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         *,
         voxel_size: Optional[Union[Sequence[Union[float, int]], float, int, Tensor]] = None,
         spatial_shape: Union[
-            Sequence[Union[IReformattingShapeOption, int]],
-            IReformattingShapeOption,
+            Sequence[Union[ReformattingSpatialShape, int]],
+            ReformattingSpatialShape,
             int,
             Tensor,
-        ] = FitToFOVOption(fitting_method="round", fov_convention="full_voxels"),
+        ] = OriginalFOV(fitting_method="round", fov_convention="full_voxels"),
         reference: Union[
-            Sequence[Union[IReformattingReferenceOption, Number]],
-            IReformattingReferenceOption,
+            Sequence[Union[ReformattingReference, Number]],
+            ReformattingReference,
             Number,
-        ] = ReferenceOption(position="center"),
+        ] = Center(),
         target_reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, Number]],
-                IReformattingReferenceOption,
+                Sequence[Union[ReformattingReference, Number]],
+                ReformattingReference,
                 Number,
             ]
         ] = None,
@@ -772,20 +654,20 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         upsampling_factor: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         voxel_size: Optional[Union[Sequence[Number], Number, Tensor]] = None,
         spatial_shape: Union[
-            Sequence[Union[IReformattingShapeOption, int]],
-            IReformattingShapeOption,
+            Sequence[Union[ReformattingSpatialShape, int]],
+            ReformattingSpatialShape,
             int,
             Tensor,
-        ] = FitToFOVOption(fitting_method="round", fov_convention="full_voxels"),
+        ] = OriginalFOV(fitting_method="round", fov_convention="full_voxels"),
         reference: Union[
-            Sequence[Union[IReformattingReferenceOption, Number]],
-            IReformattingReferenceOption,
+            Sequence[Union[ReformattingReference, Number]],
+            ReformattingReference,
             Number,
-        ] = ReferenceOption(position="center"),
+        ] = Center(),
         target_reference: Optional[
             Union[
-                Sequence[Union[IReformattingReferenceOption, Number]],
-                IReformattingReferenceOption,
+                Sequence[Union[ReformattingReference, Number]],
+                ReformattingReference,
                 Number,
             ]
         ] = None,
@@ -810,13 +692,12 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             spatial_shape: Defines spatial_shape of the target grid, either
                 given separately for each dimension or as a single value in
                 which case the same value is used for all the dimensions.
-                Defaults to FitToFOVOption("round", "full_voxels")
+                Defaults to OriginalFOV("round", "full_voxels").
             reference: Defines the point in the original voxel
                 coordinates which will be aligned with the target reference in
                 the reformatted coordinates. Either given separately for each
                 dimension or as a single value in which case the same value is
-                used for all the dimensions. Defaults to ReferenceOption("center",
-                "full_voxels")
+                used for all the dimensions. Defaults to Center().
             target_reference: Defaults to reference. Defines the point in the
                 reformatted voxel coordinates which will be aligned with the
                 source reference in the original coordinates. Either given
@@ -918,27 +799,29 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     def _get_reference_in_voxel_coordinates(
         self,
         reference: Union[
-            Sequence[Union[IReformattingReferenceOption, Number]],
-            IReformattingReferenceOption,
+            Sequence[Union[ReformattingReference, Number]],
+            ReformattingReference,
             Number,
         ],
         spatial_shape: Sequence[int],
     ) -> List[float]:
-        if isinstance(reference, (IReformattingReferenceOption, float, int)):
+        if isinstance(reference, (ReformattingReference, float, int)):
             reference = [reference] * len(spatial_shape)
         voxel_coordinate_reference: List[float] = []
         for dim_reference, dim_size in zip(reference, spatial_shape):
             if isinstance(dim_reference, (float, int)):
                 voxel_coordinate_reference.append(dim_reference)
             else:
-                voxel_coordinate_reference.append(dim_reference.get_voxel_coordinate(dim_size))
+                voxel_coordinate_reference.append(
+                    float(dim_reference.get_voxel_coordinate(dim_size))
+                )
         return voxel_coordinate_reference
 
     def _get_target_shape(
         self,
         downsampling_factor: Tensor,
         spatial_shape: Union[
-            Sequence[Union[IReformattingShapeOption, int]], IReformattingShapeOption, int, Tensor
+            Sequence[Union[ReformattingSpatialShape, int]], ReformattingSpatialShape, int, Tensor
         ],
     ) -> Sequence[int]:
         if isinstance(spatial_shape, Tensor):
@@ -950,7 +833,7 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             return spatial_shape.tolist()
         if isinstance(spatial_shape, int):
             return [spatial_shape] * len(self._spatial_shape)
-        if isinstance(spatial_shape, IReformattingShapeOption):
+        if isinstance(spatial_shape, ReformattingSpatialShape):
             spatial_shape = [spatial_shape] * len(self._spatial_shape)
         else:
             if len(spatial_shape) != len(self._spatial_shape):
@@ -981,15 +864,15 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     def _get_target_shape_for_batch(
         self,
         single_downsampling_factor: Tensor,
-        spatial_shape: Sequence[Union[IReformattingShapeOption, int]],
+        spatial_shape: Sequence[Union[ReformattingSpatialShape, int]],
     ) -> Sequence[int]:
         target_shape = []
         for dim_original_shape, dim_shape, dim_downsampling_factor in zip(
             self._spatial_shape, spatial_shape, single_downsampling_factor
         ):
-            if isinstance(dim_shape, IReformattingShapeOption):
+            if isinstance(dim_shape, ReformattingSpatialShape):
                 target_shape.append(
-                    dim_shape.to_target_size(dim_original_shape, dim_downsampling_factor.item())
+                    dim_shape.target_size(dim_original_shape, dim_downsampling_factor.item())
                 )
             elif isinstance(dim_shape, int):
                 target_shape.append(dim_shape)

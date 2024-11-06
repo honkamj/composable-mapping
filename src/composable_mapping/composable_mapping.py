@@ -80,7 +80,7 @@ def _generate_bivariate_arithmetic_operator(
         other: Union["ComposableMapping", Number, MappableTensor],
     ) -> "ComposableMapping":
         return _as_grid_composable_mapping_if_needed(
-            _ArithmeticOperator(
+            _BivariateArithmeticOperator(
                 mapping, other, operator=operator, inverse_operator=inverse_operator
             ),
             [mapping, other],
@@ -96,11 +96,10 @@ def _generate_univariate_arithmetic_operator(
 ) -> T:
     def _operator(mapping: "ComposableMapping") -> "ComposableMapping":
         return _as_grid_composable_mapping_if_needed(
-            _ArithmeticOperator(
+            _UnivariateArithmeticOperator(
                 mapping,
-                None,
-                operator=lambda x, _: operator(x),
-                inverse_operator=lambda x, _: inverse_operator(x),
+                operator=operator,
+                inverse_operator=inverse_operator,
             ),
             [mapping],
         )
@@ -319,12 +318,17 @@ class ComposableMapping(ITensorLike, ABC):
     __add__ = _generate_bivariate_arithmetic_operator(
         lambda x, y: x + y, lambda x, y: x - y, _bivariate_arithmetic_operator_template
     )
+    __radd__ = __add__
     __sub__ = _generate_bivariate_arithmetic_operator(
         lambda x, y: x - y, lambda x, y: x + y, _bivariate_arithmetic_operator_template
+    )
+    __rsub__ = _generate_bivariate_arithmetic_operator(
+        lambda x, y: y - x, lambda x, y: y - x, _bivariate_arithmetic_operator_template
     )
     __mul__ = _generate_bivariate_arithmetic_operator(
         lambda x, y: x * y, lambda x, y: x / y, _bivariate_arithmetic_operator_template
     )
+    __rmul__ = __mul__
     __truediv__ = _generate_bivariate_arithmetic_operator(
         lambda x, y: x / y, lambda x, y: x * y, _bivariate_arithmetic_operator_template
     )
@@ -509,13 +513,11 @@ class _Composition(BaseTensorLikeWrapper, ComposableMapping):
         )
 
 
-class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
-    """Arithmetic operator on a composable mapping."""
-
+class _BivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
     def __init__(
         self,
         mapping: ComposableMapping,
-        other: Optional[Union[ComposableMapping, MappableTensor, Number, Tensor]],
+        other: Union[ComposableMapping, MappableTensor, Number, Tensor],
         operator: Callable[[MappableTensor, Any], MappableTensor],
         inverse_operator: Callable[[MappableTensor, Any], MappableTensor],
     ) -> None:
@@ -527,9 +529,9 @@ class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
-    ) -> "_ArithmeticOperator":
-        return _ArithmeticOperator(
-            cast(ComposableMapping, self._mapping),
+    ) -> "_BivariateArithmeticOperator":
+        return _BivariateArithmeticOperator(
+            self._mapping,
             cast(Union[ComposableMapping, MappableTensor, Number, Tensor], tensors["other"]),
             self._operator,
             self._inverse_operator,
@@ -543,7 +545,7 @@ class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
 
     def _get_children(self) -> Mapping[str, ITensorLike]:
         children: Dict[str, ITensorLike] = {"mapping": self._mapping}
-        if isinstance(self._other, MappableTensor) or isinstance(self._other, ComposableMapping):
+        if isinstance(self._other, (MappableTensor, ComposableMapping)):
             children["other"] = self._other
         return children
 
@@ -559,7 +561,9 @@ class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
             raise ValueError("Operation is not invertible")
         return _Composition(
             self._mapping.invert(**arguments),
-            _ArithmeticOperator(Identity(), self._other, self._inverse_operator, self._operator),
+            _BivariateArithmeticOperator(
+                Identity(), self._other, self._inverse_operator, self._operator
+            ),
         )
 
     @property
@@ -572,8 +576,53 @@ class _ArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
 
     def __repr__(self) -> str:
         return (
-            f"_ArithmeticOperator(mapping={self._mapping}, "
+            f"_BivariateArithmeticOperator(mapping={self._mapping}, "
             "other={self._other}, operator={self._operator}, "
+            "inverse_operator={self._inverse_operator})"
+        )
+
+
+class _UnivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
+    def __init__(
+        self,
+        mapping: ComposableMapping,
+        operator: Callable[[MappableTensor], MappableTensor],
+        inverse_operator: Callable[[MappableTensor], MappableTensor],
+    ) -> None:
+        super().__init__()
+        self._mapping = mapping
+        self._operator = operator
+        self._inverse_operator = inverse_operator
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "_UnivariateArithmeticOperator":
+        return _UnivariateArithmeticOperator(
+            cast(ComposableMapping, self._mapping),
+            self._operator,
+            self._inverse_operator,
+        )
+
+    def _get_children(self) -> Mapping[str, ITensorLike]:
+        return {"mapping": self._mapping}
+
+    def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
+        return self._operator(self._mapping(masked_coordinates))
+
+    def invert(self, **arguments) -> "ComposableMapping":
+        return _Composition(
+            self._mapping.invert(**arguments),
+            _UnivariateArithmeticOperator(Identity(), self._inverse_operator, self._operator),
+        )
+
+    @property
+    def default_sampling_data_format(self) -> Optional[DataFormat]:
+        return self._mapping.default_sampling_data_format
+
+    def __repr__(self) -> str:
+        return (
+            f"_UnivariateArithmeticOperator(mapping={self._mapping}, "
+            "operator={self._operator}, "
             "inverse_operator={self._inverse_operator})"
         )
 
