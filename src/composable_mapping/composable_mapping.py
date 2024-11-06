@@ -243,8 +243,10 @@ class ComposableMapping(ITensorLike, ABC):
             sampler=sampler,
         )
 
-    def to_coordinates(self, target: "ICoordinateSystemContainer") -> "GridComposableMapping":
-        """Set a coordinate system for the mapping.
+    def assign_coordinates(
+        self, coordinates: "ICoordinateSystemContainer"
+    ) -> "GridComposableMapping":
+        """Assign a coordinate system for the mapping.
 
         This only changes the coordinate system of the mapping, the mapping itself
         is not changed. The coordinate system contained by the mapping affects
@@ -252,13 +254,13 @@ class ComposableMapping(ITensorLike, ABC):
         `GridComposableMapping.resample`.
 
         Args:
-            target: Target coordinate system (or a container with a coordinate system)
-                to set for the mapping.
+            coordinates: Coordinate system (or a container with a coordinate system)
+                to assign for the mapping.
 
         Returns:
             Mapping with the given target coordinate system.
         """
-        return GridComposableMappingDecorator(self, target.coordinate_system)
+        return GridComposableMappingDecorator(self, coordinates.coordinate_system)
 
     def as_affine_transformation(self) -> IAffineTransformation:
         """Obtain the mapping as an affine transformation on PyTorch tensors, if possible.
