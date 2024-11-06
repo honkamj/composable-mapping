@@ -1,4 +1,4 @@
-"""Utility functions."""
+"""Utility functions for common tasks."""
 
 from itertools import repeat
 from typing import Iterable, Optional, Sequence, Tuple, TypeVar, Union
