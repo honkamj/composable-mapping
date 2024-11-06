@@ -67,7 +67,7 @@ def estimate_spatial_jacobian_matrices(
         + sampled_jacobians.spatial_shape
     )
     coordinate_system_affine_transformation = (
-        target.coordinate_system.to_voxel_coordinates.as_affine_transformation()
+        target.coordinate_system.to_voxel_coordinates.transformation
     )
     coordinate_system_diagonal_affine_matrix = coordinate_system_affine_transformation.as_diagonal()
     if coordinate_system_diagonal_affine_matrix is None:
