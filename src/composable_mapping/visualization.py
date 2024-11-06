@@ -19,7 +19,7 @@ from .composable_mapping import (
 from .interface import Number
 from .mappable_tensor import MappableTensor
 from .sampler import DataFormat
-from .util import get_spatial_dims, get_spatial_shape, to_numpy
+from .util import get_spatial_dims, get_spatial_shape
 
 
 def obtain_coordinate_mapping_central_planes(
@@ -40,7 +40,7 @@ def obtain_coordinate_mapping_central_planes(
             for other_dim in reversed(other_dims):
                 transformed_grid_2d = transformed_grid_2d.movedim(-n_dims + other_dim, 0)
                 transformed_grid_2d = transformed_grid_2d[transformed_grid_2d.size(0) // 2]
-            slices.append(to_numpy(transformed_grid_2d))
+            slices.append(_to_numpy(transformed_grid_2d))
     else:
         raise NotImplementedError("Currently 1D volumes are not supported")
     return slices, dimension_pairs
@@ -68,8 +68,8 @@ def obtain_central_planes(
                 mask_plane = mask_plane[:, mask_plane.size(0) // 2]
             spatial_shape = get_spatial_shape(plane.shape, n_channel_dims=1)
             if spatial_shape[0] != 1 and spatial_shape[1] != 1:
-                planes.append(to_numpy(plane))
-                mask_planes.append(to_numpy(mask_plane))
+                planes.append(_to_numpy(plane))
+                mask_planes.append(_to_numpy(mask_plane))
         return planes, mask_planes, dimension_pairs
     raise NotImplementedError("Currently 1D volumes are not supported")
 
@@ -292,3 +292,7 @@ def visualize_to_as_deformed_grid(
     return visualize_grid(
         mapping.sample_to(target, data_format=DataFormat.world_coordinates()), arguments=arguments
     )
+
+
+def _to_numpy(item: Tensor) -> ndarray:
+    return item.detach().cpu().resolve_conj().resolve_neg().numpy()

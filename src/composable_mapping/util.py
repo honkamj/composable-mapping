@@ -1,29 +1,27 @@
 """Utility functions."""
 
 from itertools import repeat
-from typing import Callable, Iterable, Optional, Sequence, Tuple, TypeVar, Union, cast
+from typing import Iterable, Optional, Sequence, Tuple, TypeVar, Union
 
-import torch.nn
-from numpy import ndarray
 from torch import Tensor, broadcast_shapes
 from torch.nn.functional import pad
 
 T = TypeVar("T")
 
 
-def ceildiv(denominator: Union[int, float], numerator: Union[int, float]) -> Union[int, float]:
-    """Ceil integer division"""
-    return -(denominator // -numerator)
+def get_batch_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
+    """Returns indices for batch dimensions"""
+    first_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[0]
+    return tuple(range(first_channel_dim))
 
 
-def optional_add(addable_1: Optional[T], addable_2: Optional[T]) -> Optional[T]:
-    """Optional add"""
-    if addable_1 is None:
-        return addable_2
-    if addable_2 is None:
-        return addable_1
-    added = addable_1 + addable_2  # type: ignore
-    return cast(T, added)
+def get_spatial_dims(
+    n_total_dims: int,
+    n_channel_dims: int = 1,
+) -> Tuple[int, ...]:
+    """Returns indices for spatial dimensions"""
+    last_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[-1]
+    return tuple(range(last_channel_dim + 1, n_total_dims))
 
 
 def get_channel_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
@@ -41,13 +39,56 @@ def get_channel_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, .
     return tuple(range(1, n_channel_dims + 1))
 
 
-def get_spatial_dims(
-    n_total_dims: int,
+def get_batch_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
+    """Returns size of the batch dimensions"""
+    first_channel_dim = get_channel_dims(len(shape), n_channel_dims)[0]
+    return tuple(shape[:first_channel_dim])
+
+
+def get_spatial_shape(
+    shape: Sequence[int],
     n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
-    """Returns indices for spatial dimensions"""
-    last_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[-1]
-    return tuple(range(last_channel_dim + 1, n_total_dims))
+    """Returns shape of the spatial dimensions"""
+    last_channel_dim = get_channel_dims(len(shape), n_channel_dims)[-1]
+    return tuple(shape[last_channel_dim + 1 :])
+
+
+def get_channels_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
+    """Returns shape of the channel dimensions"""
+    channel_dims = get_channel_dims(len(shape), n_channel_dims)
+    n_channel_dims = len(channel_dims)
+    first_channel_dim = channel_dims[0]
+    return tuple(shape[first_channel_dim : first_channel_dim + n_channel_dims])
+
+
+def has_spatial_dims(
+    shape: Sequence[int],
+    n_channel_dims: int = 1,
+) -> bool:
+    """Check if shape has spatial dimensions"""
+    return bool(get_spatial_shape(shape, n_channel_dims))
+
+
+def reduce_channels_shape_to_ones(
+    shape: Sequence[int],
+    n_channel_dims: int = 1,
+) -> Tuple[int, ...]:
+    """Reduces channel shape to ones
+
+    E.g. (3, 5, 4, 4) with n_channel_dims = 1 returns
+    (3, 1, 4, 4)
+    """
+    batch_shape, channel_shape, spatial_shape = split_shape(shape, n_channel_dims)
+    return batch_shape + tuple(1 for _ in channel_shape) + spatial_shape
+
+
+def num_spatial_dims(
+    n_total_dims: int,
+    n_channel_dims: int = 1,
+) -> int:
+    """Returns number of spatial dimensions"""
+    return len(get_spatial_dims(n_total_dims, n_channel_dims))
 
 
 def get_n_channel_dims(n_total_dims: int, n_spatial_dims: int) -> int:
@@ -62,12 +103,6 @@ def get_n_channel_dims(n_total_dims: int, n_spatial_dims: int) -> int:
     if n_channel_dims < 1:
         raise RuntimeError("Invalid n_total_dims for given n_spatial_dims")
     return n_channel_dims
-
-
-def get_batch_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
-    """Returns indices for batch dimensions"""
-    first_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[0]
-    return tuple(range(first_channel_dim))
 
 
 def move_channels_first(
@@ -412,58 +447,6 @@ def split_shape(
     )
 
 
-def get_channels_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
-    """Returns shape of the channel dimensions"""
-    channel_dims = get_channel_dims(len(shape), n_channel_dims)
-    n_channel_dims = len(channel_dims)
-    first_channel_dim = channel_dims[0]
-    return tuple(shape[first_channel_dim : first_channel_dim + n_channel_dims])
-
-
-def get_spatial_shape(
-    shape: Sequence[int],
-    n_channel_dims: int = 1,
-) -> Tuple[int, ...]:
-    """Returns shape of the spatial dimensions"""
-    last_channel_dim = get_channel_dims(len(shape), n_channel_dims)[-1]
-    return tuple(shape[last_channel_dim + 1 :])
-
-
-def get_batch_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
-    """Returns size of the batch dimensions"""
-    first_channel_dim = get_channel_dims(len(shape), n_channel_dims)[0]
-    return tuple(shape[:first_channel_dim])
-
-
-def has_spatial_dims(
-    shape: Sequence[int],
-    n_channel_dims: int = 1,
-) -> bool:
-    """Check if shape has spatial dimensions"""
-    return bool(get_spatial_shape(shape, n_channel_dims))
-
-
-def reduce_channels_shape_to_ones(
-    shape: Sequence[int],
-    n_channel_dims: int = 1,
-) -> Tuple[int, ...]:
-    """Reduces channel shape to ones
-
-    E.g. (3, 5, 4, 4) with n_channel_dims = 1 returns
-    (3, 1, 4, 4)
-    """
-    batch_shape, channel_shape, spatial_shape = split_shape(shape, n_channel_dims)
-    return batch_shape + tuple(1 for _ in channel_shape) + spatial_shape
-
-
-def num_spatial_dims(
-    n_total_dims: int,
-    n_channel_dims: int = 1,
-) -> int:
-    """Returns number of spatial dimensions"""
-    return len(get_spatial_dims(n_total_dims, n_channel_dims))
-
-
 def combine_optional_masks(
     *masks: Optional[Tensor],
     n_channel_dims: Union[int, Iterable[int]] = 1,
@@ -481,16 +464,6 @@ def combine_optional_masks(
             else:
                 combined_mask = combined_mask & mask
     return combined_mask
-
-
-def avg_pool_nd_function(n_dims: int) -> Callable[..., Tensor]:
-    """Return any dimensional average pooling function"""
-    return getattr(torch.nn.functional, f"avg_pool{n_dims}d")
-
-
-def conv_nd_function(n_dims: int) -> Callable[..., Tensor]:
-    """Return any dimensional convolution function"""
-    return getattr(torch.nn.functional, f"conv{n_dims}d")
 
 
 def are_broadcastable(shape_1: Sequence[int], shape_2: Sequence[int]) -> bool:
@@ -511,83 +484,6 @@ def is_broadcastable_to(source_shape: Sequence[int], target_shape: Sequence[int]
     ):
         return False
     return True
-
-
-class NDSpatialSlice:
-    """Multi-dimensional slice for spatial dimensions"""
-
-    def __init__(self, start: Sequence[int], step: Sequence[int], steps: Sequence[int]) -> None:
-        if len(start) != len(step) or len(start) != len(steps):
-            raise ValueError("Start, step and steps must have the same length")
-        self.start = start
-        self.step = step
-        self.steps = steps
-
-    @property
-    def n_dims(self) -> int:
-        """Return number of dimensions"""
-        return len(self.start)
-
-    def apply_slice(
-        self, volume: Tensor, paddings: Sequence[Tuple[int, int]] = tuple(), n_channel_dims: int = 1
-    ) -> Tensor:
-        """Return slice tuple"""
-        spatial_dims = get_spatial_dims(volume.ndim, n_channel_dims)
-        spatial_shape = get_spatial_shape(volume.shape, n_channel_dims)
-        if len(paddings) != self.n_dims:
-            raise ValueError("Number of paddings must match number of dimensions")
-        if len(spatial_dims) != self.n_dims:
-            raise ValueError("Number of spatial dims must match number of dimensions")
-
-        flipped_spatial_dims = []
-        slices = []
-        for start, step, steps, spatial_dim, spatial_dim_size, (padding_start, _padding_end) in zip(
-            self.start, self.step, self.steps, spatial_dims, spatial_shape, paddings
-        ):
-            start = start + padding_start
-            if step < 0:
-                flipped_spatial_dims.append(spatial_dim)
-                start = spatial_dim_size - start - 1
-                step = -step
-            slices.append(slice(start, start + steps * step, step))
-        if flipped_spatial_dims:
-            volume = volume.flip(flipped_spatial_dims)
-        sliced_volume = volume[(...,) + tuple(slices)]
-        if flipped_spatial_dims:
-            sliced_volume = sliced_volume.flip(flipped_spatial_dims)
-        return sliced_volume
-
-    def obtain_paddings(self, shape: Sequence[int]) -> Tuple[Tuple[int, int], ...]:
-        """Obtain paddings and crops for the slice to just fit inside a volume"""
-        if len(shape) != self.n_dims:
-            raise ValueError("Shape must have the same number of dimensions as the slice")
-        ending_points = (
-            start + step * steps for start, step, steps in zip(self.start, self.step, self.steps)
-        )
-        return tuple(
-            (
-                -min(start, ending_point),
-                -min(dim_size - start - 1, dim_size - ending_point - 1),
-            )
-            for start, ending_point, dim_size in zip(self.start, ending_points, shape)
-        )
-
-    @staticmethod
-    def obtain_joint_padding_from_slices(
-        slices: Sequence["NDSpatialSlice"], shape: Sequence[int]
-    ) -> Tuple[Tuple[int, int], ...]:
-        """Obtain paddings containing all the slices"""
-        if any(slice_.n_dims != slices[0].n_dims for slice_ in slices):
-            raise ValueError("All slices must have the same number of dimensions")
-        if slices[0].n_dims != len(shape):
-            raise ValueError("Shape must have the same number of dimensions as the slices")
-        paddings = [slice_.obtain_paddings(shape) for slice_ in slices]
-        combined_paddings = []
-        for dim_paddings in zip(*paddings):
-            start_padding = max(start for start, _ in dim_paddings)
-            end_padding = max(end for _, end in dim_paddings)
-            combined_paddings.append((start_padding, end_padding))
-        return tuple(combined_paddings)
 
 
 def crop_and_then_pad_spatial(
@@ -688,8 +584,3 @@ def _is_dim_croppable_first(
     if mode in ("reflect", "circular") and pad_width >= remaining_width:
         return False
     return True
-
-
-def to_numpy(item: Tensor) -> ndarray:
-    """Convert tensor to numpy"""
-    return item.detach().cpu().resolve_conj().resolve_neg().numpy()

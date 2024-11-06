@@ -24,7 +24,6 @@ from composable_mapping.util import (
     get_batch_shape,
     get_channels_shape,
     get_spatial_shape,
-    optional_add,
     reduce_channels_shape_to_ones,
     split_shape,
 )
@@ -300,7 +299,10 @@ class MappableTensor(BaseTensorLikeWrapper):
                 channels_shape=channels_shape,
                 spatial_shape=spatial_shape,
             )
-        values = optional_add(displacements, grid)
+        if displacements is None:
+            values = grid
+        else:
+            values = displacements
         if values is None:
             return zeros(1, dtype=self.dtype, device=self.device).expand(self.shape)
         return values

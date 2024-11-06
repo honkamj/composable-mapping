@@ -1,13 +1,13 @@
 """Interpolating samplers."""
 
-from typing import Tuple
+from typing import Callable, Tuple
 
+import torch.nn
 from torch import Tensor, ones_like
 
 from composable_mapping.dense_deformation import interpolate
 from composable_mapping.sampler.base import ISeparableKernelSupport
 from composable_mapping.util import (
-    avg_pool_nd_function,
     get_batch_shape,
     get_channels_shape,
     get_n_channel_dims,
@@ -251,7 +251,7 @@ class BicubicInterpolator(BaseSeparableSampler):
             mask.shape, n_channel_dims=n_channel_dims
         )
         mask = mask.view(batch_shape + (1,) + spatial_shape).to(coordinates.dtype)
-        mask = avg_pool_nd_function(n_spatial_dims)(mask, kernel_size=3, stride=1, padding=1) >= 1
+        mask = _avg_pool_nd_function(n_spatial_dims)(mask, kernel_size=3, stride=1, padding=1) >= 1
         interpolated_mask = interpolate(
             volume=mask.to(coordinates.dtype),
             grid=coordinates,
@@ -266,3 +266,7 @@ class BicubicInterpolator(BaseSeparableSampler):
             )
             >= 1 - self._mask_threshold
         )
+
+
+def _avg_pool_nd_function(n_dims: int) -> Callable[..., Tensor]:
+    return getattr(torch.nn.functional, f"avg_pool{n_dims}d")

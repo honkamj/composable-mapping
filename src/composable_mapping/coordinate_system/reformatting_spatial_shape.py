@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Callable, Tuple, Union
 
-from composable_mapping.util import ceildiv
+from composable_mapping.interface import Number
 
 
 def _define_bivariate_shape_operator(operator: Callable[[int, int], int]) -> Tuple[
@@ -124,6 +124,10 @@ class OriginalShape(ReformattingSpatialShape):
         return original_size
 
 
+def _ceildiv(denominator: Number, numerator: Number) -> Number:
+    return -(denominator // -numerator)
+
+
 class OriginalFOV(ReformattingSpatialShape):
     """Spatial shape such that the size of the field of view is the same as with
     the original grid.
@@ -146,7 +150,7 @@ class OriginalFOV(ReformattingSpatialShape):
     DIVISION_FUNCTIONS = {
         "round": lambda x, y: int(round(x / y)),
         "floor": lambda x, y: int(x // y),
-        "ceil": lambda x, y: int(ceildiv(x, y)),
+        "ceil": lambda x, y: int(_ceildiv(x, y)),
     }
 
     def __init__(self, fitting_method: str = "round", fov_convention: str = "full_voxels") -> None:
