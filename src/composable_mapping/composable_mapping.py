@@ -32,12 +32,12 @@ if TYPE_CHECKING:
     from .coordinate_system import CoordinateSystem
 
 
-def _as_grid_composable_mapping_if_needed(
+def _assign_coordinates_if_available(
     target_mapping: "ComposableMapping", sources: Iterable[Any]
 ) -> "ComposableMapping":
-    for source_mapping in sources:
-        if isinstance(source_mapping, GridComposableMapping):
-            return GridComposableMappingDecorator(target_mapping, source_mapping.coordinate_system)
+    for source in sources:
+        if isinstance(source, ICoordinateSystemContainer):
+            return target_mapping.assign_coordinates(source)
     return target_mapping
 
 
@@ -79,7 +79,7 @@ def _generate_bivariate_arithmetic_operator(
         mapping: "ComposableMapping",
         other: Union["ComposableMapping", Number, MappableTensor],
     ) -> "ComposableMapping":
-        return _as_grid_composable_mapping_if_needed(
+        return _assign_coordinates_if_available(
             _BivariateArithmeticOperator(
                 mapping, other, operator=operator, inverse_operator=inverse_operator
             ),
@@ -95,7 +95,7 @@ def _generate_univariate_arithmetic_operator(
     _type_template: T,
 ) -> T:
     def _operator(mapping: "ComposableMapping") -> "ComposableMapping":
-        return _as_grid_composable_mapping_if_needed(
+        return _assign_coordinates_if_available(
             _UnivariateArithmeticOperator(
                 mapping,
                 operator=operator,
@@ -122,8 +122,24 @@ def _composition(
 def _composition(
     self: "ComposableMapping", right_mapping: "ComposableMapping"
 ) -> "ComposableMapping":
-    return _as_grid_composable_mapping_if_needed(
+    return _assign_coordinates_if_available(
         _Composition(self, right_mapping), [self, right_mapping]
+    )
+
+
+@overload
+def _set_default_sampling_data_format(
+    self: "GridComposableMapping", data_format: Optional[DataFormat]
+) -> "GridComposableMapping": ...
+@overload
+def _set_default_sampling_data_format(
+    self: "ComposableMapping", data_format: Optional[DataFormat]
+) -> "ComposableMapping": ...
+def _set_default_sampling_data_format(
+    self: "ComposableMapping", data_format: Optional[DataFormat]
+) -> "ComposableMapping":
+    return _assign_coordinates_if_available(
+        _SetDefaultSamplingDataFormatDecorator(self, data_format), [self]
     )
 
 
@@ -189,8 +205,12 @@ class ComposableMapping(ITensorLike, ABC):
             target: Target coordinate system (or a container with a coordinate system)
                 defining a grid to evaluate the mapping at.
             data_format: Data format of the output. Default data format depends
-                on the mapping, and can be accessed through the property
-                `default_sampling_data_format`.
+                on the mapping, but as a general rule is the same as the data
+                format of the mapping being sampled, or the default data format
+                of the left mapping in a composition or other operation. When no
+                clear default data format is available,
+                DataFormat.world_coordinates() is used. Default data format can
+                be set for a mapping using `set_default_sampling_data_format`.
 
         Returns:
             Mappable tensor containing the values obtained by evaluating the
@@ -221,9 +241,13 @@ class ComposableMapping(ITensorLike, ABC):
             target: Target coordinate system (or a container with a coordinate system)
                 defining a grid to resample the mapping at.
             data_format: Data format used as an internal representation of the
-                generated resampled mapping. Default data format depends
-                on the mapping, and can be accessed through the property
-                `default_sampling_data_format`.
+                generated resampled mapping. Default data format depends on the
+                mapping, but as a general rule is the same as the data format of
+                the mapping being sampled, or the default data format of the
+                left mapping in a composition or other operation. When no clear
+                default data format is available, DataFormat.world_coordinates()
+                is used. Default data format can be set for a mapping using
+                `set_default_sampling_data_format`.
             sampler: Sampler used by the generated resampled mapping. Note that
                 this sampler is not used to resample the mapping, but to sample
                 the generated resampled mapping. If None, the default sampler
@@ -260,7 +284,7 @@ class ComposableMapping(ITensorLike, ABC):
         Returns:
             Mapping with the given target coordinate system.
         """
-        return GridComposableMappingDecorator(self, coordinates.coordinate_system)
+        return _AssignCoordinatesDecorator(self, coordinates.coordinate_system)
 
     def as_affine_transformation(self) -> IAffineTransformation:
         """Obtain the mapping as an affine transformation on PyTorch tensors, if possible.
@@ -299,6 +323,17 @@ class ComposableMapping(ITensorLike, ABC):
         of the other mapping will be used.
         """
         return None
+
+    set_default_sampling_data_format = _set_default_sampling_data_format
+    """Set the default data format to use in sampling and resampling operations for
+    the mapping.
+    
+    Args:
+        data_format: Default data format to use in sampling and resampling operations.
+    
+    Returns:
+        Mapping with the default data format set.
+    """
 
     def _get_sampling_data_format(self, data_format: Optional[DataFormat]) -> DataFormat:
         if data_format is not None:
@@ -360,8 +395,12 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
 
         Args:
             data_format: Data format of the output. Default data format depends
-                on the mapping, and can be accessed through the property
-                `default_sampling_data_format`.
+                on the mapping, but as a general rule is the same as the data
+                format of the mapping being sampled, or the default data format
+                of the left mapping in a composition or other operation. When no
+                clear default data format is available,
+                DataFormat.world_coordinates() is used. Default data format can
+                be set for a mapping using `set_default_sampling_data_format`.
 
         Returns:
             Mappable tensor containing the values obtained by evaluating the
@@ -378,9 +417,13 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
 
         Args:
             data_format: Data format used as an internal representation of the
-                generated resampled mapping. Default data format depends
-                on the mapping, and can be accessed through the property
-                `default_sampling_data_format`.
+                generated resampled mapping. Default data format depends on the
+                mapping, but as a general rule is the same as the data format of
+                the mapping being sampled, or the default data format of the
+                left mapping in a composition or other operation. When no clear
+                default data format is available, DataFormat.world_coordinates()
+                is used. Default data format can be set for a mapping using
+                `set_default_sampling_data_format`.
             sampler: Sampler used by the generated resampled mapping. Note that
                 this sampler is not used to resample the mapping, but to sample
                 the generated resampled mapping. If None, the default sampler
@@ -396,14 +439,12 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
         )
 
 
-class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMapping):
+class _AssignCoordinatesDecorator(BaseTensorLikeWrapper, GridComposableMapping):
     """Decorator for coupling a composable mapping with a coordinate system.
 
-    Args:
+    Arguments:
         mapping: Composable mapping.
         coordinate_system: Coordinate system assigned to the mapping.
-
-    @private
     """
 
     def __init__(self, mapping: ComposableMapping, coordinate_system: "CoordinateSystem") -> None:
@@ -416,8 +457,8 @@ class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMappin
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
-    ) -> "GridComposableMappingDecorator":
-        return GridComposableMappingDecorator(
+    ) -> "_AssignCoordinatesDecorator":
+        return _AssignCoordinatesDecorator(
             cast(ComposableMapping, children["mapping"]),
             cast("CoordinateSystem", children["coordinate_system"]),
         )
@@ -426,9 +467,7 @@ class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMappin
         return self._mapping(coordinates)
 
     def invert(self, **arguments) -> GridComposableMapping:
-        return GridComposableMappingDecorator(
-            self._mapping.invert(**arguments), self._coordinate_system
-        )
+        return self._mapping.invert(**arguments).assign_coordinates(self._coordinate_system)
 
     @property
     def coordinate_system(self) -> "CoordinateSystem":
@@ -440,8 +479,50 @@ class GridComposableMappingDecorator(BaseTensorLikeWrapper, GridComposableMappin
 
     def __repr__(self) -> str:
         return (
-            f"GridComposableMappingDecorator(mapping={self._mapping}, "
+            f"_AssignCoordinatesDecorator(mapping={self._mapping}, "
             f"coordinate_system={self._coordinate_system})"
+        )
+
+
+class _SetDefaultSamplingDataFormatDecorator(BaseTensorLikeWrapper, ComposableMapping):
+    """Decorator for setting the default data format of a composable mapping.
+
+    Arguments:
+        mapping: Composable mapping.
+        data_format: Default data format to use in sampling and resampling operations.
+    """
+
+    def __init__(self, mapping: ComposableMapping, data_format: Optional[DataFormat]) -> None:
+        super().__init__()
+        self._mapping = mapping
+        self._data_format = data_format
+
+    def _get_children(self) -> Mapping[str, ITensorLike]:
+        return {"mapping": self._mapping}
+
+    def _modified_copy(
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+    ) -> "_SetDefaultSamplingDataFormatDecorator":
+        return _SetDefaultSamplingDataFormatDecorator(
+            cast(ComposableMapping, children["mapping"]),
+            self._data_format,
+        )
+
+    def __call__(self, coordinates: MappableTensor) -> MappableTensor:
+        return self._mapping(coordinates)
+
+    def invert(self, **arguments) -> ComposableMapping:
+        return self._mapping.invert(**arguments).set_default_sampling_data_format(self._data_format)
+
+    @property
+    def default_sampling_data_format(self) -> Optional[DataFormat]:
+        return self._data_format
+
+    def __repr__(self) -> str:
+        return (
+            f"_SetDefaultSamplingDataFormatDecorator("
+            f"mapping={self._mapping}, "
+            f"data_format={self._data_format})"
         )
 
 
@@ -912,7 +993,8 @@ def stack_mappings(*mappings: ComposableMappingT, channel_index: int = 0) -> Com
     stacked: ComposableMapping = _Stack(*mappings, channel_index=channel_index)
     for mapping in mappings:
         if isinstance(mapping, GridComposableMapping):
-            stacked = GridComposableMappingDecorator(stacked, mapping.coordinate_system)
+            stacked = stacked.assign_coordinates(mapping)
+            break
     return cast(ComposableMappingT, stacked)
 
 
@@ -932,5 +1014,6 @@ def concatenate_mappings(
     concatenated: ComposableMapping = _Concatenate(*mappings, channel_index=channel_index)
     for mapping in mappings:
         if isinstance(mapping, GridComposableMapping):
-            concatenated = GridComposableMappingDecorator(concatenated, mapping.coordinate_system)
+            concatenated = concatenated.assign_coordinates(mapping)
+            break
     return cast(ComposableMappingT, concatenated)
