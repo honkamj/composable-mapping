@@ -11,8 +11,8 @@ and functions for handling spatial coordinate transformations.
 The most powerful feature of this library is the ability to easily compose
 transformations lazily and resample them to different coordinate systems as well
 as sampler classes for sampling volumes defined on regular grids such that the
-optimal method (either convolution or torch.grid_sample) is used based on the
-sampling locations.
+optimal method (either slicing operation, convolution, or torch.grid_sample) is
+used based on the sampling locations.
 
 The main idea was to develop a library that allows handling of the coordinate
 mappings as if they were mathematical functions, without losing much performance

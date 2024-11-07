@@ -1,25 +1,10 @@
 """Dense deformations utility functions."""
 
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
-from torch import Tensor
-from torch import all as torch_all
-from torch import device as torch_device
-from torch import dtype as torch_dtype
-from torch import ge, gt, le, linspace, lt, meshgrid, stack, tensor
+from torch import Tensor, tensor
 from torch.jit import script
 from torch.nn.functional import grid_sample
-
-from .util import move_channels_first, move_channels_last
-
-
-def generate_voxel_coordinate_grid(
-    spatial_shape: Sequence[int],
-    device: Optional[torch_device] = None,
-    dtype: Optional[torch_dtype] = None,
-) -> Tensor:
-    """Generate voxel coordinate grid"""
-    return _generate_voxel_coordinate_grid(spatial_shape, device, dtype)
 
 
 def interpolate(
@@ -41,35 +26,6 @@ def interpolate(
     return _interpolate(volume, grid, mode, padding_mode)
 
 
-def generate_mask_based_on_bounds(
-    coordinates: Tensor,
-    min_values: Sequence[float],
-    max_values: Sequence[float],
-    n_channel_dims: int = 1,
-    inclusive_min: bool = True,
-    inclusive_max: bool = True,
-) -> Tensor:
-    """Generate mask based on coordinate bounds"""
-    coordinates = move_channels_last(coordinates.detach(), n_channel_dims=n_channel_dims)
-    non_blocking = coordinates.device.type != "cpu"
-    min_values_tensor = tensor(min_values, dtype=coordinates.dtype).to(
-        device=coordinates.device, non_blocking=non_blocking
-    )
-    max_values_tensor = tensor(max_values, dtype=coordinates.dtype).to(
-        device=coordinates.device, non_blocking=non_blocking
-    )
-    normalized_coordinates = (coordinates - min_values_tensor) / (
-        max_values_tensor - min_values_tensor
-    )
-    min_operator = ge if inclusive_min else gt
-    max_operator = le if inclusive_max else lt
-    fov_mask = min_operator(normalized_coordinates, 0) & max_operator(normalized_coordinates, 1)
-    fov_mask = move_channels_first(
-        torch_all(fov_mask, dim=-1, keepdim=True), n_channel_dims=n_channel_dims
-    )
-    return fov_mask
-
-
 @script
 def _convert_voxel_to_normalized_coordinates(
     coordinates: Tensor, volume_shape: Optional[List[int]]
@@ -88,21 +44,6 @@ def _convert_voxel_to_normalized_coordinates(
         .to(device=coordinates.device, non_blocking=coordinates.device.type != "cpu")
     )
     return coordinates / (volume_shape_tensor - 1) * 2 - 1
-
-
-@script
-def _generate_voxel_coordinate_grid(
-    spatial_shape: List[int],
-    device: Optional[torch_device] = None,
-    dtype: Optional[torch_dtype] = None,
-) -> Tensor:
-
-    axes = [
-        linspace(start=0, end=int(dim_size) - 1, steps=int(dim_size), device=device, dtype=dtype)
-        for dim_size in spatial_shape
-    ]
-    coordinates = stack(meshgrid(axes, indexing="ij"), dim=0)
-    return coordinates[None]
 
 
 def _broadcast_batch_size(tensor_1: Tensor, tensor_2: Tensor) -> Tuple[Tensor, Tensor]:

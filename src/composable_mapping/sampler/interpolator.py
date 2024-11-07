@@ -5,7 +5,6 @@ from typing import Callable, Tuple
 import torch.nn
 from torch import Tensor, ones_like
 
-from composable_mapping.dense_deformation import interpolate
 from composable_mapping.sampler.base import ISeparableKernelSupport
 from composable_mapping.util import (
     get_batch_shape,
@@ -17,6 +16,7 @@ from composable_mapping.util import (
 
 from .base import BaseSeparableSampler, SymmetricPolynomialKernelSupport
 from .interface import LimitDirection
+from .interpolate import interpolate
 
 
 class LinearInterpolator(BaseSeparableSampler):

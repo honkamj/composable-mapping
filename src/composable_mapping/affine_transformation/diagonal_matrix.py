@@ -418,7 +418,7 @@ def invert_diagonal_affine_matrix(
 def negate_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> DiagonalAffineMatrixDefinition:
-    """Negate diagonal affine matrix
+    """Negate diagonal affine matrix.
 
     Args:
         matrix_definition: Definition of the diagonal affine matrix.
@@ -450,7 +450,7 @@ def negate_diagonal_affine_matrix(
 def is_identity_diagonal_affine_matrix(
     matrix_definition: DiagonalAffineMatrixDefinition,
 ) -> bool:
-    """Is the diagonal matrix an identity matrix
+    """Is the diagonal matrix an identity matrix.
 
     Args:
         matrix_definition: Definition of the diagonal affine matrix.

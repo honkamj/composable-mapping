@@ -6,12 +6,23 @@ and functions for handling spatial coordinate transformations.
 The most powerful feature of this library is the ability to easily compose
 transformations lazily and resample them to different coordinate systems as well
 as sampler classes for sampling volumes defined on regular grids such that the
-optimal method (either convolution or torch.grid_sample) is used based on the
-sampling locations.
+optimal method (either slicing operation, convolution, or torch.grid_sample) is
+used based on the sampling locations.
 
 The main idea was to develop a library that allows handling of the coordinate
 mappings as if they were mathematical functions, without losing much performance
 compared to more manual implementation.
+
+In this codebase tensor shapes are seen as consisting of three parts (in the
+following order): batch dimension, channel dimensions and spatial dimensions.
+The split is defined by providing the number of channel dimensions with the
+assumption that there is at most one batch dimension. If the number of
+dimensions equals the number of channel dimensions, the batch dimension is
+assumed to be empty. Codebase implements custom broadcasting operations which
+apply normal broadcasting separately to each split. This makes many operations
+easier as one does not have to worry about unsqueezing correct number of
+dimensions to apply the same operation e.g. over all spatial and batch
+dimensions.
 """
 
 from .affine_mapping import Affine, affine, diagonal_affine

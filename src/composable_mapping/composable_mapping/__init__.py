@@ -7,11 +7,13 @@ from .composable_mapping import (
     SamplableVolume,
     samplable_volume,
 )
+from .interface import ICoordinateSystemContainer
 from .util import concatenate_mappings, stack_mappings
 
 __all__ = [
     "ComposableMapping",
     "GridComposableMapping",
+    "ICoordinateSystemContainer",
     "Identity",
     "SamplableVolume",
     "samplable_volume",

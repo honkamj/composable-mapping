@@ -23,6 +23,8 @@ from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.sampler import DataFormat, ISampler, get_sampler
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 
+from .interface import ICoordinateSystemContainer
+
 if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
 
@@ -141,17 +143,6 @@ def _set_default_sampling_data_format(
     return _assign_coordinates_if_available(
         _SetDefaultSamplingDataFormatDecorator(self, data_format), [self]
     )
-
-
-class ICoordinateSystemContainer(ABC):
-    """Class holding a unique coordinate system."""
-
-    @property
-    @abstractmethod
-    def coordinate_system(
-        self,
-    ) -> "CoordinateSystem":
-        """Coordinate system of the container."""
 
 
 class ComposableMapping(ITensorLike, ABC):

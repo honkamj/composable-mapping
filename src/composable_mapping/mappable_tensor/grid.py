@@ -3,9 +3,11 @@ transformation."""
 
 from typing import Mapping, Optional, Sequence, Tuple, cast
 
-from torch import Tensor, broadcast_shapes, cat
+from torch import Tensor, arange, broadcast_shapes, cat
 from torch import device as torch_device
-from torch import diag, tensor, zeros
+from torch import diag
+from torch import dtype as torch_dtype
+from torch import meshgrid, stack, tensor, zeros
 
 from composable_mapping.affine_transformation import (
     HostAffineTransformation,
@@ -15,7 +17,6 @@ from composable_mapping.affine_transformation import (
 from composable_mapping.affine_transformation.matrix import (
     convert_to_homogenous_coordinates,
 )
-from composable_mapping.dense_deformation import generate_voxel_coordinate_grid
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 from composable_mapping.util import (
     are_broadcastable,
@@ -62,7 +63,7 @@ class GridDefinition(BaseTensorLikeWrapper):
         """Generate the grid as a tensor"""
         if self._affine_transformation.is_zero():
             return zeros(1, dtype=self.dtype, device=self.device).expand(self.shape)
-        voxel_grid = generate_voxel_coordinate_grid(
+        voxel_grid = self._generate_voxel_coordinate_grid(
             spatial_shape=self._spatial_shape, device=self.device, dtype=self.dtype
         )
         return self._affine_transformation(voxel_grid, n_channel_dims=1)
@@ -214,3 +215,15 @@ class GridDefinition(BaseTensorLikeWrapper):
             f"GridDefinition(spatial_shape={self.spatial_shape}, "
             f"affine_transformation={self.affine_transformation})"
         )
+
+    @staticmethod
+    def _generate_voxel_coordinate_grid(
+        spatial_shape: Sequence[int],
+        device: Optional[torch_device] = None,
+        dtype: Optional[torch_dtype] = None,
+    ) -> Tensor:
+        axes = [
+            arange(start=0, end=dim_size, device=device, dtype=dtype) for dim_size in spatial_shape
+        ]
+        coordinates = stack(meshgrid(axes, indexing="ij"), dim=0)
+        return coordinates[None]

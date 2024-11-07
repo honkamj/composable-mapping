@@ -3,9 +3,12 @@
 from typing import Mapping, Sequence
 
 from torch import Tensor
+from torch import all as torch_all
+from torch import ge, gt, le, lt, tensor
+
+from composable_mapping.util import move_channels_first, move_channels_last
 
 from .composable_mapping import ComposableMapping
-from .dense_deformation import generate_mask_based_on_bounds
 from .mappable_tensor import MappableTensor
 from .tensor_like import BaseTensorLikeWrapper, ITensorLike
 
@@ -45,7 +48,7 @@ class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
 
     def __call__(self, coordinates: MappableTensor) -> MappableTensor:
         values = coordinates.generate_values()
-        update_mask = generate_mask_based_on_bounds(
+        update_mask = self._generate_mask_based_on_bounds(
             coordinates=values,
             n_channel_dims=coordinates.n_channel_dims,
             min_values=self._min_values,
@@ -54,6 +57,34 @@ class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
             inclusive_max=self._inclusive_max,
         )
         return coordinates.mask_and(update_mask)
+
+    @staticmethod
+    def _generate_mask_based_on_bounds(
+        coordinates: Tensor,
+        min_values: Sequence[float],
+        max_values: Sequence[float],
+        n_channel_dims: int = 1,
+        inclusive_min: bool = True,
+        inclusive_max: bool = True,
+    ) -> Tensor:
+        coordinates = move_channels_last(coordinates.detach(), n_channel_dims=n_channel_dims)
+        non_blocking = coordinates.device.type != "cpu"
+        min_values_tensor = tensor(min_values, dtype=coordinates.dtype).to(
+            device=coordinates.device, non_blocking=non_blocking
+        )
+        max_values_tensor = tensor(max_values, dtype=coordinates.dtype).to(
+            device=coordinates.device, non_blocking=non_blocking
+        )
+        normalized_coordinates = (coordinates - min_values_tensor) / (
+            max_values_tensor - min_values_tensor
+        )
+        min_operator = ge if inclusive_min else gt
+        max_operator = le if inclusive_max else lt
+        fov_mask = min_operator(normalized_coordinates, 0) & max_operator(normalized_coordinates, 1)
+        fov_mask = move_channels_first(
+            torch_all(fov_mask, dim=-1, keepdim=True), n_channel_dims=n_channel_dims
+        )
+        return fov_mask
 
     def invert(self, **arguments):
         raise NotImplementedError("Rectangle mask is not invertible")

@@ -10,7 +10,17 @@ T = TypeVar("T")
 
 
 def get_batch_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
-    """Returns indices for batch dimensions"""
+    """Obtain indices for batch dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        n_total_dims: Number of total dimensions.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Indices for batch dimensions.
+    """
     first_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[0]
     return tuple(range(first_channel_dim))
 
@@ -19,13 +29,33 @@ def get_spatial_dims(
     n_total_dims: int,
     n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
-    """Returns indices for spatial dimensions"""
+    """Obtain indices for spatial dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        n_total_dims: Number of total dimensions.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Indices for spatial dimensions.
+    """
     last_channel_dim = get_channel_dims(n_total_dims, n_channel_dims)[-1]
     return tuple(range(last_channel_dim + 1, n_total_dims))
 
 
 def get_channel_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, ...]:
-    """Returns indices for channel dimensions"""
+    """Obtain indices for channel dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        n_total_dims: Number of total dimensions.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Indices for channel dimensions.
+    """
     if n_total_dims < 1:
         raise RuntimeError("Invalid number of total dimensions")
     if n_total_dims < n_channel_dims:
@@ -40,7 +70,17 @@ def get_channel_dims(n_total_dims: int, n_channel_dims: int = 1) -> Tuple[int, .
 
 
 def get_batch_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
-    """Returns size of the batch dimensions"""
+    """Obtain shape of the batch dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shape: Shape of the tensor.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Shape of the batch dimensions.
+    """
     first_channel_dim = get_channel_dims(len(shape), n_channel_dims)[0]
     return tuple(shape[:first_channel_dim])
 
@@ -49,13 +89,33 @@ def get_spatial_shape(
     shape: Sequence[int],
     n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
-    """Returns shape of the spatial dimensions"""
+    """Obtain shape of the spatial dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shape: Shape of the tensor.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Shape of the spatial dimensions.
+    """
     last_channel_dim = get_channel_dims(len(shape), n_channel_dims)[-1]
     return tuple(shape[last_channel_dim + 1 :])
 
 
 def get_channels_shape(shape: Sequence[int], n_channel_dims: int = 1) -> Tuple[int, ...]:
-    """Returns shape of the channel dimensions"""
+    """Obtain shape of the channel dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shape: Shape of the tensor.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Shape of the channel dimensions.
+    """
     channel_dims = get_channel_dims(len(shape), n_channel_dims)
     n_channel_dims = len(channel_dims)
     first_channel_dim = channel_dims[0]
@@ -66,7 +126,17 @@ def has_spatial_dims(
     shape: Sequence[int],
     n_channel_dims: int = 1,
 ) -> bool:
-    """Check if shape has spatial dimensions"""
+    """Has the shape spatial dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shape: Shape of the tensor.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Whether the shape has spatial dimensions.
+    """
     return bool(get_spatial_shape(shape, n_channel_dims))
 
 
@@ -74,25 +144,37 @@ def reduce_channels_shape_to_ones(
     shape: Sequence[int],
     n_channel_dims: int = 1,
 ) -> Tuple[int, ...]:
-    """Reduces channel shape to ones
+    """Modify channel shape to ones.
 
-    E.g. (3, 5, 4, 4) with n_channel_dims = 1 returns
-    (3, 1, 4, 4)
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    E.g. (3, 5, 4, 4) with n_channel_dims = 2 returns
+    (3, 1, 1, 4).
+
+    Args:
+        shape: Shape of the tensor.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Shape with channel dimensions reduced to ones.
     """
     batch_shape, channel_shape, spatial_shape = split_shape(shape, n_channel_dims)
     return batch_shape + tuple(1 for _ in channel_shape) + spatial_shape
 
 
-def num_spatial_dims(
-    n_total_dims: int,
-    n_channel_dims: int = 1,
-) -> int:
-    """Returns number of spatial dimensions"""
-    return len(get_spatial_dims(n_total_dims, n_channel_dims))
-
-
 def get_n_channel_dims(n_total_dims: int, n_spatial_dims: int) -> int:
-    """Returns number of channel dimensions"""
+    """Obtain number of channel dimensions based on number of spatial
+    dimensions, if possible.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        n_total_dims: Number of total dimensions.
+        n_spatial_dims: Number of spatial dimensions.
+
+    Returns:
+        Number of channel dimensions.
+    """
     if n_spatial_dims < 0:
         raise RuntimeError("Invalid number of spatial dimensions")
     if n_spatial_dims == 0:
@@ -109,13 +191,18 @@ def move_channels_first(
     tensor: Tensor,
     n_channel_dims: int = 1,
 ) -> Tensor:
-    """Move channel dimensions back from being the last dimensions
+    """Move channel dimensions back from being the last dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
 
     Args:
-        tensor: Tensor with shape (batch_size, *, channel_1, ..., channel_{n_channel_dims})
-        n_channel_dims: Number of channel dimensions
+        tensor: Tensor with shape
+            (*batch_shape, *spatial_shape, *channels_shape).
+        n_channel_dims: Number of channel dimensions.
 
-    Returns: Tensor with shape (batch_size, channel_1, ..., channel_{n_channel_dims}, *)
+    Returns:
+        Tensor with shape
+        (*batch_shape, *channels_shape, *spatial_shape)
     """
     channel_dims = get_channel_dims(tensor.ndim, n_channel_dims)
     return tensor.moveaxis(
@@ -127,11 +214,16 @@ def move_channels_first(
 def move_channels_last(tensor: Tensor, n_channel_dims: int = 1) -> Tensor:
     """Move channel dimensions last
 
-    Args:
-        tensor: Tensor with shape (batch_size, channel_1, ..., channel_{n_channel_dims}, *)
-        n_channel_dims: Number of channel dimensions
+    See `composable_mapping` for special handling of shapes in the codebase.
 
-    Returns: Tensor with shape (batch_size, *, channel_1, ..., channel_{n_channel_dims})
+    Args:
+        tensor: Tensor with shape
+            (*batch_shape, *channels_shape, *spatial_shape)
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Tensor with shape
+        (*batch_shape, *spatial_shape, *channels_shape)
     """
     channel_dims = get_channel_dims(tensor.ndim, n_channel_dims)
     return tensor.moveaxis(
@@ -153,13 +245,22 @@ def broadcast_shapes_in_parts_splitted(
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
 ) -> Tuple[Optional[Tuple[int, ...]], Optional[Tuple[int, ...]], Optional[Tuple[int, ...]]]:
-    """Broadcasts batch dimension, channel dimensions and spatial dimensions separately
+    """Broadcast batch dimension, channel dimensions and spatial dimensions separately.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
 
     Args:
-        shapes: Shapes to broadcast
-        n_channel_dims: Number of channel dims for each shape, if
-            integer is given, same number will be used for all shapes. Channel dimensions
-            are assumed to come after the batch dimension.
+        shapes: Shapes to broadcast.
+        n_channel_dims: Number of channel dims for each shape, if integer is
+            given, same number will be used for all shapes.
+        broadcast_batch: Whether to broadcast batch dimension.
+        broadcast_channels: Whether to broadcast channel dimensions.
+        broadcast_spatial: Whether to broadcast spatial dimensions.
+
+    Returns:
+        Tuple of broadcasted batch shape, broadcasted channel shape and
+        broadcasted spatial shape. If the part of the shape is not broadcasted,
+        None is returned.
     """
     channel_dims_iterable = _n_dims_to_iterable(n_channel_dims)
     splitted_shapes = [
@@ -212,13 +313,23 @@ def broadcast_optional_shapes_in_parts_splitted(
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
 ) -> Tuple[Optional[Tuple[int, ...]], Optional[Tuple[int, ...]], Optional[Tuple[int, ...]]]:
-    """Broadcasts batch dimension, channel dimensions and spatial dimensions separately
+    """Broadcast batch dimension, channel dimensions and spatial dimensions
+    separately for optional shapes.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
 
     Args:
-        shapes: Shapes to broadcast
-        n_channel_dims: Number of channel dims for each shape, if
-            integer is given, same number will be used for all shapes. Channel dimensions
-            are assumed to come after the batch dimension.
+        shapes: Optional shapes to broadcast. If None, the value is ignored.
+        n_channel_dims: Number of channel dims for each shape, if integer is
+            given, same number will be used for all shapes.
+        broadcast_batch: Whether to broadcast batch dimension.
+        broadcast_channels: Whether to broadcast channel dimensions.
+        broadcast_spatial: Whether to broadcast spatial dimensions.
+
+    Returns:
+        Tuple of broadcasted batch shape, broadcasted channel shape and
+        broadcasted spatial shape. If the part of the shape is not broadcasted,
+        None is returned.
     """
     not_optional_shapes, n_channel_dims = _select_optional_shapes(
         *shapes, n_channel_dims=n_channel_dims
@@ -241,7 +352,22 @@ def broadcast_shapes_in_parts(
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
 ) -> Sequence[Tuple[int, ...]]:
-    """Broadcasts shapes spatially"""
+    """Broadcast batch dimension, channel dimensions and spatial dimensions
+    separately while returning the broadcasted full shapes.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shapes: Shapes to broadcast.
+        n_channel_dims: Number of channel dims for each shape, if integer is
+            given, same number will be used for all shapes.
+        broadcast_batch: Whether to broadcast batch dimension.
+        broadcast_channels: Whether to broadcast channel dimensions.
+        broadcast_spatial: Whether to broadcast spatial dimensions.
+
+    Returns:
+        Broadcasted shapes.
+    """
     batch_shape, channel_shape, spatial_shape = broadcast_shapes_in_parts_splitted(
         *shapes,
         n_channel_dims=n_channel_dims,
@@ -271,10 +397,24 @@ def broadcast_shapes_in_parts_to_single_shape(
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
 ) -> Tuple[int, ...]:
-    """Broadcasts shapes spatially to single shape
+    """Broadcasts batch dimension, channel dimensions and spatial dimensions
+    separately while returning a single broadcasted shape.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shapes: Shapes to broadcast.
+        n_channel_dims: Number of channel dims for each shape, if integer is
+            given, same number will be used for all shapes.
+        broadcast_batch: Whether to broadcast batch dimension.
+        broadcast_channels: Whether to broadcast channel dimensions.
+        broadcast_spatial: Whether to broadcast spatial dimensions.
+
+    Returns:
+        Broadcasted shape.
 
     Raises:
-        RuntimeError: If the shapes do not broadcast to the same shape
+        RuntimeError: If the shapes do not broadcast to the same shape.
     """
     broadcasted_shapes = broadcast_shapes_in_parts(
         *shapes,
@@ -295,10 +435,25 @@ def broadcast_optional_shapes_in_parts_to_single_shape(
     broadcast_channels: bool = True,
     broadcast_spatial: bool = True,
 ) -> Tuple[int, ...]:
-    """Broadcasts shapes spatially to single shape
+    """Broadcasts batch dimension, channel dimensions and spatial dimensions of
+    optional shapes separately while returning a single broadcasted shape.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shapes: Optional shapes to broadcast.
+        n_channel_dims: Number of channel dims for each shape, if integer is
+            given, same number will be used for all shapes.
+        broadcast_batch: Whether to broadcast batch dimension.
+        broadcast_channels: Whether to broadcast channel dimensions.
+        broadcast_spatial: Whether to broadcast spatial dimensions.
+
+    Returns:
+        Broadcasted shape.
 
     Raises:
-        RuntimeError: If the shapes do not broadcast to the same shape
+        RuntimeError: If the shapes do not broadcast to the same shape or if
+            no shapes are provided.
     """
     not_optional_shapes, n_channel_dims = _select_optional_shapes(
         *shapes, n_channel_dims=n_channel_dims
@@ -322,8 +477,19 @@ def broadcast_to_in_parts(
     spatial_shape: Optional[Sequence[int]] = None,
     n_channel_dims: int = 1,
 ) -> Tensor:
-    """Broadcasts tensor to given shapes, if None, the part of the shape is not
-    broadcasted"""
+    """Broadcasts tensor to given batch, channel and spatial shapes separately.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        tensor: Tensor to broadcast.
+        batch_shape: Shape of the batch dimensions to broadcast to.
+        channels_shape: Shape of the channel dimensions to broadcast to.
+        spatial_shape: Shape of the spatial dimensions to broadcast to.
+
+    Returns:
+        Broadcasted tensor.
+    """
     initial_batch_shape, initial_channels_shape, initial_spatial_shape = split_shape(
         tensor.shape, n_channel_dims=n_channel_dims
     )
@@ -370,7 +536,22 @@ def broadcast_tensors_in_parts(
     broadcast_spatial: bool = True,
     n_channel_dims: Union[int, Iterable[int]] = 1,
 ) -> Tuple[Tensor, ...]:
-    """Broadcasts tensors spatially"""
+    """Broadcast multiple tensors separately for batch, channel and spatial
+    dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        tensors: Tensors to broadcast.
+        broadcast_batch: Whether to broadcast batch dimension.
+        broadcast_channels: Whether to broadcast channel dimensions.
+        broadcast_spatial: Whether to broadcast spatial dimensions.
+        n_channel_dims: Number of channel dims for each tensor, if integer is
+            given, same number will be used for all tensors.
+
+    Returns:
+        Broadcasted tensors.
+    """
     shapes = [tensor.shape for tensor in tensors]
     broadcasted_batch_shape, broadcasted_channel_shape, broadcasted_spatial_shape = (
         broadcast_shapes_in_parts_splitted(
@@ -403,7 +584,22 @@ def broadcast_optional_tensors_in_parts(
     broadcast_spatial: bool = True,
     n_channel_dims: Union[int, Iterable[int]] = 1,
 ) -> Tuple[Optional[Tensor], ...]:
-    """Broadcasts tensors spatially"""
+    """Broadcast multiple optional tensors separately for batch, channel and
+    spatial dimensions.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        tensors: Optional tensors to broadcast.
+        broadcast_batch: Whether to broadcast batch dimension.
+        broadcast_channels: Whether to broadcast channel dimensions.
+        broadcast_spatial: Whether to broadcast spatial dimensions.
+        n_channel_dims: Number of channel dims for each tensor, if integer is
+            given, same number will be used for all tensors.
+
+    Returns:
+        Broadcasted tensors with the same None positions as the input tensors.
+    """
     shapes = [None if tensor is None else tensor.shape for tensor in tensors]
     broadcasted_batch_shape, broadcasted_channel_shape, broadcasted_spatial_shape = (
         broadcast_optional_shapes_in_parts_splitted(
@@ -436,7 +632,17 @@ def broadcast_optional_tensors_in_parts(
 def split_shape(
     shape: Sequence[int], n_channel_dims: int = 1
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]:
-    """Splits shape into batch, channel and spatial dimensions"""
+    """Splits shape into batch, channel and spatial shapes.
+
+    See `composable_mapping` for special handling of shapes in the codebase.
+
+    Args:
+        shape: Shape of the tensor.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Tuple of batch shape, channel shape and spatial shape.
+    """
     channel_dims = get_channel_dims(len(shape), n_channel_dims)
     n_channel_dims = len(channel_dims)
     first_channel_dim = channel_dims[0]
@@ -451,7 +657,16 @@ def combine_optional_masks(
     *masks: Optional[Tensor],
     n_channel_dims: Union[int, Iterable[int]] = 1,
 ) -> Optional[Tensor]:
-    """Combine optional masks"""
+    """Combine optional masks.
+
+    Args:
+        masks: Masks to combine.
+        n_channel_dims: Number of channel dims for each mask, if integer is
+            given, same number will be used for all masks.
+
+    Returns:
+        Combined mask.
+    """
     broadcasted_masks = broadcast_tensors_in_parts(
         *(mask for mask in masks if mask is not None),
         n_channel_dims=n_channel_dims,
@@ -467,7 +682,15 @@ def combine_optional_masks(
 
 
 def are_broadcastable(shape_1: Sequence[int], shape_2: Sequence[int]) -> bool:
-    """Check if two shapes are broadcastable"""
+    """Check if two shapes are broadcastable.
+
+    Args:
+        shape_1: First shape.
+        shape_2: Second shape.
+
+    Returns:
+        Whether the shapes are broadcastable.
+    """
     if any(
         dim_size_1 != dim_size_2 and dim_size_1 != 1 and dim_size_2 != 1
         for dim_size_1, dim_size_2 in zip(shape_1[::-1], shape_2[::-1])
@@ -477,7 +700,15 @@ def are_broadcastable(shape_1: Sequence[int], shape_2: Sequence[int]) -> bool:
 
 
 def is_broadcastable_to(source_shape: Sequence[int], target_shape: Sequence[int]) -> bool:
-    """Check if source shape is broadcastable to target shape"""
+    """Check if source shape is broadcastable to target shape.
+
+    Args:
+        source_shape: Source shape.
+        target_shape: Target shape.
+
+    Returns:
+        Whether the source shape is broadcastable to the target shape.
+    """
     if len(target_shape) < len(source_shape) or any(
         dim_size_1 not in {dim_size_2, 1}
         for dim_size_1, dim_size_2 in zip(source_shape[::-1], target_shape[::-1])
@@ -493,9 +724,25 @@ def crop_and_then_pad_spatial(
     value: Optional[float] = 0.0,
     n_channel_dims: int = 1,
 ) -> Tensor:
-    """Pad spatial dimensions starting from the first spatial dimension"""
-    n_spatial_dims = num_spatial_dims(tensor.ndim, n_channel_dims)
+    """Crop or pad spatial dimensions starting from the first spatial dimension.
+
+    Applies cropping first and then padding. Negative values in pads_or_crops
+    indicate cropping.
+
+    Args:
+        tensor: Tensor to pad or crop.
+        pads_or_crops: Pads or crops to apply. Each element is a tuple of
+            padding or cropping for the start and end of the spatial dimension.
+            Negative values indicate cropping.
+        mode: Padding mode.
+        value: Value to pad with.
+        n_channel_dims: Number of channel dimensions.
+
+    Returns:
+        Padded or cropped tensor.
+    """
     spatial_shape = get_spatial_shape(tensor.shape, n_channel_dims)
+    n_spatial_dims = len(spatial_shape)
     if len(pads_or_crops) != n_spatial_dims:
         raise ValueError("Number of paddings must match number of spatial dimensions")
     if all(padding == (0, 0) for padding in pads_or_crops):
@@ -539,7 +786,18 @@ def is_croppable_first(
     pads_or_crops: Sequence[Tuple[int, int]],
     mode: str = "constant",
 ) -> bool:
-    """Checks whether the pads or crops can be applied by applying the cropping first"""
+    """Checks whether the pads or crops can be applied by applying the cropping first.
+
+    Args:
+        spatial_shape: Shape of the spatial dimensions.
+        pads_or_crops: Pads or crops to apply. Each element is a tuple of
+            padding or cropping for the start and end of the spatial dimension.
+            Negative values indicate cropping.
+        mode: Padding mode.
+
+    Returns:
+        Whether the pads or crops can be applied by applying the cropping first.
+    """
     if mode == "constant":
         return True
     n_spatial_dims = len(spatial_shape)
@@ -549,13 +807,6 @@ def is_croppable_first(
         if not _is_dim_croppable_first(spatial_dim_size, padding_start, padding_end, mode):
             return False
     return True
-
-
-def includes_padding(
-    pads_or_crops: Sequence[Tuple[int, int]],
-) -> bool:
-    """Checks if pads or crops include padding"""
-    return any(padding_start > 0 or padding_end > 0 for padding_start, padding_end in pads_or_crops)
 
 
 def _is_dim_croppable_first(
@@ -584,3 +835,19 @@ def _is_dim_croppable_first(
     if mode in ("reflect", "circular") and pad_width >= remaining_width:
         return False
     return True
+
+
+def includes_padding(
+    pads_or_crops: Sequence[Tuple[int, int]],
+) -> bool:
+    """Checks if pads or crops include padding (positive values).
+
+    Args:
+        pads_or_crops: Pads or crops to apply. Each element is a tuple of
+            padding or cropping for the start and end of the spatial dimension.
+            Negative values indicate cropping.
+
+    Returns:
+        Whether pads or crops include padding.
+    """
+    return any(padding_start > 0 or padding_end > 0 for padding_start, padding_end in pads_or_crops)
