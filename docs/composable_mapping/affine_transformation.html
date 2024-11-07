@@ -564,7 +564,6 @@ matrix on host (cpu), if available</p>
                                 <dd id="AffineTransformation.dtype" class="variable">dtype</dd>
                 <dd id="AffineTransformation.device" class="variable">device</dd>
                 <dd id="AffineTransformation.cast" class="function">cast</dd>
-                <dd id="AffineTransformation.pin_memory" class="function">pin_memory</dd>
                 <dd id="AffineTransformation.detach" class="function">detach</dd>
 
             </div>
@@ -1013,10 +1012,25 @@ diagonal or translation is given.</li>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Cast to given data type and device</p>
+            <div class="docstring"><p>Cast to given data type and device.</p>
 
 <p>We will not use method name "to" as it would create conflict with
 torch.nn.Module.to method which does casting in-place.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>dtype:</strong>  Data type to cast to.</li>
+<li><strong>device:</strong>  Device to cast to.</li>
+<li><strong>non_blocking:</strong>  Whether to perform the operation asynchronously (if
+possible).</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>New tensor like object with the casted tensor(s).</p>
+</blockquote>
 </div>
 
 
@@ -1284,8 +1298,7 @@ torch.nn.Module.to method which does casting in-place.</p>
                                 <h5>Inherited Members</h5>
                                 <dl>
                                     <div><dt>composable_mapping.tensor_like.BaseTensorLikeWrapper</dt>
-                                <dd id="DiagonalAffineMatrixDefinition.pin_memory" class="function">pin_memory</dd>
-                <dd id="DiagonalAffineMatrixDefinition.detach" class="function">detach</dd>
+                                <dd id="DiagonalAffineMatrixDefinition.detach" class="function">detach</dd>
 
             </div>
                                 </dl>
@@ -1670,7 +1683,6 @@ matrix on host (cpu), if available</p>
                                 <dd id="DiagonalAffineTransformation.dtype" class="variable">dtype</dd>
                 <dd id="DiagonalAffineTransformation.device" class="variable">device</dd>
                 <dd id="DiagonalAffineTransformation.cast" class="function">cast</dd>
-                <dd id="DiagonalAffineTransformation.pin_memory" class="function">pin_memory</dd>
                 <dd id="DiagonalAffineTransformation.detach" class="function">detach</dd>
 
             </div>
@@ -1913,7 +1925,7 @@ matrix on host (cpu), if available</p>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Detach the wrapped tensors from computational graph</p>
+            <div class="docstring"><p>Detach the wrapped tensors from computational graph.</p>
 </div>
 
 
@@ -1935,9 +1947,7 @@ matrix on host (cpu), if available</p>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Return the device of the underlying tensor(s)</p>
-
-<p>Does not check that all the wrapped tensors are on the same device.</p>
+            <div class="docstring"><p>PyTorch device.</p>
 </div>
 
 
@@ -1969,10 +1979,25 @@ matrix on host (cpu), if available</p>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Cast to given data type and device</p>
+            <div class="docstring"><p>Cast to given data type and device.</p>
 
 <p>We will not use method name "to" as it would create conflict with
 torch.nn.Module.to method which does casting in-place.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>dtype:</strong>  Data type to cast to.</li>
+<li><strong>device:</strong>  Device to cast to.</li>
+<li><strong>non_blocking:</strong>  Whether to perform the operation asynchronously (if
+possible).</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>New tensor like object with the casted tensor(s).</p>
+</blockquote>
 </div>
 
 
@@ -2050,7 +2075,6 @@ torch.nn.Module.to method which does casting in-place.</p>
             </div>
             <div><dt>composable_mapping.tensor_like.BaseTensorLikeWrapper</dt>
                                 <dd id="HostAffineTransformation.dtype" class="variable">dtype</dd>
-                <dd id="HostAffineTransformation.pin_memory" class="function">pin_memory</dd>
 
             </div>
                                 </dl>
@@ -2412,7 +2436,7 @@ matrix on host (cpu), if available</p>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Detach the wrapped tensors from computational graph</p>
+            <div class="docstring"><p>Detach the wrapped tensors from computational graph.</p>
 </div>
 
 
@@ -2434,9 +2458,7 @@ matrix on host (cpu), if available</p>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Return the device of the underlying tensor(s)</p>
-
-<p>Does not check that all the wrapped tensors are on the same device.</p>
+            <div class="docstring"><p>PyTorch device.</p>
 </div>
 
 
@@ -2466,10 +2488,25 @@ matrix on host (cpu), if available</p>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Cast to given data type and device</p>
+            <div class="docstring"><p>Cast to given data type and device.</p>
 
 <p>We will not use method name "to" as it would create conflict with
 torch.nn.Module.to method which does casting in-place.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>dtype:</strong>  Data type to cast to.</li>
+<li><strong>device:</strong>  Device to cast to.</li>
+<li><strong>non_blocking:</strong>  Whether to perform the operation asynchronously (if
+possible).</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>New tensor like object with the casted tensor(s).</p>
+</blockquote>
 </div>
 
 
@@ -2585,7 +2622,6 @@ torch.nn.Module.to method which does casting in-place.</p>
             </div>
             <div><dt>composable_mapping.tensor_like.BaseTensorLikeWrapper</dt>
                                 <dd id="HostDiagonalAffineTransformation.dtype" class="variable">dtype</dd>
-                <dd id="HostDiagonalAffineTransformation.pin_memory" class="function">pin_memory</dd>
 
             </div>
             <div><dt>composable_mapping.affine_transformation.affine_transformation.BaseAffineTransformation</dt>
@@ -3297,7 +3333,6 @@ would equal broadcasting the original output to have n_output_channels channels.
                 <dd id="IAffineTransformation.device" class="variable">device</dd>
                 <dd id="IAffineTransformation.cast" class="function">cast</dd>
                 <dd id="IAffineTransformation.detach" class="function">detach</dd>
-                <dd id="IAffineTransformation.pin_memory" class="function">pin_memory</dd>
 
             </div>
                                 </dl>
@@ -3414,7 +3449,6 @@ would equal broadcasting the original output to have n_output_channels channels.
             </div>
             <div><dt>composable_mapping.tensor_like.BaseTensorLikeWrapper</dt>
                                 <dd id="IdentityAffineTransformation.dtype" class="variable">dtype</dd>
-                <dd id="IdentityAffineTransformation.pin_memory" class="function">pin_memory</dd>
 
             </div>
             <div><dt>composable_mapping.affine_transformation.affine_transformation.BaseAffineTransformation</dt>
@@ -3612,7 +3646,6 @@ matrix on host (cpu)</p>
                 <dd id="IHostAffineTransformation.device" class="variable">device</dd>
                 <dd id="IHostAffineTransformation.cast" class="function">cast</dd>
                 <dd id="IHostAffineTransformation.detach" class="function">detach</dd>
-                <dd id="IHostAffineTransformation.pin_memory" class="function">pin_memory</dd>
 
             </div>
                                 </dl>

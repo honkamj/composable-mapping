@@ -1224,10 +1224,25 @@ diagonal or translation is given.</li>
 </span></pre></div>
 
 
-            <div class="docstring"><p>Cast to given data type and device</p>
+            <div class="docstring"><p>Cast to given data type and device.</p>
 
 <p>We will not use method name "to" as it would create conflict with
 torch.nn.Module.to method which does casting in-place.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>dtype:</strong>  Data type to cast to.</li>
+<li><strong>device:</strong>  Device to cast to.</li>
+<li><strong>non_blocking:</strong>  Whether to perform the operation asynchronously (if
+possible).</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>New tensor like object with the casted tensor(s).</p>
+</blockquote>
 </div>
 
 
@@ -1495,8 +1510,7 @@ torch.nn.Module.to method which does casting in-place.</p>
                                 <h5>Inherited Members</h5>
                                 <dl>
                                     <div><dt>composable_mapping.tensor_like.BaseTensorLikeWrapper</dt>
-                                <dd id="DiagonalAffineMatrixDefinition.pin_memory" class="function">pin_memory</dd>
-                <dd id="DiagonalAffineMatrixDefinition.detach" class="function">detach</dd>
+                                <dd id="DiagonalAffineMatrixDefinition.detach" class="function">detach</dd>
 
             </div>
                                 </dl>
