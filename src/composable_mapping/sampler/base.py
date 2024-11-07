@@ -135,7 +135,7 @@ class BaseSeparableSampler(ISampler):
         self._convolution_threshold = convolution_threshold
         self._mask_threshold = mask_threshold
         self._limit_direction = (
-            limit_direction.as_callable()
+            limit_direction.for_all_spatial_dims()
             if isinstance(limit_direction, LimitDirection)
             else limit_direction
         )

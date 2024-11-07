@@ -39,18 +39,27 @@ class LimitDirection:
         """Average of left and right limit directions."""
         return cls("average")
 
-    def as_callable(self) -> Callable[[int], "LimitDirection"]:
-        """Limit direction as callable.
+    def for_all_spatial_dims(self) -> Callable[[int], "LimitDirection"]:
+        """Obtain callable with spatial dimension as input, and the
+        limit direction as output.
 
         Useful for creating a callable that returns the same limit direction
-        for all dimensions.
+        for all spatial dimensions.
         """
-        return lambda _: self
+        return _SameLimitDirectionForAllSpatialDims(limit_direction=self)
 
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, LimitDirection):
             return False
         return self.direction == value.direction
+
+
+class _SameLimitDirectionForAllSpatialDims:
+    def __init__(self, limit_direction: "LimitDirection") -> None:
+        self.limit_direction = limit_direction
+
+    def __call__(self, _: int) -> "LimitDirection":
+        return self.limit_direction
 
 
 class DataFormat:
