@@ -307,8 +307,10 @@ class MappableTensor(BaseTensorLikeWrapper):
             )
         if displacements is None:
             values = grid
-        else:
+        elif grid is None:
             values = displacements
+        else:
+            values = displacements + grid
         if values is None:
             return zeros(1, dtype=self.dtype, device=self.device).expand(self.shape)
         return values
