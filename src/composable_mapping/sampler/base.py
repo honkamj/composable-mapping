@@ -913,7 +913,7 @@ class FlippingPermutation:
         Returns:
             Coordinate transformation corresponding to the flipping and permutation.
         """
-        if self.spatial_permutation == tuple(range(len(spatial_shape))):
+        if tuple(self.spatial_permutation) == tuple(range(len(spatial_shape))):
             if not self.flipped_spatial_dims:
                 return IdentityAffineTransformation(
                     n_dims=len(spatial_shape), dtype=dtype, device=device
