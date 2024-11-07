@@ -155,7 +155,7 @@ class ICoordinateSystemContainer(ABC):
 
 
 class ComposableMapping(ITensorLike, ABC):
-    """Base class for mappings composable with each other and action on mappable
+    """Base class for mappings composable with each other, and acting on mappable
     tensors.
 
     In general a composable mapping is a callable object that takes coordinates
@@ -164,9 +164,14 @@ class ComposableMapping(ITensorLike, ABC):
     dimensions of an input.
 
     As the name suggests, a composable mapping can be additionally composed with
-    other composable mappings. Basic arithmetic operations are also supported
-    between two composable mappings or between a composable mapping and a number
-    or a tensor, both of which return a new composable mapping.
+    other composable mappings with the `__matmul__` operator (@). Composing does
+    not apply resampling, an operation which can be executed separately using
+    `resample_to` method (or `GridComposableMapping.resample` method for
+    composable mappings with an assigned coordinate system).
+
+    Basic arithmetic operations are also supported between two composable
+    mappings or between a composable mapping and a number or a tensor, both of
+    which return a new composable mapping.
     """
 
     @abstractmethod
@@ -381,7 +386,7 @@ class ComposableMapping(ITensorLike, ABC):
 
 
 class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
-    """Base class for composable mappings coupled with a coordinate system."""
+    """Base class for composable mappings with an assigned coordinate system."""
 
     @abstractmethod
     def invert(self, **arguments) -> "GridComposableMapping":
