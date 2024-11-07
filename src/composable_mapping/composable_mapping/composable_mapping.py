@@ -315,16 +315,19 @@ class ComposableMapping(ITensorLike, ABC):
         """
         return None
 
-    set_default_resampling_data_format = _set_default_resampling_data_format
-    """Set the default data format to use in resampling operations for
-    the mapping.
-    
-    Args:
-        data_format: Default data format to use in resampling operations.
-    
-    Returns:
-        Mapping with the default data format set.
-    """
+    def set_default_resampling_data_format(
+        self, data_format: Optional[DataFormat]
+    ) -> "ComposableMapping":
+        """Set the default data format to use in resampling operations for
+        the mapping.
+
+        Args:
+            data_format: Default data format to use in resampling operations.
+
+        Returns:
+            Mapping with the default data format set.
+        """
+        return _SetDefaultResamplingDataFormatDecorator(self, data_format)
 
     def _get_resampling_data_format(self, data_format: Optional[DataFormat]) -> DataFormat:
         if data_format is not None:
@@ -424,6 +427,11 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
             data_format=data_format,
             sampler=sampler,
         )
+
+    def set_default_resampling_data_format(
+        self, data_format: Optional[DataFormat]
+    ) -> "GridComposableMapping":
+        return super().set_default_resampling_data_format(data_format).assign_coordinates(self)
 
 
 class _AssignCoordinatesDecorator(BaseTensorLikeWrapper, GridComposableMapping):
