@@ -84,10 +84,6 @@ class BaseTensorLikeWrapper(ITensorLike):
     def dtype(
         self,
     ) -> torch_dtype:
-        """Return the dtype of the underlying tensor(s)
-
-        Does not check that all the wrapped tensors have the same dtype.
-        """
         tensors = self._get_tensors()
         if not tensors:
             return next(iter(self._get_children().values())).dtype
@@ -97,10 +93,6 @@ class BaseTensorLikeWrapper(ITensorLike):
     def device(
         self,
     ) -> torch_device:
-        """Return the device of the underlying tensor(s)
-
-        Does not check that all the wrapped tensors are on the same device.
-        """
         tensors = self._get_tensors()
         if not tensors:
             return next(iter(self._get_children().values())).device
