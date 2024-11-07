@@ -106,7 +106,7 @@ class Affine(BaseTensorLikeWrapper, ComposableMapping):
         return cls(IdentityAffineTransformation(n_dims, dtype=dtype, device=device))
 
     @property
-    def default_sampling_data_format(self) -> DataFormat:
+    def default_resampling_data_format(self) -> DataFormat:
         return DataFormat.voxel_displacements()
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:

@@ -9,7 +9,6 @@ from composable_mapping.mappable_tensor import (
     concatenate_mappable_tensors,
     stack_mappable_tensors,
 )
-from composable_mapping.sampler import DataFormat
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
 
 from .composable_mapping import ComposableMapping, GridComposableMapping
@@ -66,8 +65,8 @@ class _Stack(BaseTensorLikeWrapper, ComposableMapping):
         self._channel_index = channel_index
 
     @property
-    def default_sampling_data_format(self) -> DataFormat:
-        return DataFormat.world_coordinates()
+    def default_resampling_data_format(self) -> None:
+        return None
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
@@ -108,8 +107,8 @@ class _Concatenate(BaseTensorLikeWrapper, ComposableMapping):
         self._channel_index = channel_index
 
     @property
-    def default_sampling_data_format(self) -> DataFormat:
-        return DataFormat.world_coordinates()
+    def default_resampling_data_format(self) -> None:
+        return None
 
     def _modified_copy(
         self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
