@@ -78,7 +78,15 @@ class BaseTensorLikeWrapper(ITensorLike):
         tensors: Mapping[str, Tensor],
         children: Mapping[str, ITensorLike],
     ) -> BaseTensorLikeWrapperT:
-        """Create a modified copy of the object with new tensors and children"""
+        """Create a modified copy of the object with new tensors and children.
+
+        Args:
+            tensors: New tensors to be wrapped.
+            children: New children to be wrapped.
+
+        Returns:
+            Modified copy of the object.
+        """
 
     @property
     def dtype(
