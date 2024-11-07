@@ -11,10 +11,10 @@ ITensorLikeT = TypeVar("ITensorLikeT", bound="ITensorLike")
 
 
 class ITensorLike(ABC):
-    """Interface for classes having tensor like properties
+    """Interface for classes having tensor like properties.
 
     Usually contains wrapped tensors with device, dtype, and detachment
-    related functionalities corresponding directly to the wrapped tensors.
+    functionalities corresponding directly to the wrapped tensors.
     """
 
     @property
@@ -22,14 +22,14 @@ class ITensorLike(ABC):
     def dtype(
         self,
     ) -> torch_dtype:
-        """PyTorch data type"""
+        """PyTorch data type."""
 
     @property
     @abstractmethod
     def device(
         self,
     ) -> torch_device:
-        """PyTorch device"""
+        """PyTorch device."""
 
     @abstractmethod
     def cast(
@@ -38,19 +38,24 @@ class ITensorLike(ABC):
         device: Optional[torch_device] = None,
         non_blocking: bool = False,
     ) -> ITensorLikeT:
-        """Cast to given data type and device
+        """Cast to given data type and device.
 
         We will not use method name "to" as it would create conflict with
         torch.nn.Module.to method which does casting in-place.
+
+        Args:
+            dtype: Data type to cast to.
+            device: Device to cast to.
+            non_blocking: Whether to perform the operation asynchronously (if
+                possible).
+
+        Returns:
+            New tensor like object with the casted tensor(s).
         """
 
     @abstractmethod
     def detach(self: ITensorLikeT) -> ITensorLikeT:
-        """Detach the wrapped tensors from computational graph"""
-
-    @abstractmethod
-    def pin_memory(self: ITensorLikeT) -> ITensorLikeT:
-        """Move the wrapped tensors to page-locked memory"""
+        """Detach the wrapped tensors from computational graph."""
 
 
 BaseTensorLikeWrapperT = TypeVar("BaseTensorLikeWrapperT", bound="BaseTensorLikeWrapper")
@@ -119,11 +124,6 @@ class BaseTensorLikeWrapper(ITensorLike):
             key: child.cast(dtype=dtype, device=device, non_blocking=non_blocking)
             for key, child in self._get_children().items()
         }
-        return self._modified_copy(modified_tensors, modified_children)
-
-    def pin_memory(self: BaseTensorLikeWrapperT) -> BaseTensorLikeWrapperT:
-        modified_tensors = {key: tensor.pin_memory() for key, tensor in self._get_tensors().items()}
-        modified_children = {key: child.pin_memory() for key, child in self._get_children().items()}
         return self._modified_copy(modified_tensors, modified_children)
 
     def detach(self: BaseTensorLikeWrapperT) -> BaseTensorLikeWrapperT:
