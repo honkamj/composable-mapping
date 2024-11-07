@@ -242,7 +242,7 @@ class ComposableMapping(ITensorLike, ABC):
             sampler: Sampler used by the generated resampled mapping. Note that
                 this sampler is not used to resample the mapping, but to sample
                 the generated resampled mapping. If None, the default sampler
-                is used (see `sampler.default_sampler`).
+                is used (see `default_sampler`).
 
         Returns:
             Resampled mapping.
@@ -291,9 +291,9 @@ class ComposableMapping(ITensorLike, ABC):
         traced = self(tracer)
         if isinstance(traced, _AffineTracer):
             if traced.traced_affine is None:
-                raise NotAffineTransformationError("Could not infer affine transformation")
+                raise NotAffineTransformationError("Could not infer affine transformation.")
             return traced.traced_affine
-        raise NotAffineTransformationError("Could not infer affine transformation")
+        raise NotAffineTransformationError("Could not infer affine transformation.")
 
     def as_affine_matrix(self) -> Tensor:
         """Obtain the mapping as an affine matrix, if possible.
