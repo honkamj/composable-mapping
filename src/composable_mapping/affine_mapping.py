@@ -24,7 +24,7 @@ class Affine(BaseTensorLikeWrapper, ComposableMapping):
     This class represents an affine transformation applicable to mappable
     tensors. In essence, it is a wrapper around an affine transformation object
     which acts on PyTorch tensors. Since it is a composable mapping, it can be
-    composed with other mappings.
+    composed with other composable mappings.
 
     Recommended way to create an affine transformation is to use the factory
     functions provided in this module or as class methods of this class:
@@ -37,7 +37,7 @@ class Affine(BaseTensorLikeWrapper, ComposableMapping):
 
     def __init__(self, transformation: IAffineTransformation) -> None:
         self.transformation: IAffineTransformation = transformation
-        """The wrapped affine transformation action on PyTorch tensors."""
+        """The wrapped affine transformation acting on PyTorch tensors."""
 
     @classmethod
     def from_matrix(cls, matrix: Tensor) -> "Affine":
