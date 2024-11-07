@@ -72,7 +72,6 @@ from .sampler import (
     get_sampler,
     set_default_sampler,
 )
-from .tensor_like import ITensorLike
 from .visualization import (
     GridVisualizationArguments,
     ImageVisualizationArguments,
@@ -99,7 +98,6 @@ __all__ = [
     "Identity",
     "ISampler",
     "ImageVisualizationArguments",
-    "ITensorLike",
     "LimitDirection",
     "LinearInterpolator",
     "MappableTensor",
