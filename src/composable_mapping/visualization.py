@@ -216,7 +216,7 @@ def visualize_image(
     if arguments.mask_color is None:
         mask_color: Optional[ndarray] = None
     else:
-        mask_color = array(to_rgba(arguments.mask_color))
+        mask_color = array(to_rgba(arguments.mask_color))[None, None]
     for axis, plane, mask_plane, (dim_1, dim_2) in zip(
         axes.flatten(), planes, mask_planes, dimension_pairs
     ):
@@ -238,7 +238,6 @@ def visualize_image(
         )
         if mask_color is not None:
             mask_plane = moveaxis(mask_plane[arguments.batch_index], 0, -1)
-            mask_color = mask_color[None, None]
             coloured_mask_plane = (1 - mask_plane) * mask_color
             axis.imshow(
                 coloured_mask_plane,
