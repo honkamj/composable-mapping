@@ -6,7 +6,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    List,
     Mapping,
     Optional,
     Sequence,
@@ -15,22 +14,10 @@ from typing import (
     cast,
 )
 
-from torch import Tensor
-from torch import bool as torch_bool
-from torch import contiguous_format
-from torch import device as torch_device
-from torch import dtype as torch_dtype
-from torch import empty, linspace, long, ones, tensor, zeros
+from torch import Tensor, ones
 from torch.autograd.functional import vjp
 from torch.nn.functional import conv1d, conv_transpose1d
 
-from composable_mapping.affine_transformation import (
-    DiagonalAffineMatrixDefinition,
-    HostAffineTransformation,
-    HostDiagonalAffineTransformation,
-    IdentityAffineTransformation,
-    IHostAffineTransformation,
-)
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import (
     crop_and_then_pad_spatial,
@@ -39,6 +26,10 @@ from composable_mapping.util import (
     is_croppable_first,
 )
 
+from .convolution_sampling import (
+    apply_flipping_permutation_to_volume,
+    obtain_conv_parameters,
+)
 from .interface import DataFormat, ISampler, LimitDirection
 from .inverse import FixedPointInverseSampler
 
@@ -240,263 +231,62 @@ class BaseSeparableSampler(ISampler):
             "reflection": ("reflect", 0.0),
         }[self._extrapolation_mode]
 
-    def _extract_conv_interpolatable_parameters(
-        self,
-        volume: MappableTensor,
-        voxel_coordinates: MappableTensor,
-    ) -> Optional[Tuple[Tensor, Tensor, Tensor, Tensor, "FlippingPermutation"]]:
-        if voxel_coordinates.displacements is not None:
-            return None
-        grid = voxel_coordinates.grid
-        assert grid is not None
-        affine_transformation = grid.affine_transformation
-        channels_shape = affine_transformation.channels_shape
-        if channels_shape[0] != channels_shape[1]:
-            return None
-        n_dims = len(grid.spatial_shape)
-        host_matrix = grid.affine_transformation.as_host_matrix()
-        if host_matrix is None:
-            return None
-        host_matrix = host_matrix.view(-1, n_dims + 1, n_dims + 1)
-        flipping_permutation = FlippingPermutation.obtain_normalizing_flipping_permutation(
-            host_matrix[0]
-        )
-        if flipping_permutation is None:
-            return None
-        affine_transformation = (
-            flipping_permutation.as_transformation(spatial_shape=volume.spatial_shape)
-            @ affine_transformation
-        )
-        host_matrix = affine_transformation.as_host_matrix()
-        assert host_matrix is not None
-        host_matrix = host_matrix.view(-1, n_dims + 1, n_dims + 1)
-        diagonal = host_matrix[0, :-1, :-1].diagonal()
-        if diagonal.any() == 0.0:
-            return None
-        translation = host_matrix[0, :-1, -1].clone(memory_format=contiguous_format)
-
-        transposed_convolve = diagonal < 0.75
-        downsampling_factor = empty(diagonal.shape, device=diagonal.device, dtype=diagonal.dtype)
-        downsampling_factor[~transposed_convolve] = diagonal[~transposed_convolve].round()
-        downsampling_factor[transposed_convolve] = 1 / (1 / diagonal[transposed_convolve]).round()
-        rounded_diagonal_matrix = DiagonalAffineMatrixDefinition(
-            diagonal=downsampling_factor, translation=translation
-        ).as_matrix()
-        difference_matrix = host_matrix[:, :-1, :-1] - rounded_diagonal_matrix[:-1, :-1]
-        shape_tensor = tensor(grid.spatial_shape, device=torch_device("cpu"), dtype=grid.dtype)
-        max_conv_coordinate_difference_upper_bound = (
-            (difference_matrix * shape_tensor).abs().amax(dim=(0, 2))
-        )
-        if (max_conv_coordinate_difference_upper_bound > self._convolution_threshold).any():
-            return None
-        interpolating_kernel = tensor(
-            [
-                self._is_interpolating_kernel(flipping_permutation.spatial_permutation[spatial_dim])
-                for spatial_dim in range(n_dims)
-            ],
-            device=torch_device("cpu"),
-            dtype=torch_bool,
-        )
-        if (interpolating_kernel & (~transposed_convolve)).any():
-            rounded_translation = translation.round()
-            max_slicing_coordinate_difference_upper_bound = (
-                (translation - rounded_translation).abs()
-                + max_conv_coordinate_difference_upper_bound
-            ).amax()
-            convolve = (
-                (~interpolating_kernel)
-                | (max_slicing_coordinate_difference_upper_bound > self._convolution_threshold)
-            ) & (~transposed_convolve)
-            no_convolve_or_transposed_convolve = (~transposed_convolve) & (~convolve)
-            translation[no_convolve_or_transposed_convolve] = translation[
-                no_convolve_or_transposed_convolve
-            ].round()
-        else:
-            convolve = ~transposed_convolve
-        return downsampling_factor, translation, convolve, transposed_convolve, flipping_permutation
-
-    def _obtain_conv_parameters(
-        self,
-        volume: MappableTensor,
-        voxel_coordinates: MappableTensor,
-    ) -> Optional[
-        Tuple[
-            Sequence[Optional[Tensor]],
-            Sequence[int],
-            Sequence[int],
-            Sequence[bool],
-            Sequence[Tuple[int, int]],
-            Sequence[Tuple[int, int]],
-            "FlippingPermutation",
-        ]
-    ]:
-        conv_interpolation_parameters = self._extract_conv_interpolatable_parameters(
-            volume, voxel_coordinates
-        )
-        if conv_interpolation_parameters is None:
-            return None
-        downsampling_factor, translation, convolve, transposed_convolve, flipping_permutation = (
-            conv_interpolation_parameters
-        )
-        pre_pads_or_crops: List[Tuple[int, int]] = []
-        post_pads_or_crops: List[Tuple[int, int]] = []
-        conv_paddings: List[int] = []
-        conv_kernels: List[Optional[Tensor]] = []
-        for spatial_dim, (
-            dim_size_volume,
-            dim_size_grid,
-            dim_convolve,
-            dim_transposed_convolve,
-            dim_translation,
-            dim_downsampling_factor,
-        ) in enumerate(
-            zip(
-                flipping_permutation.permute_sequence(volume.spatial_shape),
-                voxel_coordinates.spatial_shape,
-                convolve.tolist(),
-                transposed_convolve.tolist(),
-                translation.tolist(),
-                downsampling_factor.tolist(),
-            )
-        ):
-            kernel_dim = flipping_permutation.spatial_permutation[spatial_dim]
-            flip_kernel = kernel_dim in flipping_permutation.flipped_spatial_dims
-            (kernel_width, inclusive_min, inclusive_max) = self._kernel_support(kernel_dim)(
-                self._limit_direction(kernel_dim)
-            )
-            if flip_kernel:
-                inclusive_min, inclusive_max = inclusive_max, inclusive_min
-            lower_flooring_function = self._get_flooring_function(inclusive_min)
-            upper_flooring_function = self._get_flooring_function(inclusive_max)
-            min_coordinate = dim_translation
-            max_coordinate = dim_translation + dim_downsampling_factor * (dim_size_grid - 1)
-            if dim_convolve or dim_transposed_convolve:
-                pre_pad_or_crop_lower = lower_flooring_function(kernel_width / 2 - dim_translation)
-                pre_pad_or_crop_upper = upper_flooring_function(
-                    kernel_width / 2
-                    + dim_translation
-                    + dim_downsampling_factor * (dim_size_grid - 1)
-                    - (dim_size_volume - 1)
-                )
-                if dim_transposed_convolve:
-                    start_kernel_coordinate = (
-                        1
-                        - dim_translation
-                        + upper_flooring_function(
-                            (kernel_width / 2 - (1 - dim_translation)) / dim_downsampling_factor
-                        )
-                        * dim_downsampling_factor
-                    )
-                    end_kernel_coordinate = (
-                        -dim_translation
-                        - lower_flooring_function(
-                            (kernel_width / 2 - dim_translation) / dim_downsampling_factor
-                        )
-                        * dim_downsampling_factor
-                    )
-                    kernel_step_size = dim_downsampling_factor
-                else:
-                    relative_coordinate = dim_translation - floor(dim_translation)
-                    start_kernel_coordinate = (
-                        -lower_flooring_function(kernel_width / 2 - relative_coordinate)
-                        - relative_coordinate
-                    )
-                    end_kernel_coordinate = upper_flooring_function(
-                        kernel_width / 2 - (1 - relative_coordinate)
-                    ) + (1 - relative_coordinate)
-                    kernel_step_size = 1
-                kernel_coordinates = linspace(
-                    start_kernel_coordinate,
-                    end_kernel_coordinate,
-                    int(
-                        round(
-                            abs(end_kernel_coordinate - start_kernel_coordinate) / kernel_step_size
-                        )
-                    )
-                    + 1,
-                    dtype=voxel_coordinates.dtype,
-                    device=voxel_coordinates.device,
-                )
-                if flip_kernel:
-                    kernel_coordinates = -kernel_coordinates
-                kernel = self._kernel(
-                    kernel_coordinates,
-                    spatial_dim=kernel_dim,
-                )
-            else:
-                kernel = None
-                pre_pad_or_crop_lower = -int(min_coordinate)
-                pre_pad_or_crop_upper = int(max_coordinate) - (dim_size_volume - 1)
-            if dim_transposed_convolve:
-                post_pad_or_crop_lower = -int(
-                    round(
-                        (min_coordinate + pre_pad_or_crop_lower + start_kernel_coordinate)
-                        / dim_downsampling_factor
-                    )
-                )
-                post_pad_or_crop_upper = -int(
-                    round(
-                        (
-                            (dim_size_volume - 1)
-                            + pre_pad_or_crop_upper
-                            - end_kernel_coordinate
-                            - max_coordinate
-                        )
-                        / dim_downsampling_factor
-                    )
-                )
-                assert post_pad_or_crop_lower <= 0 and post_pad_or_crop_upper <= 0
-                conv_padding = -max(post_pad_or_crop_lower, post_pad_or_crop_upper)
-                post_pad_or_crop_lower += conv_padding
-                post_pad_or_crop_upper += conv_padding
-            else:
-                conv_padding = 0
-                post_pad_or_crop_lower = 0
-                post_pad_or_crop_upper = 0
-            conv_kernels.append(kernel)
-            conv_paddings.append(conv_padding)
-            pre_pads_or_crops.append((pre_pad_or_crop_lower, pre_pad_or_crop_upper))
-            post_pads_or_crops.append((post_pad_or_crop_lower, post_pad_or_crop_upper))
-        padding_mode, _padding_value = self._padding_mode_and_value
-        if not is_croppable_first(
-            spatial_shape=volume.spatial_shape, pads_or_crops=pre_pads_or_crops, mode=padding_mode
-        ):
-            return None
-        conv_strides = (
-            (
-                downsampling_factor * (~transposed_convolve)
-                + (1 / downsampling_factor) * transposed_convolve
-            )
-            .round()
-            .to(dtype=long)
-        )
-        return (
-            conv_kernels,
-            conv_strides.tolist(),
-            conv_paddings,
-            transposed_convolve.tolist(),
-            pre_pads_or_crops,
-            post_pads_or_crops,
-            flipping_permutation,
-        )
-
     def _interpolate_conv(
         self,
         volume: MappableTensor,
         voxel_coordinates: MappableTensor,
     ) -> Optional[MappableTensor]:
-        conv_parameters = self._obtain_conv_parameters(volume, voxel_coordinates)
+        if voxel_coordinates.displacements is not None:
+            return None
+        grid = voxel_coordinates.grid
+        if grid is None:
+            return None
+        grid_affine_matrix = grid.affine_transformation.as_host_matrix()
+        if grid_affine_matrix is None:
+            return None
+        conv_parameters = obtain_conv_parameters(
+            volume_spatial_shape=volume.spatial_shape,
+            grid_spatial_shape=grid.spatial_shape,
+            grid_affine_matrix=grid_affine_matrix,
+            is_interpolating_kernel=[
+                self._is_interpolating_kernel(spatial_dim)
+                for spatial_dim in range(len(grid.spatial_shape))
+            ],
+            kernel_support=[
+                self._kernel_support(spatial_dim)(self._limit_direction(spatial_dim))
+                for spatial_dim in range(len(grid.spatial_shape))
+            ],
+            convolution_threshold=self._convolution_threshold,
+            target_device=voxel_coordinates.device,
+        )
         if conv_parameters is None:
             return None
         (
-            conv_kernels,
+            conv_kernel_coordinates,
             conv_strides,
             conv_paddings,
             transposed_convolve,
             pre_pads_or_crops,
             post_pads_or_crops,
-            flipping_permutation,
+            spatial_permutation,
+            flipped_spatial_dims,
         ) = conv_parameters
+        conv_kernels = [
+            (
+                self._kernel(
+                    kernel_coordinates,
+                    spatial_dim=spatial_permutation[spatial_dim],
+                )
+                if kernel_coordinates is not None
+                else None
+            )
+            for spatial_dim, kernel_coordinates in enumerate(conv_kernel_coordinates)
+        ]
+        padding_mode, _padding_value = self._padding_mode_and_value
+        if not is_croppable_first(
+            spatial_shape=volume.spatial_shape, pads_or_crops=pre_pads_or_crops, mode=padding_mode
+        ):
+            return None
         padding_mode, padding_value = self._padding_mode_and_value
 
         values, mask = volume.generate(
@@ -504,7 +294,12 @@ class BaseSeparableSampler(ISampler):
             and self._mask_extrapolated_regions_for_empty_volume_mask,
             cast_mask=False,
         )
-        interpolated_values = flipping_permutation(values, n_channel_dims=volume.n_channel_dims)
+        interpolated_values = apply_flipping_permutation_to_volume(
+            values,
+            n_channel_dims=volume.n_channel_dims,
+            spatial_permutation=spatial_permutation,
+            flipped_spatial_dims=flipped_spatial_dims,
+        )
         interpolated_values = crop_and_then_pad_spatial(
             interpolated_values,
             pads_or_crops=pre_pads_or_crops,
@@ -530,7 +325,12 @@ class BaseSeparableSampler(ISampler):
         if mask is None:
             interpolated_mask: Optional[Tensor] = None
         else:
-            interpolated_mask = flipping_permutation(mask, n_channel_dims=volume.n_channel_dims)
+            interpolated_mask = apply_flipping_permutation_to_volume(
+                mask,
+                n_channel_dims=volume.n_channel_dims,
+                spatial_permutation=spatial_permutation,
+                flipped_spatial_dims=flipped_spatial_dims,
+            )
             interpolated_mask = crop_and_then_pad_spatial(
                 interpolated_mask,
                 pads_or_crops=pre_pads_or_crops,
@@ -559,6 +359,12 @@ class BaseSeparableSampler(ISampler):
         return mappable(
             interpolated_values, interpolated_mask, n_channel_dims=volume.n_channel_dims
         )
+
+    @staticmethod
+    def _get_flooring_function(inclusive: bool) -> Callable[[Union[float, int]], int]:
+        if inclusive:
+            return lambda x: int(floor(x))
+        return lambda x: int(ceil(x - 1))
 
     def _separable_conv(
         self,
@@ -620,12 +426,6 @@ class BaseSeparableSampler(ISampler):
             padding=padding,
         ).reshape(dim_excluded_shape + (-1,))
         return convolved.moveaxis(-1, dim)
-
-    @staticmethod
-    def _get_flooring_function(inclusive: bool) -> Callable[[Union[float, int]], int]:
-        if inclusive:
-            return lambda x: int(floor(x))
-        return lambda x: int(ceil(x - 1))
 
     def _interpolate_general(
         self, volume: MappableTensor, voxel_coordinates: MappableTensor
@@ -815,141 +615,3 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             "cases where the coordinates are on a regular grid with the axes "
             "aligned with the spatial dimensions are supported (implementable with convolution)."
         )
-
-
-class FlippingPermutation:
-    """Class for describing transformations which include flipping and permutation.
-
-    The core idea is that given a coordinate and its transformed counterpart,
-    they should point to the same location in the original volume and the
-    transformed volume, respectively.
-
-    Arguments:
-        spatial_permutation: Permutation of the spatial dimensions.
-        flipped_spatial_dims: Spatial dimensions which are flipped.
-    """
-
-    def __init__(
-        self, spatial_permutation: Sequence[int], flipped_spatial_dims: Sequence[int]
-    ) -> None:
-        self.spatial_permutation = spatial_permutation
-        self.flipped_spatial_dims = flipped_spatial_dims
-
-    @staticmethod
-    def is_valid_permutation(n_dims: int, spatial_permutation: Sequence[int]) -> bool:
-        """Check if a permutation is valid
-
-        Args:
-            n_dims: Number of spatial dimensions
-            spatial_permutation: Permutation of the spatial dimensions
-
-        Returns:
-            Whether the permutation is valid.
-        """
-        return set(spatial_permutation) == set(range(n_dims))
-
-    def permute_sequence(self, sequence: Sequence) -> Tuple:
-        """Permute a sequence with the spatial permutation.
-
-        Args:
-            sequence: Sequence to permute.
-
-        Returns:
-            Permuted sequence.
-        """
-        if len(sequence) != len(self.spatial_permutation):
-            raise ValueError("Sequence has wrong length")
-        return tuple(sequence[spatial_dim] for spatial_dim in self.spatial_permutation)
-
-    def __call__(self, volume: Tensor, n_channel_dims: int) -> Tensor:
-        """Apply the flipping and permutation to a volume.
-
-        Args:
-            volume: Volume to transform.
-            n_channel_dims: Number of channel dimensions in the volume.
-
-        Returns:
-            Transformed volume.
-        """
-        spatial_dims = get_spatial_dims(volume.ndim, n_channel_dims=n_channel_dims)
-        if self.flipped_spatial_dims:
-            flipped_dims = [spatial_dims[spatial_dim] for spatial_dim in self.flipped_spatial_dims]
-            volume = volume.flip(dims=flipped_dims)
-        volume = volume.permute(tuple(range(spatial_dims[0])) + self.permute_sequence(spatial_dims))
-        return volume
-
-    def _flipping_transformation(
-        self,
-        spatial_shape: Sequence[int],
-        dtype: Optional[torch_dtype] = None,
-        device: Optional[torch_device] = None,
-    ) -> HostDiagonalAffineTransformation:
-        n_dims = len(spatial_shape)
-        diagonal = ones(n_dims, dtype=dtype, device=torch_device("cpu"))
-        translation = zeros(n_dims, dtype=dtype, device=torch_device("cpu"))
-        for flipped_spatial_dim in self.flipped_spatial_dims:
-            diagonal[flipped_spatial_dim] = -1.0
-            translation[flipped_spatial_dim] = spatial_shape[flipped_spatial_dim] - 1
-        return HostDiagonalAffineTransformation(
-            diagonal=diagonal,
-            translation=translation,
-            device=device,
-        )
-
-    def as_transformation(
-        self,
-        spatial_shape: Sequence[int],
-        dtype: Optional[torch_dtype] = None,
-        device: Optional[torch_device] = None,
-    ) -> IHostAffineTransformation:
-        """Obtain coordinate transformation corresponding to the flipping and
-        permutation.
-
-        Args:
-            spatial_shape: Shape of the spatial dimensions.
-            dtype: Data type of the generated transformation.
-            device: Device of the generated transformation.
-
-        Returns:
-            Coordinate transformation corresponding to the flipping and permutation.
-        """
-        if tuple(self.spatial_permutation) == tuple(range(len(spatial_shape))):
-            if not self.flipped_spatial_dims:
-                return IdentityAffineTransformation(
-                    n_dims=len(spatial_shape), dtype=dtype, device=device
-                )
-            return self._flipping_transformation(spatial_shape, dtype=dtype, device=device)
-        matrix = self._flipping_transformation(
-            spatial_shape, dtype=dtype, device=device
-        ).as_matrix()
-        matrix = matrix[tuple(self.spatial_permutation) + (-1,), :]
-        return HostAffineTransformation(transformation_matrix_on_host=matrix, device=device)
-
-    @classmethod
-    def obtain_normalizing_flipping_permutation(
-        cls,
-        matrix: Tensor,
-    ) -> Optional["FlippingPermutation"]:
-        """Obtain permutation with flipping which turns the affine matrix as
-        close to a diagonal matrix with positive diagonal as possible.
-
-        If the algorithm is not able to find a valid permutation, None is returned.
-        This could be improved as the current algorithm can not handle zero diagonal elements.
-
-        Args:
-            matrix: The affine matrix to normalize with shape (n_dims + 1, n_dims + 1).
-
-        Returns:
-            Normalizing flipping permutation or None if no valid flipping
-            permutation is found.
-        """
-        permutation = matrix[:-1, :-1].abs().argmax(dim=0).tolist()
-        n_dims = matrix.shape[-1] - 1
-        if not FlippingPermutation.is_valid_permutation(n_dims, permutation):
-            return None
-        flipped_spatial_dims = [
-            largest_row
-            for column, largest_row in enumerate(permutation)
-            if matrix[largest_row, column] < 0
-        ]
-        return FlippingPermutation(permutation, flipped_spatial_dims)

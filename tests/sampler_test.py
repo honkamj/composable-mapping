@@ -24,11 +24,16 @@ from composable_mapping.affine_transformation import (
     AffineTransformation,
     HostAffineTransformation,
 )
+from composable_mapping.affine_transformation.matrix import embed_matrix
 from composable_mapping.sampler.base import (
     BaseSeparableSampler,
-    FlippingPermutation,
     ISeparableKernelSupport,
     SymmetricPolynomialKernelSupport,
+)
+from composable_mapping.sampler.convolution_sampling import (
+    apply_flipping_permutation_to_affine_matrix,
+    apply_flipping_permutation_to_volume,
+    obtain_normalizing_flipping_permutation,
 )
 from composable_mapping.sampler.interface import LimitDirection
 
@@ -563,11 +568,16 @@ class FlippingPermutationTest(TestCase):
         """Test that one ends in same coordinate with permuting the volume and
         applying the transformation"""
         for _ in range(100):
-            test_permutation = FlippingPermutation(
-                spatial_permutation=randperm(5).tolist(),
-                flipped_spatial_dims=randperm(5)[: randint(high=5, size=tuple()).item()].tolist(),
-            )
-            transformation = test_permutation.as_transformation((5, 6, 7, 8, 9))
+            spatial_permutation = randperm(5).tolist()
+            flipped_spatial_dims = randperm(5)[: randint(high=5, size=tuple()).item()].tolist()
+            matrix = eye(5, 6, dtype=float32)
+            flipping_permutation_matrix = apply_flipping_permutation_to_affine_matrix(
+                matrix=matrix[None],
+                spatial_permutation=spatial_permutation,
+                flipped_spatial_dims=flipped_spatial_dims,
+                volume_spatial_shape=[5, 6, 7, 8, 9],
+            )[0]
+            transformation = AffineTransformation(embed_matrix(flipping_permutation_matrix, (6, 6)))
 
             test_value = tensor(
                 [
@@ -586,9 +596,12 @@ class FlippingPermutationTest(TestCase):
 
             assert_close(
                 grid[(...,) + tuple(test_value.long().tolist())],
-                test_permutation(grid, 1)[
-                    (...,) + tuple(transformation(test_value).long().tolist())
-                ],
+                apply_flipping_permutation_to_volume(
+                    grid,
+                    n_channel_dims=1,
+                    spatial_permutation=spatial_permutation,
+                    flipped_spatial_dims=flipped_spatial_dims,
+                )[(...,) + tuple(transformation(test_value).long().tolist())],
             )
 
     def test_flipping_permutation_normalization(self):
@@ -600,13 +613,16 @@ class FlippingPermutationTest(TestCase):
             random_flips = 2 * randint(0, 2, (5,), dtype=float32) - 1
             matrix[:-1, :-1] = random_flips * matrix[:-1, :-1]
             matrix[:-1, :-1] = matrix[:-1, :-1][random_permutation.long()]
-            normalizing_permutation = FlippingPermutation.obtain_normalizing_flipping_permutation(
-                matrix
+            spatial_permutation, flipped_spatial_dims = obtain_normalizing_flipping_permutation(
+                matrix[:-1]
             )
-            normalizing_transformation = normalizing_permutation.as_transformation((5, 6, 7, 8, 9))
-            normalized_matrix = (
-                normalizing_transformation @ AffineTransformation(matrix)
-            ).as_matrix()
+            normalized_matrix = apply_flipping_permutation_to_affine_matrix(
+                matrix=matrix[None, :-1],
+                spatial_permutation=spatial_permutation,
+                flipped_spatial_dims=flipped_spatial_dims,
+                volume_spatial_shape=[5, 6, 7, 8, 9],
+            )[0]
+            normalized_matrix = embed_matrix(normalized_matrix, (6, 6))
             assert_close(
                 normalized_matrix[:-1, :-1],
                 eye(5, dtype=float32),

@@ -1,5 +1,6 @@
 """Affine transformations on PyTorch tensors."""
 
+from . import diagonal_matrix, matrix
 from .affine_transformation import (
     AffineTransformation,
     DiagonalAffineMatrixDefinition,
