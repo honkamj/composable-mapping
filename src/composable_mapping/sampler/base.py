@@ -331,6 +331,7 @@ class BaseSeparableSampler(ISampler):
                     volume=volume, voxel_coordinates=voxel_coordinates
                 )
                 sampling_parameter_cache.append_sampling_parameters(conv_parameters)
+            sampling_parameter_cache.increment_index()
         else:
             conv_parameters = self._obtain_conv_parameters(
                 volume=volume, voxel_coordinates=voxel_coordinates
@@ -707,6 +708,12 @@ class EnumeratedSamplingParameterCache(AbstractContextManager):
         self._index = 0
         _SAMPLING_PARAMETER_CACHE_STACK.stack.append(self)
 
+    def increment_index(self) -> None:
+        """Increment the index in the cache"""
+        if self._index is None:
+            raise ValueError("Cache not active.")
+        self._index += 1
+
     def has_sampling_parameters(self) -> bool:
         """Check if there are any sampling parameters in the cache"""
         if self._index is None:
@@ -717,9 +724,7 @@ class EnumeratedSamplingParameterCache(AbstractContextManager):
         """Get the next set of sampling parameters from the cache"""
         if self._index is None:
             raise ValueError("Cache not active.")
-        sampling_parameters = self._sampling_parameters[self._index]
-        self._index += 1
-        return sampling_parameters
+        return self._sampling_parameters[self._index]
 
     def append_sampling_parameters(self, sampling_parameters: Any) -> None:
         """Append the next set of sampling parameters to the cache"""
@@ -728,3 +733,15 @@ class EnumeratedSamplingParameterCache(AbstractContextManager):
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         _SAMPLING_PARAMETER_CACHE_STACK.stack.pop()
         self._index = None
+
+
+class no_sampling_parameter_cache(  # this is supposed to appear as function - pylint: disable=invalid-name
+    AbstractContextManager
+):
+    """Context manager for disabling the sampling parameter cache."""
+
+    def __enter__(self) -> None:
+        _SAMPLING_PARAMETER_CACHE_STACK.stack.append(None)
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        _SAMPLING_PARAMETER_CACHE_STACK.stack.pop()

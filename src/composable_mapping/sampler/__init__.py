@@ -5,6 +5,7 @@ from .base import (
     BaseSeparableSampler,
     EnumeratedSamplingParameterCache,
     GenericSeparableDerivativeSampler,
+    no_sampling_parameter_cache,
 )
 from .default import (
     clear_default_sampler,
@@ -33,5 +34,6 @@ __all__ = [
     "default_sampler",
     "get_default_sampler",
     "get_sampler",
+    "no_sampling_parameter_cache",
     "set_default_sampler",
 ]

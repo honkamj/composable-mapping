@@ -72,6 +72,7 @@ from .sampler import (
     default_sampler,
     get_default_sampler,
     get_sampler,
+    no_sampling_parameter_cache,
     set_default_sampler,
 )
 from .visualization import (
@@ -127,6 +128,7 @@ __all__ = [
     "get_default_sampler",
     "get_sampler",
     "mappable",
+    "no_sampling_parameter_cache",
     "samplable_volume",
     "set_default_sampler",
     "stack_mappings",
