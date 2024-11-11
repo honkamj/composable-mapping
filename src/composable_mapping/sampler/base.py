@@ -324,20 +324,8 @@ class BaseSeparableSampler(ISampler):
             spatial_shape=volume.spatial_shape, pads_or_crops=pre_pads_or_crops, mode=padding_mode
         ):
             return None
-        # Optimize to use either spatially separable convolutions or general
-        # convolutions. This is currently a very simple heuristic that seems to
-        # work somewhat well in practice.
-        if (
-            all(conv_kernel is None or conv_kernel.size(0) <= 4 for conv_kernel in conv_kernels)
-            == 1
-            and (all(transposed_convolve) or not any(transposed_convolve))
-            and all(stride <= 2 for stride in conv_strides)
-        ):
-            conv_kernel_dims = [list(range(len(volume.spatial_shape)))]
-            conv_kernel_transposed = [transposed_convolve[0]]
-        else:
-            conv_kernel_dims = [[dim] for dim in range(len(volume.spatial_shape))]
-            conv_kernel_transposed = transposed_convolve
+        conv_kernel_dims = [[dim] for dim in range(len(volume.spatial_shape))]
+        conv_kernel_transposed = transposed_convolve
         return (
             conv_kernel_dims,
             [
