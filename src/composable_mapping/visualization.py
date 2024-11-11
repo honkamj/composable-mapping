@@ -162,7 +162,8 @@ class ImageVisualizationArguments:
         self,
         batch_index: int = 0,
         figure_height: Number = 5,
-        mask_color: Optional[Any] = "#591500",
+        mask_color: Optional[Any] = "red",
+        mask_alpha: Number = 0.5,
         vmin: Optional[Number] = None,
         vmax: Optional[Number] = None,
         imshow_kwargs: Optional[Mapping[str, Any]] = None,
@@ -170,6 +171,7 @@ class ImageVisualizationArguments:
         self.batch_index = batch_index
         self.figure_height = figure_height
         self.mask_color = mask_color
+        self.mask_alpha = mask_alpha
         self.vmin = vmin
         self.vmax = vmax
         self.imshow_kwargs = {} if imshow_kwargs is None else imshow_kwargs
@@ -217,6 +219,7 @@ def visualize_image(
         mask_color: Optional[ndarray] = None
     else:
         mask_color = array(to_rgba(arguments.mask_color))[None, None]
+        mask_color[..., -1] = arguments.mask_alpha
     for axis, plane, mask_plane, (dim_1, dim_2) in zip(
         axes.flatten(), planes, mask_planes, dimension_pairs
     ):
