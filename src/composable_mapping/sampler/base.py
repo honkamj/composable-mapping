@@ -327,9 +327,12 @@ class BaseSeparableSampler(ISampler):
         # Optimize to use either spatially separable convolutions or general
         # convolutions. This is currently a very simple heuristic that seems to
         # work somewhat well in practice.
-        if all(
-            conv_kernel is None or conv_kernel.size(0) <= 4 for conv_kernel in conv_kernels
-        ) == 1 and (all(transposed_convolve) or not any(transposed_convolve)):
+        if (
+            all(conv_kernel is None or conv_kernel.size(0) <= 4 for conv_kernel in conv_kernels)
+            == 1
+            and (all(transposed_convolve) or not any(transposed_convolve))
+            and all(stride <= 2 for stride in conv_strides)
+        ):
             conv_kernel_dims = [list(range(len(volume.spatial_shape)))]
             conv_kernel_transposed = [transposed_convolve[0]]
         else:
@@ -481,10 +484,10 @@ class BaseSeparableSampler(ISampler):
             raise ValueError("Invalid number of strides, transposed, or paddings")
         if len(kernels) != len(kernel_spatial_dims) or len(kernels) != len(kernel_transposed):
             raise ValueError("Invalid number of kernels, kernel spatial dims, or kernel transposed")
-        for spatial_dims, kernel, kernel_transposed_ in zip(
+        for spatial_dims, kernel, single_kernel_transposed in zip(
             kernel_spatial_dims, kernels, kernel_transposed
         ):
-            if kernel is None or kernel.shape.numel() == 1 and not kernel_transposed_:
+            if kernel is None or kernel.shape.numel() == 1 and not single_kernel_transposed:
                 slicing_tuple: Tuple[slice, ...] = tuple()
                 for dim in range(n_spatial_dims):
                     if dim in spatial_dims:
@@ -501,7 +504,7 @@ class BaseSeparableSampler(ISampler):
                     kernel=kernel,
                     stride=[stride[dim] for dim in spatial_dims],
                     padding=[padding[dim] for dim in spatial_dims],
-                    transposed=kernel_transposed_,
+                    transposed=single_kernel_transposed,
                     n_channel_dims=n_channel_dims,
                 )
         return volume
