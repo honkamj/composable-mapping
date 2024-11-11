@@ -65,7 +65,7 @@ def obtain_central_planes(
                 plane = plane.movedim(spatial_dims[other_dim], 1)
                 plane = plane[:, plane.size(1) // 2]
                 mask_plane = mask_plane.movedim(spatial_dims[other_dim], 1)
-                mask_plane = mask_plane[:, mask_plane.size(0) // 2]
+                mask_plane = mask_plane[:, mask_plane.size(1) // 2]
             spatial_shape = get_spatial_shape(plane.shape, n_channel_dims=1)
             if spatial_shape[0] != 1 and spatial_shape[1] != 1:
                 planes.append(_to_numpy(plane))
