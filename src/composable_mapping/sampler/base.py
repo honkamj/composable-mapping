@@ -14,12 +14,11 @@ from typing import (
     Sequence,
     Tuple,
     Union,
-    cast,
 )
 
-from torch import Tensor, ones
+from torch import Tensor, ones, zeros
 from torch.autograd.functional import vjp
-from torch.nn.functional import conv1d, conv_transpose1d
+from torch.nn import functional as torch_functional
 
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import (
@@ -40,14 +39,15 @@ if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
 
 
-_CONV_PARAMETERS_TYPE = Optional[
+_ConvParametersType = Optional[
     Tuple[
-        List[Optional[Tensor]],
-        List[int],
-        List[int],
-        List[bool],
-        List[Tuple[int, int]],
-        List[Tuple[int, int]],
+        Sequence[Sequence[int]],
+        Sequence[Optional[Tensor]],
+        Sequence[bool],
+        Sequence[int],
+        Sequence[int],
+        Sequence[Tuple[int, int]],
+        Sequence[Tuple[int, int]],
         List[int],
         List[int],
     ]
@@ -248,11 +248,31 @@ class BaseSeparableSampler(ISampler):
             "reflection": ("reflect", 0.0),
         }[self._extrapolation_mode]
 
+    @staticmethod
+    def _build_joint_kernel(
+        kernel_dims: Sequence[int], kernels_1d: Sequence[Optional[Tensor]]
+    ) -> Optional[Tensor]:
+        not_none_kernels = [kernel for kernel in kernels_1d if kernel is not None]
+        if not not_none_kernels:
+            return None
+        generated_kernels_1d = [
+            (
+                zeros(1, dtype=not_none_kernels[0].dtype, device=not_none_kernels[0].device)
+                if kernel is None
+                else kernel
+            )
+            for kernel in kernels_1d
+        ]
+        conv_kernel = generated_kernels_1d[kernel_dims[0]]
+        for dim in kernel_dims[1:]:
+            conv_kernel = conv_kernel[..., None] * generated_kernels_1d[dim]
+        return conv_kernel
+
     def _obtain_conv_parameters(
         self,
         volume: MappableTensor,
         voxel_coordinates: MappableTensor,
-    ) -> _CONV_PARAMETERS_TYPE:
+    ) -> _ConvParametersType:
         if voxel_coordinates.displacements is not None:
             return None
         grid = voxel_coordinates.grid
@@ -304,11 +324,26 @@ class BaseSeparableSampler(ISampler):
             spatial_shape=volume.spatial_shape, pads_or_crops=pre_pads_or_crops, mode=padding_mode
         ):
             return None
+        # Optimize to use either spatially separable convolutions or general
+        # convolutions. This is currently a very simple heuristic that seems to
+        # work somewhat well in practice.
+        if all(
+            conv_kernel is None or conv_kernel.size(0) <= 4 for conv_kernel in conv_kernels
+        ) == 1 and (all(transposed_convolve) or not any(transposed_convolve)):
+            conv_kernel_dims = [list(range(len(volume.spatial_shape)))]
+            conv_kernel_transposed = [transposed_convolve[0]]
+        else:
+            conv_kernel_dims = [[dim] for dim in range(len(volume.spatial_shape))]
+            conv_kernel_transposed = transposed_convolve
         return (
-            conv_kernels,
+            conv_kernel_dims,
+            [
+                self._build_joint_kernel(kernel_dims, conv_kernels)
+                for kernel_dims in conv_kernel_dims
+            ],
+            conv_kernel_transposed,
             conv_strides,
             conv_paddings,
-            transposed_convolve,
             pre_pads_or_crops,
             post_pads_or_crops,
             spatial_permutation,
@@ -323,7 +358,7 @@ class BaseSeparableSampler(ISampler):
         sampling_parameter_cache = _get_sampling_parameter_cache()
         if sampling_parameter_cache is not None:
             if sampling_parameter_cache.has_sampling_parameters():
-                conv_parameters: _CONV_PARAMETERS_TYPE = (
+                conv_parameters: _ConvParametersType = (
                     sampling_parameter_cache.get_sampling_parameters()
                 )
             else:
@@ -339,10 +374,11 @@ class BaseSeparableSampler(ISampler):
         if conv_parameters is None:
             return None
         (
+            conv_kernel_dims,
             conv_kernels,
+            conv_kernel_transposed,
             conv_strides,
             conv_paddings,
-            transposed_convolve,
             pre_pads_or_crops,
             post_pads_or_crops,
             spatial_permutation,
@@ -371,9 +407,10 @@ class BaseSeparableSampler(ISampler):
         interpolated_values = self._separable_conv(
             interpolated_values,
             kernels=conv_kernels,
-            strides=conv_strides,
-            paddings=conv_paddings,
-            transposed=transposed_convolve,
+            kernel_spatial_dims=conv_kernel_dims,
+            kernel_transposed=conv_kernel_transposed,
+            stride=conv_strides,
+            padding=conv_paddings,
             n_channel_dims=volume.n_channel_dims,
         )
         interpolated_values = crop_and_then_pad_spatial(
@@ -403,9 +440,10 @@ class BaseSeparableSampler(ISampler):
                 self._separable_conv(
                     (~interpolated_mask).to(dtype=voxel_coordinates.dtype),
                     kernels=[None if kernel is None else kernel.abs() for kernel in conv_kernels],
-                    strides=conv_strides,
-                    paddings=conv_paddings,
-                    transposed=transposed_convolve,
+                    kernel_spatial_dims=conv_kernel_dims,
+                    kernel_transposed=conv_kernel_transposed,
+                    stride=conv_strides,
+                    padding=conv_paddings,
                     n_channel_dims=volume.n_channel_dims,
                 )
                 <= self._mask_threshold
@@ -427,66 +465,89 @@ class BaseSeparableSampler(ISampler):
             return lambda x: int(floor(x))
         return lambda x: int(ceil(x - 1))
 
+    @classmethod
     def _separable_conv(
-        self,
+        cls,
         volume: Tensor,
         kernels: Sequence[Optional[Tensor]],
-        strides: Sequence[int],
-        paddings: Sequence[int],
-        transposed: Sequence[bool],
+        kernel_spatial_dims: Sequence[Sequence[int]],
+        kernel_transposed: Sequence[bool],
+        stride: Sequence[int],
+        padding: Sequence[int],
         n_channel_dims: int,
     ) -> Tensor:
-        if (
-            len(kernels) != len(get_spatial_dims(volume.ndim, n_channel_dims))
-            or len(kernels) != len(strides)
-            or len(kernels) != len(transposed)
-            or len(kernels) != len(paddings)
+        n_spatial_dims = len(get_spatial_dims(volume.ndim, n_channel_dims))
+        if n_spatial_dims != len(stride) or n_spatial_dims != len(padding):
+            raise ValueError("Invalid number of strides, transposed, or paddings")
+        if len(kernels) != len(kernel_spatial_dims) or len(kernels) != len(kernel_transposed):
+            raise ValueError("Invalid number of kernels, kernel spatial dims, or kernel transposed")
+        for spatial_dims, kernel, kernel_transposed_ in zip(
+            kernel_spatial_dims, kernels, kernel_transposed
         ):
-            raise ValueError("Invalid number of kernels, strides, transposed, or paddings")
-        for spatial_dim, (kernel, stride, dim_transposed, padding) in enumerate(
-            zip(kernels, strides, transposed, paddings)
-        ):
-            if kernel is None or kernel.size(0) == 1:
-                assert dim_transposed is False
-                dim = get_spatial_dims(volume.ndim, n_channel_dims)[spatial_dim]
-                volume = volume[(slice(None),) * dim + (slice(None, None, stride),)]
+            if kernel is None or kernel.shape.numel() == 1 and not kernel_transposed_:
+                slicing_tuple: Tuple[slice, ...] = tuple()
+                for dim in range(n_spatial_dims):
+                    if dim in spatial_dims:
+                        slicing_tuple += (slice(None, None, stride[dim]),)
+                    else:
+                        slicing_tuple += (slice(None),)
+                volume = volume[(...,) + slicing_tuple]
                 if kernel is not None:
                     volume = kernel * volume
             else:
-                volume = self._conv1d(
+                volume = cls._conv_nd(
                     volume,
+                    spatial_dims=spatial_dims,
                     kernel=kernel,
-                    stride=stride,
-                    padding=padding,
-                    transposed=dim_transposed,
-                    spatial_dim=spatial_dim,
+                    stride=[stride[dim] for dim in spatial_dims],
+                    padding=[padding[dim] for dim in spatial_dims],
+                    transposed=kernel_transposed_,
                     n_channel_dims=n_channel_dims,
                 )
         return volume
 
-    @staticmethod
-    def _conv1d(
+    @classmethod
+    def _conv_nd(
+        cls,
         volume: Tensor,
+        spatial_dims: Sequence[int],
         kernel: Tensor,
-        stride: int,
-        padding: int,
+        stride: Sequence[int],
+        padding: Sequence[int],
         transposed: bool,
-        spatial_dim: int,
         n_channel_dims: int,
     ) -> Tensor:
-        dim = get_spatial_dims(volume.ndim, n_channel_dims)[spatial_dim]
-        volume = volume.moveaxis(dim, -1)
-        dim_excluded_shape = volume.shape[:-1]
-        volume = volume.reshape(-1, 1, volume.size(-1))
-        conv_function = cast(Callable[..., Tensor], conv1d if not transposed else conv_transpose1d)
+        n_kernel_dims = kernel.ndim
+        volume_spatial_dims = get_spatial_dims(volume.ndim, n_channel_dims)
+        convolved_dims = [volume_spatial_dims[dim] for dim in spatial_dims]
+        last_dims = list(range(-n_kernel_dims, 0))
+        volume = volume.moveaxis(convolved_dims, last_dims)
+        convolved_dims_excluded_shape = volume.shape[:-n_kernel_dims]
+        volume = volume.reshape(-1, 1, *volume.shape[-n_kernel_dims:])
+        conv_function = (
+            cls._conv_nd_function(n_kernel_dims)
+            if not transposed
+            else cls._conv_transpose_nd_function(n_kernel_dims)
+        )
         convolved = conv_function(  # pylint: disable=not-callable
             volume,
             kernel[None, None],
             bias=None,
-            stride=(stride,),
+            stride=stride,
             padding=padding,
-        ).reshape(dim_excluded_shape + (-1,))
-        return convolved.moveaxis(-1, dim)
+        )
+        convolved = convolved.reshape(
+            *convolved_dims_excluded_shape, *convolved.shape[-n_kernel_dims:]
+        )
+        return convolved.moveaxis(last_dims, convolved_dims)
+
+    @staticmethod
+    def _conv_nd_function(n_dims: int) -> Callable[..., Tensor]:
+        return getattr(torch_functional, f"conv{n_dims}d")
+
+    @staticmethod
+    def _conv_transpose_nd_function(n_dims: int) -> Callable[..., Tensor]:
+        return getattr(torch_functional, f"conv_transpose{n_dims}d")
 
     def _interpolate_general(
         self, volume: MappableTensor, voxel_coordinates: MappableTensor
