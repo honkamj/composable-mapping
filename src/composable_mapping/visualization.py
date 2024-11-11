@@ -1,9 +1,9 @@
 """Visualization utilities for composable mappings."""
 
 from itertools import combinations
-from typing import Any, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
 
-from matplotlib.colors import Normalize, to_rgba  # type: ignore
+from matplotlib.colors import to_rgba  # type: ignore
 from matplotlib.figure import Figure  # type: ignore
 from matplotlib.pyplot import subplots  # type: ignore
 from numpy import amax, amin, array, moveaxis, ndarray
@@ -155,26 +155,17 @@ def visualize_grid(
     return figure
 
 
-class ImageVisualizationArguments:
+class ImageVisualizationArguments(NamedTuple):
     """Arguments for image visualization"""
 
-    def __init__(
-        self,
-        batch_index: int = 0,
-        figure_height: Number = 5,
-        mask_color: Optional[Any] = "red",
-        mask_alpha: Number = 0.5,
-        vmin: Optional[Number] = None,
-        vmax: Optional[Number] = None,
-        imshow_kwargs: Optional[Mapping[str, Any]] = None,
-    ) -> None:
-        self.batch_index = batch_index
-        self.figure_height = figure_height
-        self.mask_color = mask_color
-        self.mask_alpha = mask_alpha
-        self.vmin = vmin
-        self.vmax = vmax
-        self.imshow_kwargs = {} if imshow_kwargs is None else imshow_kwargs
+    batch_index: int = 0
+    figure_height: Number = 5
+    mask_color: Optional[Any] = "red"
+    mask_alpha: Number = 0.5
+    vmin: Optional[Number] = None
+    vmax: Optional[Number] = None
+    imshow_kwargs: Optional[Mapping[str, Any]] = None
+    draw_colorbar: bool = True
 
 
 def visualize_image(
@@ -208,13 +199,16 @@ def visualize_image(
         if arguments.vmax is None
         else arguments.vmax
     )
-    normalizer = Normalize(vmin=vmin, vmax=vmax)
     figure, axes = subplots(
         1,
         len(planes),
         figsize=(arguments.figure_height * len(planes), arguments.figure_height),
         squeeze=False,
     )
+    if arguments.imshow_kwargs is None:
+        imshow_kwargs: Mapping[str, Any] = {}
+    else:
+        imshow_kwargs = arguments.imshow_kwargs
     if arguments.mask_color is None:
         mask_color: Optional[ndarray] = None
     else:
@@ -223,7 +217,6 @@ def visualize_image(
     for axis, plane, mask_plane, (dim_1, dim_2) in zip(
         axes.flatten(), planes, mask_planes, dimension_pairs
     ):
-        plane = normalizer(plane)
         aspect = (
             voxel_size[arguments.batch_index, dim_1].item()
             / voxel_size[arguments.batch_index, dim_2].item()
@@ -232,12 +225,14 @@ def visualize_image(
         axis.set_ylabel(dimension_to_letter(dim_1, n_dims))
         axis.set_xlabel(dimension_to_letter(dim_2, n_dims))
 
-        axis.imshow(
+        image = axis.imshow(
             plane,
             origin="lower",
             aspect=aspect,
             cmap=cmap,
-            **arguments.imshow_kwargs,
+            vmin=vmin,
+            vmax=vmax,
+            **imshow_kwargs,
         )
         if mask_color is not None:
             mask_plane = moveaxis(mask_plane[arguments.batch_index], 0, -1)
@@ -246,8 +241,13 @@ def visualize_image(
                 coloured_mask_plane,
                 origin="lower",
                 aspect=aspect,
-                **arguments.imshow_kwargs,
+                vmin=0.0,
+                vmax=1.0,
             )
+    if arguments.draw_colorbar:
+        figure.subplots_adjust(right=0.8)
+        colorbar_ax = figure.add_axes([0.85, 0.15, 0.05, 0.7])
+        figure.colorbar(image, cax=colorbar_ax)
 
     return figure
 
