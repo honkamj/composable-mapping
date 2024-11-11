@@ -328,7 +328,7 @@ class BaseSeparableSampler(ISampler):
         # convolutions. This is currently a very simple heuristic that seems to
         # work somewhat well in practice.
         if all(
-            conv_kernel is None or conv_kernel.size(0) <= 4 for conv_kernel in conv_kernels
+            conv_kernel is None or conv_kernel.size(0) <= 2 for conv_kernel in conv_kernels
         ) == 1 and not any(transposed_convolve):
             conv_kernel_dims = [list(range(len(volume.spatial_shape)))]
             conv_kernel_transposed = [transposed_convolve[0]]
