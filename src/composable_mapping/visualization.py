@@ -246,7 +246,7 @@ def visualize_image(
             )
     if arguments.draw_colorbar:
         figure.subplots_adjust(right=0.8)
-        colorbar_ax = figure.add_axes([0.85, 0.15, 0.05, 0.7])
+        colorbar_ax = figure.add_axes([0.85, 0.15, 0.05 / len(planes), 0.7])
         figure.colorbar(image, cax=colorbar_ax)
 
     return figure
