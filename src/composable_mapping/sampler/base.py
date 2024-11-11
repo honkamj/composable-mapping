@@ -1,11 +1,14 @@
 """Base sampler implementations"""
 
 from abc import abstractmethod
+from contextlib import AbstractContextManager
 from math import ceil, floor
+from threading import local
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    List,
     Mapping,
     Optional,
     Sequence,
@@ -35,6 +38,20 @@ from .inverse import FixedPointInverseSampler
 
 if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
+
+
+_CONV_PARAMETERS_TYPE = Optional[
+    Tuple[
+        List[Optional[Tensor]],
+        List[int],
+        List[int],
+        List[bool],
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+        List[int],
+        List[int],
+    ]
+]
 
 
 class ISeparableKernelSupport:
@@ -231,11 +248,11 @@ class BaseSeparableSampler(ISampler):
             "reflection": ("reflect", 0.0),
         }[self._extrapolation_mode]
 
-    def _interpolate_conv(
+    def _obtain_conv_parameters(
         self,
         volume: MappableTensor,
         voxel_coordinates: MappableTensor,
-    ) -> Optional[MappableTensor]:
+    ) -> _CONV_PARAMETERS_TYPE:
         if voxel_coordinates.displacements is not None:
             return None
         grid = voxel_coordinates.grid
@@ -287,6 +304,49 @@ class BaseSeparableSampler(ISampler):
             spatial_shape=volume.spatial_shape, pads_or_crops=pre_pads_or_crops, mode=padding_mode
         ):
             return None
+        return (
+            conv_kernels,
+            conv_strides,
+            conv_paddings,
+            transposed_convolve,
+            pre_pads_or_crops,
+            post_pads_or_crops,
+            spatial_permutation,
+            flipped_spatial_dims,
+        )
+
+    def _interpolate_conv(
+        self,
+        volume: MappableTensor,
+        voxel_coordinates: MappableTensor,
+    ) -> Optional[MappableTensor]:
+        sampling_parameter_cache = _get_sampling_parameter_cache()
+        if sampling_parameter_cache is not None:
+            if sampling_parameter_cache.has_sampling_parameters():
+                conv_parameters: _CONV_PARAMETERS_TYPE = (
+                    sampling_parameter_cache.get_sampling_parameters()
+                )
+            else:
+                conv_parameters = self._obtain_conv_parameters(
+                    volume=volume, voxel_coordinates=voxel_coordinates
+                )
+                sampling_parameter_cache.append_sampling_parameters(conv_parameters)
+        else:
+            conv_parameters = self._obtain_conv_parameters(
+                volume=volume, voxel_coordinates=voxel_coordinates
+            )
+        if conv_parameters is None:
+            return None
+        (
+            conv_kernels,
+            conv_strides,
+            conv_paddings,
+            transposed_convolve,
+            pre_pads_or_crops,
+            post_pads_or_crops,
+            spatial_permutation,
+            flipped_spatial_dims,
+        ) = conv_parameters
         padding_mode, padding_value = self._padding_mode_and_value
 
         values, mask = volume.generate(
@@ -615,3 +675,56 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             "cases where the coordinates are on a regular grid with the axes "
             "aligned with the spatial dimensions are supported (implementable with convolution)."
         )
+
+
+_SAMPLING_PARAMETER_CACHE_STACK = local()
+_SAMPLING_PARAMETER_CACHE_STACK.stack = []
+
+
+def _get_sampling_parameter_cache() -> Optional["EnumeratedSamplingParameterCache"]:
+    if _SAMPLING_PARAMETER_CACHE_STACK.stack:
+        return _SAMPLING_PARAMETER_CACHE_STACK.stack[-1]
+    return None
+
+
+class EnumeratedSamplingParameterCache(AbstractContextManager):
+    """Context manager for caching convolution parameters for sampling
+    with separable kernels.
+
+    Is intended for situations where same order of sampling operations is
+    repeated multiple times, e.g. when iterating a training step.
+
+    One can then use this context manager to cache the convolution parameters
+    for the sampling operations and avoid recomputing them. That can save
+    few milliseconds per sampling operation.
+    """
+
+    def __init__(self) -> None:
+        self._sampling_parameters: List[Any] = []
+        self._index: Optional[int] = None
+
+    def __enter__(self) -> None:
+        self._index = 0
+        _SAMPLING_PARAMETER_CACHE_STACK.stack.append(self)
+
+    def has_sampling_parameters(self) -> bool:
+        """Check if there are any sampling parameters in the cache"""
+        if self._index is None:
+            raise ValueError("Cache not active.")
+        return self._index < len(self._sampling_parameters)
+
+    def get_sampling_parameters(self) -> Optional[Any]:
+        """Get the next set of sampling parameters from the cache"""
+        if self._index is None:
+            raise ValueError("Cache not active.")
+        sampling_parameters = self._sampling_parameters[self._index]
+        self._index += 1
+        return sampling_parameters
+
+    def append_sampling_parameters(self, sampling_parameters: Any) -> None:
+        """Append the next set of sampling parameters to the cache"""
+        self._sampling_parameters.append(sampling_parameters)
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        _SAMPLING_PARAMETER_CACHE_STACK.stack.pop()
+        self._index = None

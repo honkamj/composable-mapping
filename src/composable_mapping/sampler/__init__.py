@@ -1,7 +1,11 @@
 """Sampler module for sampling volumes defined on regular grids."""
 
 from .b_spline import CubicSplineSampler
-from .base import BaseSeparableSampler, GenericSeparableDerivativeSampler
+from .base import (
+    BaseSeparableSampler,
+    EnumeratedSamplingParameterCache,
+    GenericSeparableDerivativeSampler,
+)
 from .default import (
     clear_default_sampler,
     default_sampler,
@@ -18,6 +22,7 @@ __all__ = [
     "BicubicInterpolator",
     "CubicSplineSampler",
     "DataFormat",
+    "EnumeratedSamplingParameterCache",
     "GenericSeparableDerivativeSampler",
     "ISampler",
     "LimitDirection",

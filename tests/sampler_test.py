@@ -186,7 +186,7 @@ class InterpolatorTest(TestCase):
                 device=torch_device("cpu"),
             )
             .translate_voxel(0.01)
-            .grid()
+            .grid
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
@@ -216,7 +216,7 @@ class InterpolatorTest(TestCase):
                 device=torch_device("cpu"),
             )
             .translate_voxel(-0.01)
-            .grid()
+            .grid
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
@@ -237,7 +237,7 @@ class InterpolatorTest(TestCase):
             voxel_size=(2.0, 2.0),
             dtype=float32,
             device=torch_device("cpu"),
-        ).grid()
+        ).grid
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
         test_volume = mappable(
@@ -266,7 +266,7 @@ class InterpolatorTest(TestCase):
                 device=torch_device("cpu"),
             )
             .translate_voxel(0.3)
-            .grid()
+            .grid
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
@@ -285,7 +285,7 @@ class InterpolatorTest(TestCase):
                 device=torch_device("cpu"),
             )
             .translate_voxel(-2.49)
-            .grid()
+            .grid
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
@@ -373,7 +373,7 @@ class InterpolatorTest(TestCase):
             )
             .reformat(upsampling_factor=(3, 2))
             .translate_voxel(0.8)
-            .grid()
+            .grid
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0
@@ -398,7 +398,7 @@ class InterpolatorTest(TestCase):
             )
             .reformat(upsampling_factor=(2, 3))
             .translate_world(-3)
-            .grid()
+            .grid
         )
         mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
         mask[:, :, 2:4] = 0.0

@@ -208,14 +208,14 @@ class ComposableMapping(ITensorLike, ABC):
             Mappable tensor containing the values obtained by evaluating the
             mapping at the coordinates defined by the target.
         """
-        sampled = self(target.coordinate_system.grid())
+        sampled = self(target.coordinate_system.grid)
         if data_format.coordinate_type == "voxel":
             sampled = target.coordinate_system.to_voxel_coordinates(sampled)
         if data_format.representation == "displacements":
             grid = (
-                target.coordinate_system.voxel_grid()
+                target.coordinate_system.voxel_grid
                 if data_format.coordinate_type == "voxel"
-                else target.coordinate_system.grid()
+                else target.coordinate_system.grid
             )
             sampled = sampled - grid
         return sampled

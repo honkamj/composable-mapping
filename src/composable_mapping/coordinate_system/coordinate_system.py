@@ -97,6 +97,14 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             or get_spatial_shape(to_voxel_coordinates.shape, n_channel_dims=2) != tuple()
         ):
             raise ValueError("Invalid affine transformation for a coordinate system")
+        self._voxel_grid_which_should_not_be_accessed_directly = voxel_grid(
+            spatial_shape=self._spatial_shape,
+            dtype=from_voxel_coordinates.dtype,
+            device=from_voxel_coordinates.device,
+        )
+        self._grid_which_should_not_be_accessed_directly = (
+            self._voxel_grid_which_should_not_be_accessed_directly.transform(from_voxel_coordinates)
+        )
         # Trick to make torch.nn.Module type conversion work automatically, we
         # use the empty indicator tensor to infer the device and dtype of the
         # coordinate system.
@@ -353,19 +361,41 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
         """Spatial shape of the coordinate system grid"""
         return self._spatial_shape
 
+    @property
     def grid(self) -> MappableTensor:
         """Grid in the world coordinates"""
-        return self.from_voxel_coordinates(
-            voxel_grid(
-                spatial_shape=self._spatial_shape,
-                dtype=self.dtype,
-                device=self.device,
-            )
-        )
+        return self._grid
 
+    @property
     def voxel_grid(self) -> MappableTensor:
         """Grid in the voxel coordinates"""
-        return voxel_grid(spatial_shape=self._spatial_shape, dtype=self.dtype, device=self.device)
+        return self._voxel_grid
+
+    @property
+    def _grid(self) -> MappableTensor:
+        if (
+            self._grid_which_should_not_be_accessed_directly.device != self.device
+            or self._grid_which_should_not_be_accessed_directly.dtype != self.dtype
+        ):
+            self._grid_which_should_not_be_accessed_directly = (
+                self._grid_which_should_not_be_accessed_directly.cast(
+                    dtype=self.dtype, device=self.device
+                )
+            )
+        return self._grid_which_should_not_be_accessed_directly
+
+    @property
+    def _voxel_grid(self) -> MappableTensor:
+        if (
+            self._voxel_grid_which_should_not_be_accessed_directly.device != self.device
+            or self._voxel_grid_which_should_not_be_accessed_directly.dtype != self.dtype
+        ):
+            self._voxel_grid_which_should_not_be_accessed_directly = (
+                self._voxel_grid_which_should_not_be_accessed_directly.cast(
+                    dtype=self.dtype, device=self.device
+                )
+            )
+        return self._voxel_grid_which_should_not_be_accessed_directly
 
     @staticmethod
     def _calculate_voxel_size(affine_matrix: Tensor) -> Tensor:
