@@ -22,6 +22,7 @@ from torch.nn import functional as torch_functional
 
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import (
+    combine_optional_masks,
     crop_and_then_pad_spatial,
     get_spatial_dims,
     includes_padding,
@@ -456,7 +457,12 @@ class BaseSeparableSampler(ISampler):
                 n_channel_dims=volume.n_channel_dims,
             )
         return mappable(
-            interpolated_values, interpolated_mask, n_channel_dims=volume.n_channel_dims
+            interpolated_values,
+            combine_optional_masks(
+                interpolated_mask,
+                voxel_coordinates.generate_mask(generate_missing_mask=False, cast_mask=False),
+            ),
+            n_channel_dims=volume.n_channel_dims,
         )
 
     @staticmethod
@@ -556,7 +562,9 @@ class BaseSeparableSampler(ISampler):
             generate_missing_mask=self._mask_extrapolated_regions_for_empty_volume_mask,
             cast_mask=False,
         )
-        coordinate_values = voxel_coordinates.generate_values()
+        coordinate_values, coordinate_mask = voxel_coordinates.generate(
+            generate_missing_mask=False, cast_mask=False
+        )
         interpolated_values = self.sample_values(volume_values, coordinate_values)
         if volume_mask is not None:
             interpolated_mask: Optional[Tensor] = self.sample_mask(
@@ -566,7 +574,9 @@ class BaseSeparableSampler(ISampler):
         else:
             interpolated_mask = None
         return mappable(
-            interpolated_values, interpolated_mask, n_channel_dims=volume.n_channel_dims
+            interpolated_values,
+            combine_optional_masks(coordinate_mask, interpolated_mask),
+            n_channel_dims=volume.n_channel_dims,
         )
 
     def inverse(
