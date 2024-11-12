@@ -1,7 +1,7 @@
 """Interface for samplers."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
 
 from torch import Tensor
 
