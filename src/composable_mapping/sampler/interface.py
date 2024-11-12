@@ -1,7 +1,7 @@
 """Interface for samplers."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 from torch import Tensor
 
@@ -72,6 +72,9 @@ class LimitDirection:
         if not isinstance(value, LimitDirection):
             return False
         return self.direction == value.direction
+
+    def __repr__(self) -> str:
+        return f"LimitDirection({self.direction})"
 
 
 class _SameLimitDirectionForAllSpatialDims:

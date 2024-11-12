@@ -1,6 +1,6 @@
 """Tools for estimating spatial derivatives of a composable mappings."""
 
-from typing import Callable, Optional, Sequence, Union
+from typing import Optional, Sequence, Union
 
 from torch import matmul
 
@@ -50,6 +50,7 @@ def estimate_spatial_jacobian_matrices(
     n_dims = len(target.coordinate_system.spatial_shape)
     if isinstance(limit_direction, LimitDirection):
         limit_direction = [limit_direction] * n_dims
+    print(limit_direction)
     sampled_jacobians = stack_mappable_tensors(
         *(
             resampled_mapping.modify_sampler(
