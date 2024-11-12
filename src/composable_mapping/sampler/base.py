@@ -212,17 +212,16 @@ class BaseSeparableSampler(ISampler):
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: Union[
-            LimitDirection, Callable[[int], LimitDirection]
-        ] = LimitDirection.average(),
+        limit_direction: LimitDirection = LimitDirection.average(),
     ) -> "GenericSeparableDerivativeSampler":
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
+            limit_direction=limit_direction,
             parent_left_limit_kernel=self._left_limit_kernel,
             parent_right_limit_kernel=self._right_limit_kernel,
             parent_kernel_support=self._kernel_support,
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
-            limit_direction=limit_direction,
+            parent_limit_direction=self._limit_direction,
             extrapolation_mode=self._extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
                 self._mask_extrapolated_regions_for_empty_volume_mask
@@ -630,11 +629,12 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
     def __init__(
         self,
         spatial_dim: int,
+        limit_direction: LimitDirection,
         parent_left_limit_kernel: Callable[[Tensor, int], Tensor],
         parent_right_limit_kernel: Callable[[Tensor, int], Tensor],
         parent_kernel_support: Callable[[int], ISeparableKernelSupport],
         parent_is_interpolating_kernel: Callable[[int], bool],
-        limit_direction: Union[LimitDirection, Callable[[int], LimitDirection]],
+        parent_limit_direction: Callable[[int], LimitDirection],
         extrapolation_mode: str = "border",
         mask_extrapolated_regions_for_empty_volume_mask: bool = True,
         convolution_threshold: float = 1e-4,
@@ -647,7 +647,9 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             ),
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
-            limit_direction=limit_direction,
+            limit_direction=LimitDirection.modify(
+                parent_limit_direction, spatial_dim, limit_direction
+            ),
         )
         self._spatial_dim = spatial_dim
         self._parent_left_limit_kernel = parent_left_limit_kernel
@@ -663,17 +665,16 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: Union[
-            LimitDirection, Callable[[int], LimitDirection]
-        ] = LimitDirection.average(),
+        limit_direction: LimitDirection = LimitDirection.average(),
     ) -> "GenericSeparableDerivativeSampler":
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
+            limit_direction=limit_direction,
             parent_left_limit_kernel=self._left_limit_kernel,
             parent_right_limit_kernel=self._right_limit_kernel,
             parent_kernel_support=self._kernel_support,
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
-            limit_direction=limit_direction,
+            parent_limit_direction=self._limit_direction,
             extrapolation_mode=self._extrapolation_mode,
             mask_extrapolated_regions_for_empty_volume_mask=(
                 self._mask_extrapolated_regions_for_empty_volume_mask

@@ -1,7 +1,7 @@
 """Interface for samplers."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 from torch import Tensor
 
@@ -48,6 +48,26 @@ class LimitDirection:
         """
         return _SameLimitDirectionForAllSpatialDims(limit_direction=self)
 
+    @staticmethod
+    def modify(
+        old_limit_directions: Callable[[int], "LimitDirection"],
+        spatial_dim: int,
+        new_limit_direction: "LimitDirection",
+    ) -> Callable[[int], "LimitDirection"]:
+        """Modify the limit direction for a specific spatial dimension.
+
+        Args:
+            limit_directions: Callable that returns the limit direction for
+                each spatial dimension.
+            spatial_dim: Spatial dimension to modify.
+            new_limit_direction: New limit direction for the spatial dimension.
+        """
+        return _ModifiedLimitDirections(
+            old_limit_directions=old_limit_directions,
+            spatial_dim=spatial_dim,
+            new_limit_direction=new_limit_direction,
+        )
+
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, LimitDirection):
             return False
@@ -60,6 +80,25 @@ class _SameLimitDirectionForAllSpatialDims:
 
     def __call__(self, _: int) -> "LimitDirection":
         return self.limit_direction
+
+
+class _ModifiedLimitDirections:
+    def __init__(
+        self,
+        old_limit_directions: Callable[[int], "LimitDirection"],
+        spatial_dim: int,
+        new_limit_direction: LimitDirection,
+    ) -> None:
+        self.old_limit_directions = old_limit_directions
+        self.spatial_dim = spatial_dim
+        self.new_limit_direction = new_limit_direction
+
+    def __call__(self, spatial_dim: int) -> LimitDirection:
+        return (
+            self.new_limit_direction
+            if spatial_dim == self.spatial_dim
+            else self.old_limit_directions(spatial_dim)
+        )
 
 
 class DataFormat:
@@ -126,9 +165,7 @@ class ISampler(ABC):
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: Union[
-            LimitDirection, Callable[[int], LimitDirection]
-        ] = LimitDirection.average(),
+        limit_direction: LimitDirection = LimitDirection.average(),
     ) -> "ISampler":
         """Obtain sampler for sampling derivatives corresponding to the current sampler.
 

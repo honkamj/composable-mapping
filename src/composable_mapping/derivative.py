@@ -1,6 +1,6 @@
 """Tools for estimating spatial derivatives of a composable mappings."""
 
-from typing import Optional
+from typing import Callable, Optional, Union
 
 from torch import matmul
 
@@ -19,7 +19,9 @@ from .util import (
 def estimate_spatial_jacobian_matrices(
     mapping: GridComposableMapping,
     target: Optional[ICoordinateSystemContainer] = None,
-    limit_direction: LimitDirection = LimitDirection.average(),
+    limit_direction: Union[
+        LimitDirection, Callable[[int], LimitDirection]
+    ] = LimitDirection.average(),
     sampler: Optional[ISampler] = None,
 ) -> MappableTensor:
     """Estimate spatial Jacobian matrices of a grid composable mapping.
@@ -48,10 +50,14 @@ def estimate_spatial_jacobian_matrices(
         data_format=DataFormat.world_coordinates(),
     )
     n_dims = len(target.coordinate_system.spatial_shape)
+    if isinstance(limit_direction, LimitDirection):
+        limit_direction = limit_direction.for_all_spatial_dims()
     sampled_jacobians = stack_mappable_tensors(
         *(
             resampled_mapping.modify_sampler(
-                sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
+                sampler.derivative(
+                    spatial_dim=spatial_dim, limit_direction=limit_direction(spatial_dim)
+                ),
             ).sample_to(target)
             for spatial_dim in range(n_dims)
         ),
