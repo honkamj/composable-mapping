@@ -4,7 +4,12 @@ from typing import Optional, Sequence, Union
 
 from torch import matmul
 
-from .composable_mapping import GridComposableMapping, ICoordinateSystemContainer
+from .composable_mapping import (
+    GridComposableMapping,
+    ICoordinateSystemContainer,
+    SamplableVolume,
+)
+from .coordinate_system import CoordinateSystem
 from .mappable_tensor import MappableTensor, stack_mappable_tensors
 from .sampler import DataFormat, ISampler, LimitDirection, get_sampler
 from .util import (
@@ -110,4 +115,50 @@ def estimate_spatial_jacobian_matrices(
         composed_jacobian_matrices,
         mask=jacobians_mask,
         n_channel_dims=sampled_jacobians.n_channel_dims,
+    )
+
+
+def estimate_coordinate_mapping_spatial_derivatives(
+    coordinate_mapping: GridComposableMapping,
+    spatial_dim: int,
+    target: Optional[ICoordinateSystemContainer] = None,
+    limit_direction: LimitDirection = LimitDirection.average(),
+    sampler: Optional[ISampler] = None,
+) -> MappableTensor:
+    """Estimate spatial derivative with respect to coordinates which are rotated
+    to aligh with the coordinate system of the mapping.
+
+    This method works only for coordinate mappings (same number of input and
+    output channels as spatial dimensions).
+
+    Args:
+        mapping: Grid composable mapping to estimate the derivative for.
+        spatial_dim: Spatial dimension along which to compute the derivative.
+            This corresponds to the axis of the grid associated with the coordinate
+            system of the mapping (not world coordinates).
+        target: Target locations at which to estimate the derivative.
+        limit_direction: Direction in which to compute the derivative, e.g. average
+            and LinearInterpolator corresponds to central finite differences when
+            estimated at the grid points.
+        sampler: Sampler to use for the derivative estimation, e.g. LinearInterpolator
+            corresponds to finite differences.
+    """
+    if target is None:
+        target = coordinate_mapping.coordinate_system
+    if sampler is None:
+        sampler = get_sampler(sampler)
+    grid_spacing = coordinate_mapping.coordinate_system.grid_spacing()
+    return (
+        SamplableVolume(
+            coordinate_mapping.sample(data_format=DataFormat.voxel_coordinates()),
+            coordinate_system=CoordinateSystem.voxel(
+                spatial_shape=coordinate_mapping.coordinate_system.spatial_shape,
+                dtype=coordinate_mapping.coordinate_system.dtype,
+                device=coordinate_mapping.coordinate_system.device,
+            ),
+            data_format=DataFormat.world_coordinates(),
+            sampler=sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
+        ).sample_to(target)
+        * grid_spacing
+        / grid_spacing[..., None, spatial_dim]
     )
