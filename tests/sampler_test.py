@@ -118,16 +118,16 @@ class _NonSymmetricInterpolator(BaseSeparableSampler):
         return False
 
     def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return coordinates + 1
+        raise NotImplementedError()
 
     def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        raise NotImplementedError
+        return coordinates + 1
 
     def sample_mask(self, mask: Tensor, coordinates: Tensor) -> Tensor:
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def sample_values(self, volume: Tensor, coordinates: Tensor) -> Tensor:
-        raise NotImplementedError
+        raise NotImplementedError()
 
 
 class InterpolatorTest(TestCase):

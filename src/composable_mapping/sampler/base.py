@@ -16,7 +16,7 @@ from typing import (
     Union,
 )
 
-from torch import Tensor, ones, zeros
+from torch import Tensor, ones
 from torch.autograd.functional import vjp
 from torch.nn import functional as torch_functional
 
@@ -85,9 +85,9 @@ class SymmetricPolynomialKernelSupport(ISeparableKernelSupport):
             return (1.0, True, False)
         bound_inclusive = self._polynomial_degree == 0
         if limit_direction == LimitDirection.left():
-            return (self._kernel_width, False, bound_inclusive)
-        if limit_direction == LimitDirection.right():
             return (self._kernel_width, bound_inclusive, False)
+        if limit_direction == LimitDirection.right():
+            return (self._kernel_width, False, bound_inclusive)
         if limit_direction == LimitDirection.average():
             return (self._kernel_width, bound_inclusive, bound_inclusive)
         raise ValueError("Unknown limit direction")
@@ -198,9 +198,9 @@ class BaseSeparableSampler(ISampler):
         """
 
     def _kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        if self._limit_direction(spatial_dim) == LimitDirection.left():
-            return self._left_limit_kernel(coordinates, spatial_dim)
         if self._limit_direction(spatial_dim) == LimitDirection.right():
+            return self._left_limit_kernel(coordinates, spatial_dim)
+        if self._limit_direction(spatial_dim) == LimitDirection.left():
             return self._right_limit_kernel(coordinates, spatial_dim)
         if self._limit_direction(spatial_dim) == LimitDirection.average():
             return 0.5 * (
@@ -257,7 +257,7 @@ class BaseSeparableSampler(ISampler):
             return None
         generated_kernels_1d = [
             (
-                zeros(1, dtype=not_none_kernels[0].dtype, device=not_none_kernels[0].device)
+                ones(1, dtype=not_none_kernels[0].dtype, device=not_none_kernels[0].device)
                 if kernel is None
                 else kernel
             )

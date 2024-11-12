@@ -593,6 +593,14 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
     def __add__(self, other: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
         return self.translate_world(other)
 
+    def __sub__(self, other: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
+        if not isinstance(other, (float, int, Tensor)):
+            return self.translate_world([-value for value in other])
+        return self.translate_world(-other)
+
+    def __neg__(self) -> "CoordinateSystem":
+        return self.multiply_world(-1)
+
     def multiply_voxel(self, factor: Union[Sequence[Number], Number, Tensor]) -> "CoordinateSystem":
         """Multiply the coordinates in the voxel coordinates (before applying
         the current affine transformation)
