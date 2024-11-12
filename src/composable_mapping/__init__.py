@@ -46,7 +46,10 @@ from .coordinate_system import (
     ReformattingSpatialShape,
     Start,
 )
-from .derivative import estimate_spatial_jacobian_matrices
+from .derivative import (
+    estimate_coordinate_mapping_spatial_derivatives,
+    estimate_spatial_jacobian_matrices,
+)
 from .interface import Number
 from .mappable_tensor import (
     MappableTensor,
@@ -124,6 +127,7 @@ __all__ = [
     "concatenate_mappable_tensors",
     "default_sampler",
     "diagonal_affine",
+    "estimate_coordinate_mapping_spatial_derivatives",
     "estimate_spatial_jacobian_matrices",
     "get_default_sampler",
     "get_sampler",
