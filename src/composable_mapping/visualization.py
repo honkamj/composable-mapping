@@ -1,11 +1,18 @@
 """Visualization utilities for composable mappings."""
 
+from importlib import import_module
 from itertools import combinations
-from typing import Any, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
-from matplotlib.colors import to_rgba  # type: ignore
-from matplotlib.figure import Figure  # type: ignore
-from matplotlib.pyplot import subplots  # type: ignore
 from numpy import amax, amin, array, moveaxis, ndarray
 from torch import Tensor
 from torch import device as torch_device
@@ -20,6 +27,9 @@ from .interface import Number
 from .mappable_tensor import MappableTensor
 from .sampler import DataFormat
 from .util import get_spatial_dims, get_spatial_shape
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure  # type: ignore
 
 
 def obtain_coordinate_mapping_central_planes(
@@ -100,8 +110,9 @@ class GridVisualizationArguments:
 def visualize_grid(
     coordinates: MappableTensor,
     arguments: Optional[GridVisualizationArguments] = None,
-) -> Figure:
+) -> "Figure":
     """Visualize coordinates as a grid"""
+    plt = import_module("matplotlib.pyplot")  # import dynamically to avoid unnecessary dependencies
     if coordinates.n_channel_dims != 1:
         raise ValueError("Only single-channel coordinates are supported")
     if coordinates.channels_shape[0] != len(coordinates.spatial_shape):
@@ -125,7 +136,7 @@ def visualize_grid(
         kwargs.update(arguments.plot_kwargs)
         return kwargs
 
-    figure, axes = subplots(
+    figure, axes = plt.subplots(
         1,
         len(planes),
         figsize=(arguments.figure_height * len(planes), arguments.figure_height),
@@ -172,8 +183,11 @@ def visualize_image(
     volume: MappableTensor,
     voxel_size: Optional[Union[Tensor, Number, Sequence[Number]]] = None,
     arguments: Optional[ImageVisualizationArguments] = None,
-) -> Figure:
+) -> "Figure":
     """Visualize coordinates as an image"""
+    # import dynamically to avoid unnecessary dependencies
+    colors = import_module("matplotlib.colors")
+    plt = import_module("matplotlib.pyplot")
     if volume.n_channel_dims != 1:
         raise ValueError("Only single-channel volumes are supported")
     if arguments is None:
@@ -199,7 +213,7 @@ def visualize_image(
         if arguments.vmax is None
         else arguments.vmax
     )
-    figure, axes = subplots(
+    figure, axes = plt.subplots(
         1,
         len(planes),
         figsize=(arguments.figure_height * len(planes), arguments.figure_height),
@@ -212,7 +226,7 @@ def visualize_image(
     if arguments.mask_color is None:
         mask_color: Optional[ndarray] = None
     else:
-        mask_color = array(to_rgba(arguments.mask_color))[None, None]
+        mask_color = array(colors.to_rgba(arguments.mask_color))[None, None]
         mask_color[..., -1] = arguments.mask_alpha
     for axis, plane, mask_plane, (dim_1, dim_2) in zip(
         axes.flatten(), planes, mask_planes, dimension_pairs

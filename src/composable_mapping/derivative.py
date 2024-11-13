@@ -9,7 +9,7 @@ from .composable_mapping import (
     ICoordinateSystemContainer,
     SamplableVolume,
 )
-from .mappable_tensor import MappableTensor, stack_mappable_tensors
+from .mappable_tensor import MappableTensor, mappable, stack_mappable_tensors
 from .sampler import DataFormat, ISampler, LimitDirection, get_sampler
 from .util import (
     broadcast_tensors_in_parts,
@@ -154,6 +154,6 @@ def estimate_coordinate_mapping_spatial_derivatives(
             data_format=DataFormat.world_coordinates(),
             sampler=sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
         ).sample_to(target)
-        * grid_spacing
-        / grid_spacing[..., None, spatial_dim]
+        * mappable(grid_spacing)
+        / mappable(grid_spacing[..., None, spatial_dim])
     )
