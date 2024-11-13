@@ -99,6 +99,7 @@ def extract_conv_samplable_parameters(
         spatial_permutation and flipped_spatial_dims or None if the sampling can not
         be done using convolution.
     """
+    print(grid_affine_matrix)
     if grid_affine_matrix.shape[-2] != grid_affine_matrix.shape[-1]:
         return None
     n_dims = len(grid_spatial_shape)

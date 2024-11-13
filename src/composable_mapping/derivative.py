@@ -9,7 +9,6 @@ from .composable_mapping import (
     ICoordinateSystemContainer,
     SamplableVolume,
 )
-from .coordinate_system import CoordinateSystem
 from .mappable_tensor import MappableTensor, stack_mappable_tensors
 from .sampler import DataFormat, ISampler, LimitDirection, get_sampler
 from .util import (
@@ -151,11 +150,7 @@ def estimate_coordinate_mapping_spatial_derivatives(
     return (
         SamplableVolume(
             coordinate_mapping.sample(data_format=DataFormat.voxel_coordinates()),
-            coordinate_system=CoordinateSystem.voxel(
-                spatial_shape=coordinate_mapping.coordinate_system.spatial_shape,
-                dtype=coordinate_mapping.coordinate_system.dtype,
-                device=coordinate_mapping.coordinate_system.device,
-            ),
+            coordinate_system=coordinate_mapping.coordinate_system,
             data_format=DataFormat.world_coordinates(),
             sampler=sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
         ).sample_to(target)
