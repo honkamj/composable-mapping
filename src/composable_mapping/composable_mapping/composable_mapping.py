@@ -16,6 +16,9 @@ from typing import (
 )
 
 from torch import Tensor
+from torch import device as torch_device
+from torch import dtype as torch_dtype
+from torch import get_default_device, get_default_dtype
 
 from composable_mapping.affine_transformation import IAffineTransformation
 from composable_mapping.interface import Number
@@ -524,7 +527,31 @@ class _SetDefaultResamplingDataFormatDecorator(BaseTensorLikeWrapper, Composable
 
 
 class Identity(BaseTensorLikeWrapper, ComposableMapping):
-    """Identity mapping."""
+    """Identity mapping.
+
+    Arguments:
+        dtype: Data type of the mapping. This has no effect except on
+            the data type property of the mapping, but for consistency
+            of the composable mapping interface, the data type is stored.
+        device: Device of the tensor. This has no effect except on
+            the device property of the mapping, but for consistency
+            of the composable mapping interface, the device is stored.
+    """
+
+    def __init__(
+        self, dtype: Optional[torch_dtype] = None, device: Optional[torch_device] = None
+    ) -> None:
+        super().__init__()
+        self._dtype = get_default_dtype() if dtype is None else dtype
+        self._device = get_default_device() if device is None else device
+
+    @property
+    def dtype(self) -> torch_dtype:
+        return self._dtype
+
+    @property
+    def device(self) -> torch_device:
+        return self._device
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}

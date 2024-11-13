@@ -6,7 +6,7 @@ from typing import Mapping, Optional, Sequence, Tuple, Union, cast, overload
 from torch import Tensor, broadcast_shapes
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import ones, zeros
+from torch import get_default_device, ones, zeros
 
 from composable_mapping.interface import Number
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
@@ -529,7 +529,7 @@ class HostAffineTransformation(AffineTransformation, IHostAffineTransformation):
         if transformation_matrix_on_host.requires_grad:
             raise ValueError("The implementation assumes a detached transformation matrix.")
         super().__init__(transformation_matrix=transformation_matrix_on_host)
-        self._device = torch_device("cpu") if device is None else device
+        self._device = get_default_device() if device is None else device
 
     def __call__(self, values: Tensor, n_channel_dims: int = 1) -> Tensor:
         if (
@@ -815,7 +815,7 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
             dtype=dtype,
             device=torch_device("cpu"),
         )
-        self._target_device = torch_device("cpu") if device is None else device
+        self._target_device = get_default_device() if device is None else device
 
     @classmethod
     def from_definition(
@@ -826,7 +826,7 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
         """Create diagonal affine transformation from definition"""
         instance = cls.__new__(cls)
         instance._matrix_definition = matrix_definition
-        instance._target_device = torch_device("cpu") if device is None else device
+        instance._target_device = get_default_device() if device is None else device
         return instance
 
     def _modified_copy(

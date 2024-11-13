@@ -5,7 +5,7 @@ from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 from torch import Tensor, allclose, broadcast_shapes, cat
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import get_default_dtype, ones, tensor, zeros
+from torch import get_default_device, get_default_dtype, ones, tensor, zeros
 
 from composable_mapping.interface import Number
 from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
@@ -326,7 +326,7 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
             dtype = translation.dtype
             device = translation.device
         dtype = get_default_dtype() if dtype is None else dtype
-        device = torch_device("cpu") if device is None else device
+        device = get_default_device() if device is None else device
         return dtype, device
 
     def clear_translation(self) -> "DiagonalAffineMatrixDefinition":
