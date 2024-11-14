@@ -102,7 +102,7 @@ class _NonSymmetricInterpolator(BaseSeparableSampler):
     ) -> None:
         super().__init__(
             extrapolation_mode="border",
-            mask_extrapolated_regions_for_empty_volume_mask=True,
+            mask_extrapolated_regions=True,
             convolution_threshold=1e-4,
             mask_threshold=1e-5,
             limit_direction=LimitDirection.left(),

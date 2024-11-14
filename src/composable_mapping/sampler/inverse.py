@@ -30,8 +30,7 @@ class FixedPointInverseSampler(ISampler):
         backward_solver: Backward solver for the fixed-point iteration.
         forward_dtype: Data type for the forward solver.
         backward_dtype: Data type for the backward solver.
-        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
-            extrapolated regions when input volume mask is empty.
+        mask_extrapolated_regions: Whether to mask extrapolated regions.
     """
 
     def __init__(
@@ -41,12 +40,10 @@ class FixedPointInverseSampler(ISampler):
         backward_solver: Optional[FixedPointSolver] = None,
         forward_dtype: Optional[torch_dtype] = None,
         backward_dtype: Optional[torch_dtype] = None,
-        mask_extrapolated_regions_for_empty_volume_mask: bool = True,
+        mask_extrapolated_regions: bool = True,
     ):
         self._sampler = sampler
-        self._mask_extrapolated_regions_for_empty_volume_mask = (
-            mask_extrapolated_regions_for_empty_volume_mask
-        )
+        self._mask_extrapolated_regions = mask_extrapolated_regions
         self._inversion_arguments = DeformationInversionArguments(
             interpolator=sampler.sample_values,
             forward_solver=forward_solver,
@@ -65,23 +62,24 @@ class FixedPointInverseSampler(ISampler):
                 "Displacement field inverse sampler assumes single channel displacement "
                 "with same number of channels as spatial dims."
             )
-        data, data_mask = volume.generate(
-            generate_missing_mask=self._mask_extrapolated_regions_for_empty_volume_mask,
-            cast_mask=False,
-        )
+        data = volume.generate_values()
         coordinates_values, coordinates_mask = coordinates.generate(
             generate_missing_mask=False, cast_mask=False
         )
         inverted_values = self._sample_values(
             data, coordinates_values, -self._sampler(volume, coordinates).generate_values()
         )
-        if data_mask is None:
-            mask: Optional[Tensor] = None
-        else:
-            mask = self._sampler.sample_mask(
+        if self._mask_extrapolated_regions:
+            data_mask = volume.generate_mask(
+                generate_missing_mask=True,
+                cast_mask=False,
+            )
+            mask: Optional[Tensor] = self._sampler.sample_mask(
                 mask=data_mask,
                 coordinates=coordinates_values + inverted_values,
             )
+        else:
+            mask = None
         mask = combine_optional_masks(
             mask,
             coordinates_mask,

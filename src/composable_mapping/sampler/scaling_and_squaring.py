@@ -24,8 +24,6 @@ class ScalingAndSquaring(ISampler):
         sampler: Sampler used in integration of the SVF and sampling the volume.
         steps: Number of scaling and squaring steps.
         inverse: Whether to integrate in the inverse direction.
-        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
-            extrapolated regions when input volume mask is empty.
     """
 
     def __init__(
@@ -33,14 +31,10 @@ class ScalingAndSquaring(ISampler):
         steps: int = 7,
         sampler: Optional[ISampler] = None,
         inverse: bool = False,
-        mask_extrapolated_regions_for_empty_volume_mask: bool = True,
     ) -> None:
         self._sampler = get_sampler(sampler)
         self._steps = steps
         self._inverse = inverse
-        self._mask_extrapolated_regions_for_empty_volume_mask = (
-            mask_extrapolated_regions_for_empty_volume_mask
-        )
 
     def __call__(self, volume: MappableTensor, coordinates: MappableTensor) -> MappableTensor:
         if volume.n_channel_dims != 1 or volume.channels_shape[0] != len(volume.spatial_shape):

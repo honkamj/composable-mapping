@@ -24,8 +24,7 @@ class LinearInterpolator(BaseSeparableSampler):
 
     Arguments:
         extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
-            extrapolated regions when input volume mask is empty.
+        mask_extrapolated_regions: Whether to mask extrapolated regions.
         convolution_threshold: Maximum allowed difference in coordinates
             for using convolution-based sampling (the difference might be upper
             bounded when doing the decision).
@@ -36,15 +35,13 @@ class LinearInterpolator(BaseSeparableSampler):
     def __init__(
         self,
         extrapolation_mode: str = "border",
-        mask_extrapolated_regions_for_empty_volume_mask: bool = True,
+        mask_extrapolated_regions: bool = True,
         convolution_threshold: float = 1e-4,
         mask_threshold: float = 1e-5,
     ) -> None:
         super().__init__(
             extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions_for_empty_volume_mask=(
-                mask_extrapolated_regions_for_empty_volume_mask
-            ),
+            mask_extrapolated_regions=mask_extrapolated_regions,
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
             limit_direction=LimitDirection.right(),
@@ -97,8 +94,7 @@ class NearestInterpolator(BaseSeparableSampler):
 
     Arguments:
         extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
-            extrapolated regions when input volume mask is empty.
+        mask_extrapolated_regions: Whether to mask extrapolated regions.
         convolution_threshold: Maximum allowed difference in coordinates
             for using convolution-based sampling (the difference might be upper
             bounded when doing the decision).
@@ -111,16 +107,14 @@ class NearestInterpolator(BaseSeparableSampler):
     def __init__(
         self,
         extrapolation_mode: str = "border",
-        mask_extrapolated_regions_for_empty_volume_mask: bool = True,
+        mask_extrapolated_regions: bool = True,
         convolution_threshold: float = 1e-4,
         mask_threshold: float = 1e-5,
         limit_direction: LimitDirection = LimitDirection.right(),
     ) -> None:
         super().__init__(
             extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions_for_empty_volume_mask=(
-                mask_extrapolated_regions_for_empty_volume_mask
-            ),
+            mask_extrapolated_regions=mask_extrapolated_regions,
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
             limit_direction=limit_direction,
@@ -168,8 +162,7 @@ class BicubicInterpolator(BaseSeparableSampler):
 
     Arguments:
         extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
-            extrapolated regions when input volume mask is empty.
+        mask_extrapolated_regions: Whether to mask extrapolated regions.
         convolution_threshold: Maximum allowed difference in coordinates
             for using convolution-based sampling (the difference might be upper
             bounded when doing the decision).
@@ -180,15 +173,13 @@ class BicubicInterpolator(BaseSeparableSampler):
     def __init__(
         self,
         extrapolation_mode: str = "border",
-        mask_extrapolated_regions_for_empty_volume_mask: bool = True,
+        mask_extrapolated_regions: bool = True,
         convolution_threshold: float = 1e-4,
         mask_threshold: float = 1e-5,
     ) -> None:
         super().__init__(
             extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions_for_empty_volume_mask=(
-                mask_extrapolated_regions_for_empty_volume_mask
-            ),
+            mask_extrapolated_regions=mask_extrapolated_regions,
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
             limit_direction=LimitDirection.right(),

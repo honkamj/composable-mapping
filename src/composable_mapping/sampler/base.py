@@ -116,8 +116,7 @@ class BaseSeparableSampler(ISampler):
 
     Arguments:
         extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
-            extrapolated regions when input volume mask is empty.
+        mask_extrapolated_regions: Whether to mask extrapolated regions.
         convolution_threshold: Maximum allowed difference in coordinates
             for using convolution-based sampling (the difference might be upper
             bounded when doing the decision).
@@ -130,7 +129,7 @@ class BaseSeparableSampler(ISampler):
     def __init__(
         self,
         extrapolation_mode: str,
-        mask_extrapolated_regions_for_empty_volume_mask: bool,
+        mask_extrapolated_regions: bool,
         convolution_threshold: float,
         mask_threshold: float,
         limit_direction: Union[LimitDirection, Callable[[int], LimitDirection]],
@@ -138,9 +137,7 @@ class BaseSeparableSampler(ISampler):
         if extrapolation_mode not in ("zeros", "border", "reflection"):
             raise ValueError("Unknown extrapolation mode")
         self._extrapolation_mode = extrapolation_mode
-        self._mask_extrapolated_regions_for_empty_volume_mask = (
-            mask_extrapolated_regions_for_empty_volume_mask
-        )
+        self._mask_extrapolated_regions = mask_extrapolated_regions
         self._convolution_threshold = convolution_threshold
         self._mask_threshold = mask_threshold
         self._limit_direction = (
@@ -223,9 +220,7 @@ class BaseSeparableSampler(ISampler):
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
             parent_limit_direction=self._limit_direction,
             extrapolation_mode=self._extrapolation_mode,
-            mask_extrapolated_regions_for_empty_volume_mask=(
-                self._mask_extrapolated_regions_for_empty_volume_mask
-            ),
+            mask_extrapolated_regions=self._mask_extrapolated_regions,
             convolution_threshold=self._convolution_threshold,
             mask_threshold=self._mask_threshold,
         )
@@ -386,11 +381,7 @@ class BaseSeparableSampler(ISampler):
         ) = conv_parameters
         padding_mode, padding_value = self._padding_mode_and_value
 
-        values, mask = volume.generate(
-            generate_missing_mask=includes_padding(pre_pads_or_crops)
-            and self._mask_extrapolated_regions_for_empty_volume_mask,
-            cast_mask=False,
-        )
+        values = volume.generate_values()
         interpolated_values = apply_flipping_permutation_to_volume(
             values,
             n_channel_dims=volume.n_channel_dims,
@@ -420,41 +411,47 @@ class BaseSeparableSampler(ISampler):
             value=padding_value,
             n_channel_dims=volume.n_channel_dims,
         )
-        if mask is None:
-            interpolated_mask: Optional[Tensor] = None
-        else:
-            interpolated_mask = apply_flipping_permutation_to_volume(
-                mask,
-                n_channel_dims=volume.n_channel_dims,
-                spatial_permutation=spatial_permutation,
-                flipped_spatial_dims=flipped_spatial_dims,
+        interpolated_mask: Optional[Tensor] = None
+        if self._mask_extrapolated_regions:
+            mask = volume.generate_mask(
+                generate_missing_mask=includes_padding(pre_pads_or_crops),
+                cast_mask=False,
             )
-            interpolated_mask = crop_and_then_pad_spatial(
-                interpolated_mask,
-                pads_or_crops=pre_pads_or_crops,
-                mode="constant",
-                value=False,
-                n_channel_dims=volume.n_channel_dims,
-            )
-            interpolated_mask = (
-                self._separable_conv(
-                    (~interpolated_mask).to(dtype=voxel_coordinates.dtype),
-                    kernels=[None if kernel is None else kernel.abs() for kernel in conv_kernels],
-                    kernel_spatial_dims=conv_kernel_dims,
-                    kernel_transposed=conv_kernel_transposed,
-                    stride=conv_strides,
-                    padding=conv_paddings,
+            if mask is not None:
+                interpolated_mask = apply_flipping_permutation_to_volume(
+                    mask,
+                    n_channel_dims=volume.n_channel_dims,
+                    spatial_permutation=spatial_permutation,
+                    flipped_spatial_dims=flipped_spatial_dims,
+                )
+                interpolated_mask = crop_and_then_pad_spatial(
+                    interpolated_mask,
+                    pads_or_crops=pre_pads_or_crops,
+                    mode="constant",
+                    value=False,
                     n_channel_dims=volume.n_channel_dims,
                 )
-                <= self._mask_threshold
-            )
-            interpolated_mask = crop_and_then_pad_spatial(
-                interpolated_mask,
-                pads_or_crops=post_pads_or_crops,
-                mode="constant",
-                value=False,
-                n_channel_dims=volume.n_channel_dims,
-            )
+                interpolated_mask = (
+                    self._separable_conv(
+                        (~interpolated_mask).to(dtype=voxel_coordinates.dtype),
+                        kernels=[
+                            None if kernel is None else kernel.abs() for kernel in conv_kernels
+                        ],
+                        kernel_spatial_dims=conv_kernel_dims,
+                        kernel_transposed=conv_kernel_transposed,
+                        stride=conv_strides,
+                        padding=conv_paddings,
+                        n_channel_dims=volume.n_channel_dims,
+                    )
+                    <= self._mask_threshold
+                )
+                interpolated_mask = crop_and_then_pad_spatial(
+                    interpolated_mask,
+                    pads_or_crops=post_pads_or_crops,
+                    mode="constant",
+                    value=False,
+                    n_channel_dims=volume.n_channel_dims,
+                )
         return mappable(
             interpolated_values,
             combine_optional_masks(
@@ -557,17 +554,14 @@ class BaseSeparableSampler(ISampler):
     def _interpolate_general(
         self, volume: MappableTensor, voxel_coordinates: MappableTensor
     ) -> MappableTensor:
-        volume_values, volume_mask = volume.generate(
-            generate_missing_mask=self._mask_extrapolated_regions_for_empty_volume_mask,
-            cast_mask=False,
-        )
+        volume_values = volume.generate_values()
         coordinate_values, coordinate_mask = voxel_coordinates.generate(
             generate_missing_mask=False, cast_mask=False
         )
         interpolated_values = self.sample_values(volume_values, coordinate_values)
-        if volume_mask is not None:
+        if self._mask_extrapolated_regions:
             interpolated_mask: Optional[Tensor] = self.sample_mask(
-                volume_mask,
+                volume.generate_mask(generate_missing_mask=True, cast_mask=False),
                 coordinate_values,
             )
         else:
@@ -594,9 +588,7 @@ class BaseSeparableSampler(ISampler):
                 backward_solver=fixed_point_inversion_arguments.get("backward_solver"),
                 forward_dtype=fixed_point_inversion_arguments.get("forward_dtype"),
                 backward_dtype=fixed_point_inversion_arguments.get("backward_dtype"),
-                mask_extrapolated_regions_for_empty_volume_mask=(
-                    self._mask_extrapolated_regions_for_empty_volume_mask
-                ),
+                mask_extrapolated_regions=self._mask_extrapolated_regions,
             )
         raise ValueError(
             "Inverse sampler has been currently implemented only for voxel "
@@ -617,8 +609,7 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             is interpolating.
         limit_direction: Direction for evaluating the kernel at discontinuous points.
         extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions_for_empty_volume_mask: Whether to mask
-            extrapolated regions when input volume mask is empty.
+        mask_extrapolated_regions: Whether to mask extrapolated regions.
         convolution_threshold: Maximum allowed difference in coordinates
             for using convolution-based sampling.
         mask_threshold: Maximum allowed weight for masked regions in a
@@ -636,15 +627,13 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         parent_is_interpolating_kernel: Callable[[int], bool],
         parent_limit_direction: Callable[[int], LimitDirection],
         extrapolation_mode: str = "border",
-        mask_extrapolated_regions_for_empty_volume_mask: bool = True,
+        mask_extrapolated_regions: bool = True,
         convolution_threshold: float = 1e-4,
         mask_threshold: float = 1e-5,
     ) -> None:
         super().__init__(
             extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions_for_empty_volume_mask=(
-                mask_extrapolated_regions_for_empty_volume_mask
-            ),
+            mask_extrapolated_regions=mask_extrapolated_regions,
             convolution_threshold=convolution_threshold,
             mask_threshold=mask_threshold,
             limit_direction=LimitDirection.modify(
@@ -676,9 +665,7 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
             parent_limit_direction=self._limit_direction,
             extrapolation_mode=self._extrapolation_mode,
-            mask_extrapolated_regions_for_empty_volume_mask=(
-                self._mask_extrapolated_regions_for_empty_volume_mask
-            ),
+            mask_extrapolated_regions=self._mask_extrapolated_regions,
             convolution_threshold=self._convolution_threshold,
             mask_threshold=self._mask_threshold,
         )
