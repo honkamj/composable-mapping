@@ -96,7 +96,12 @@ class GridDefinition(BaseTensorLikeWrapper):
         )
 
     def is_zero(self) -> Optional[bool]:
-        """Is the grid all zeros"""
+        """Is the grid all zeros
+
+        Returns:
+            None if the check cannot be done on CPU, otherwise bool indicating
+            whether the grid is all zeros.
+        """
         return self._affine_transformation.is_zero()
 
     def is_transformable(self, affine_transformation: IAffineTransformation) -> bool:
