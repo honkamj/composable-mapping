@@ -10,10 +10,10 @@ from composable_mapping.util import move_channels_first, move_channels_last
 
 from .composable_mapping import ComposableMapping
 from .mappable_tensor import MappableTensor
-from .tensor_like import BaseTensorLikeWrapper, ITensorLike
+from .tensor_like import TensorLike
 
 
-class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
+class RectangleMask(ComposableMapping):
     """Modify mask of the input based on bounds
 
     Arguments.
@@ -38,11 +38,11 @@ class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "RectangleMask":
         return RectangleMask(min_values=self._min_values, max_values=self._max_values)
 
@@ -96,17 +96,17 @@ class RectangleMask(BaseTensorLikeWrapper, ComposableMapping):
         return f"RectangleMask(min_values={self._min_values}, max_values={self._max_values})"
 
 
-class ClearMask(BaseTensorLikeWrapper, ComposableMapping):
+class ClearMask(ComposableMapping):
     """Clear mask of the input"""
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "ClearMask":
         return ClearMask()
 

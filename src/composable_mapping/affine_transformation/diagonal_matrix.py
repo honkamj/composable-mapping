@@ -8,7 +8,7 @@ from torch import dtype as torch_dtype
 from torch import get_default_device, get_default_dtype, ones, tensor, zeros
 
 from composable_mapping.interface import Number
-from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.tensor_like import TensorLike
 from composable_mapping.util import (
     broadcast_optional_shapes_in_parts_splitted,
     broadcast_shapes_in_parts_to_single_shape,
@@ -27,7 +27,7 @@ from .matrix import (
 )
 
 
-class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
+class DiagonalAffineMatrixDefinition(TensorLike):
     """Definition of a diagonal affine matrix
 
     Arguments:
@@ -91,7 +91,7 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
         self._diagonal = diagonal
         self._translation = translation
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {}
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
@@ -103,7 +103,7 @@ class DiagonalAffineMatrixDefinition(BaseTensorLikeWrapper):
         return tensors
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "DiagonalAffineMatrixDefinition":
         diagonal = tensors.get("diagonal", self._diagonal)
         translation = tensors.get("translation", self._translation)

@@ -15,10 +15,10 @@ from .affine_transformation import (
 from .composable_mapping import ComposableMapping
 from .mappable_tensor import MappableTensor
 from .sampler.interface import DataFormat
-from .tensor_like import BaseTensorLikeWrapper, ITensorLike
+from .tensor_like import TensorLike
 
 
-class Affine(BaseTensorLikeWrapper, ComposableMapping):
+class Affine(ComposableMapping):
     """Affine mapping.
 
     This class represents an affine transformation applicable to mappable
@@ -112,14 +112,14 @@ class Affine(BaseTensorLikeWrapper, ComposableMapping):
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
         return masked_coordinates.transform(self.transformation)
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {"transformation": self.transformation}
 
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "Affine":
         return Affine(cast(IAffineTransformation, children["transformation"]))
 

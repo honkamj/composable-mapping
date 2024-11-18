@@ -9,7 +9,7 @@ from composable_mapping.mappable_tensor import (
     concatenate_mappable_tensors,
     stack_mappable_tensors,
 )
-from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.tensor_like import TensorLike
 
 from .composable_mapping import ComposableMapping, GridComposableMapping
 
@@ -56,7 +56,7 @@ def concatenate_mappings(
     return cast(ComposableMappingT, concatenated)
 
 
-class _Stack(BaseTensorLikeWrapper, ComposableMapping):
+class _Stack(ComposableMapping):
     """Stacked mappings."""
 
     def __init__(self, *mappings: ComposableMapping, channel_index: int) -> None:
@@ -69,7 +69,7 @@ class _Stack(BaseTensorLikeWrapper, ComposableMapping):
         return None
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "_Stack":
         return _Stack(
             *(cast(ComposableMapping, children[f"mapping_{i}"]) for i in range(len(children))),
@@ -79,7 +79,7 @@ class _Stack(BaseTensorLikeWrapper, ComposableMapping):
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         children = {}
         for i, mapping in enumerate(self._mappings):
             children[f"mapping_{i}"] = mapping
@@ -98,7 +98,7 @@ class _Stack(BaseTensorLikeWrapper, ComposableMapping):
         return f"_Stack(mappings={self._mappings}, " f"channel_index={self._channel_index})"
 
 
-class _Concatenate(BaseTensorLikeWrapper, ComposableMapping):
+class _Concatenate(ComposableMapping):
     """Concatenated mappings."""
 
     def __init__(self, *mappings: ComposableMapping, channel_index: int) -> None:
@@ -111,7 +111,7 @@ class _Concatenate(BaseTensorLikeWrapper, ComposableMapping):
         return None
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "_Concatenate":
         return _Concatenate(
             *(cast(ComposableMapping, children[f"mapping_{i}"]) for i in range(len(children))),
@@ -121,7 +121,7 @@ class _Concatenate(BaseTensorLikeWrapper, ComposableMapping):
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         children = {}
         for i, mapping in enumerate(self._mappings):
             children[f"mapping_{i}"] = mapping

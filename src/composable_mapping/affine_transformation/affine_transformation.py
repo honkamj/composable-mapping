@@ -9,7 +9,7 @@ from torch import dtype as torch_dtype
 from torch import get_default_device, ones, zeros
 
 from composable_mapping.interface import Number
-from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.tensor_like import TensorLike
 from composable_mapping.util import (
     are_broadcastable,
     broadcast_shapes_in_parts,
@@ -45,7 +45,7 @@ from .matrix import (
 )
 
 
-class IAffineTransformation(ITensorLike):
+class IAffineTransformation(TensorLike):
     """Affine transformation"""
 
     @abstractmethod
@@ -455,7 +455,7 @@ class BaseAffineTransformation(IAffineTransformation):
         return None
 
 
-class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
+class AffineTransformation(BaseAffineTransformation):
     """Generic affine transformation
 
     Arguments:
@@ -474,7 +474,7 @@ class AffineTransformation(BaseAffineTransformation, BaseTensorLikeWrapper):
         return {"transformation_matrix": self._transformation_matrix}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "AffineTransformation":
         return AffineTransformation(tensors["transformation_matrix"])
 
@@ -681,7 +681,7 @@ class BaseDiagonalAffineTransformation(BaseAffineTransformation):
         """Return the diagonal and translation tensors detached on cpu, if available"""
 
 
-class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTransformation):
+class DiagonalAffineTransformation(BaseDiagonalAffineTransformation):
     """Affine transformation representable as a diagonal affine transformation matrix
 
     Arguments:
@@ -724,11 +724,11 @@ class DiagonalAffineTransformation(BaseTensorLikeWrapper, BaseDiagonalAffineTran
         instance._matrix_definition = matrix_definition
         return instance
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {"matrix_definition": self._matrix_definition}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "DiagonalAffineTransformation":
         return self.from_definition(
             cast(DiagonalAffineMatrixDefinition, children["matrix_definition"])
@@ -830,7 +830,7 @@ class HostDiagonalAffineTransformation(DiagonalAffineTransformation, IHostAffine
         return instance
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "HostDiagonalAffineTransformation":
         return HostDiagonalAffineTransformation.from_definition(
             cast(DiagonalAffineMatrixDefinition, children["matrix_definition"]), self.device

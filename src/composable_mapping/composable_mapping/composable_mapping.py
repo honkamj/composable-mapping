@@ -24,7 +24,7 @@ from composable_mapping.affine_transformation import IAffineTransformation
 from composable_mapping.interface import Number
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.sampler import DataFormat, ISampler, get_sampler
-from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.tensor_like import TensorLike
 
 from .interface import ICoordinateSystemContainer
 
@@ -148,7 +148,7 @@ def _set_default_resampling_data_format(
     )
 
 
-class ComposableMapping(ITensorLike, ABC):
+class ComposableMapping(TensorLike, ABC):
     """Base class for mappings composable with each other, and acting on mappable
     tensors.
 
@@ -437,7 +437,7 @@ class GridComposableMapping(ComposableMapping, ICoordinateSystemContainer, ABC):
         return super().set_default_resampling_data_format(data_format).assign_coordinates(self)
 
 
-class _AssignCoordinatesDecorator(BaseTensorLikeWrapper, GridComposableMapping):
+class _AssignCoordinatesDecorator(GridComposableMapping):
     """Decorator for coupling a composable mapping with a coordinate system.
 
     Arguments:
@@ -450,11 +450,11 @@ class _AssignCoordinatesDecorator(BaseTensorLikeWrapper, GridComposableMapping):
         self._mapping = mapping
         self._coordinate_system = coordinate_system
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {"mapping": self._mapping, "coordinate_system": self._coordinate_system}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "_AssignCoordinatesDecorator":
         return _AssignCoordinatesDecorator(
             cast(ComposableMapping, children["mapping"]),
@@ -482,7 +482,7 @@ class _AssignCoordinatesDecorator(BaseTensorLikeWrapper, GridComposableMapping):
         )
 
 
-class _SetDefaultResamplingDataFormatDecorator(BaseTensorLikeWrapper, ComposableMapping):
+class _SetDefaultResamplingDataFormatDecorator(ComposableMapping):
     """Decorator for setting the default data format of a composable mapping.
 
     Arguments:
@@ -495,11 +495,11 @@ class _SetDefaultResamplingDataFormatDecorator(BaseTensorLikeWrapper, Composable
         self._mapping = mapping
         self._data_format = data_format
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {"mapping": self._mapping}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "_SetDefaultResamplingDataFormatDecorator":
         return _SetDefaultResamplingDataFormatDecorator(
             cast(ComposableMapping, children["mapping"]),
@@ -526,7 +526,7 @@ class _SetDefaultResamplingDataFormatDecorator(BaseTensorLikeWrapper, Composable
         )
 
 
-class Identity(BaseTensorLikeWrapper, ComposableMapping):
+class Identity(ComposableMapping):
     """Identity mapping.
 
     Arguments:
@@ -556,11 +556,11 @@ class Identity(BaseTensorLikeWrapper, ComposableMapping):
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "Identity":
         return Identity()
 
@@ -577,7 +577,7 @@ class Identity(BaseTensorLikeWrapper, ComposableMapping):
         return "Identity()"
 
 
-class _Composition(BaseTensorLikeWrapper, ComposableMapping):
+class _Composition(ComposableMapping):
     """Composition of two mappings."""
 
     def __init__(self, left_mapping: ComposableMapping, right_mapping: ComposableMapping) -> None:
@@ -586,7 +586,7 @@ class _Composition(BaseTensorLikeWrapper, ComposableMapping):
         self._right_mapping = right_mapping
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "_Composition":
         return _Composition(
             cast(ComposableMapping, children["left_mapping"]),
@@ -596,7 +596,7 @@ class _Composition(BaseTensorLikeWrapper, ComposableMapping):
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {"left_mapping": self._left_mapping, "right_mapping": self._right_mapping}
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
@@ -620,7 +620,7 @@ class _Composition(BaseTensorLikeWrapper, ComposableMapping):
         )
 
 
-class _BivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
+class _BivariateArithmeticOperator(ComposableMapping):
     def __init__(
         self,
         mapping: ComposableMapping,
@@ -635,7 +635,7 @@ class _BivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
         self._inverse_operator = inverse_operator
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "_BivariateArithmeticOperator":
         return _BivariateArithmeticOperator(
             self._mapping,
@@ -650,8 +650,8 @@ class _BivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
             tensors["other"] = self._other
         return tensors
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
-        children: Dict[str, ITensorLike] = {"mapping": self._mapping}
+    def _get_children(self) -> Mapping[str, TensorLike]:
+        children: Dict[str, TensorLike] = {"mapping": self._mapping}
         if isinstance(self._other, (MappableTensor, ComposableMapping)):
             children["other"] = self._other
         return children
@@ -689,7 +689,7 @@ class _BivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
         )
 
 
-class _UnivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
+class _UnivariateArithmeticOperator(ComposableMapping):
     def __init__(
         self,
         mapping: ComposableMapping,
@@ -702,7 +702,7 @@ class _UnivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
         self._inverse_operator = inverse_operator
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "_UnivariateArithmeticOperator":
         return _UnivariateArithmeticOperator(
             cast(ComposableMapping, self._mapping),
@@ -710,7 +710,7 @@ class _UnivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
             self._inverse_operator,
         )
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {"mapping": self._mapping}
 
     def __call__(self, masked_coordinates: MappableTensor) -> MappableTensor:
@@ -734,7 +734,7 @@ class _UnivariateArithmeticOperator(BaseTensorLikeWrapper, ComposableMapping):
         )
 
 
-class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
+class SamplableVolume(GridComposableMapping):
     """Mapping defined based on a regular grid of values and a sampler turning the
     grid values into a continuously defined mapping.
 
@@ -829,14 +829,14 @@ class SamplableVolume(BaseTensorLikeWrapper, GridComposableMapping):
     def _get_tensors(self) -> Mapping[str, Tensor]:
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {
             "data": self._data,
             "coordinate_system": self._coordinate_system,
         }
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "SamplableVolume":
         return SamplableVolume(
             data=cast(MappableTensor, children["data"]),

@@ -17,7 +17,7 @@ from composable_mapping.affine_transformation import (
 from composable_mapping.affine_transformation.matrix import (
     convert_to_homogenous_coordinates,
 )
-from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.tensor_like import TensorLike
 from composable_mapping.util import (
     are_broadcastable,
     get_batch_shape,
@@ -27,7 +27,7 @@ from composable_mapping.util import (
 )
 
 
-class GridDefinition(BaseTensorLikeWrapper):
+class GridDefinition(TensorLike):
     """Defines a voxel grid transformed by an affine transformation.
 
     Arguments:
@@ -48,11 +48,11 @@ class GridDefinition(BaseTensorLikeWrapper):
             )
         self._affine_transformation = affine_transformation
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {"affine_transformation": self._affine_transformation}
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "GridDefinition":
         return GridDefinition(
             spatial_shape=self._spatial_shape,

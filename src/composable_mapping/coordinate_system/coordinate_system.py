@@ -17,7 +17,7 @@ from composable_mapping.affine_transformation import (
 from composable_mapping.composable_mapping import ICoordinateSystemContainer
 from composable_mapping.interface import Number
 from composable_mapping.mappable_tensor import MappableTensor, voxel_grid
-from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.tensor_like import TensorLike
 from composable_mapping.util import (
     broadcast_shapes_in_parts_splitted,
     broadcast_tensors_in_parts,
@@ -36,7 +36,7 @@ from .reformatting_spatial_shape import (
 )
 
 
-class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper):
+class CoordinateSystem(Module, ICoordinateSystemContainer, TensorLike):
     """Represents coordinate system between voxel and world coordinates on a regular grid
 
     Recommended way to create a coordinate system is to use the factory
@@ -962,14 +962,14 @@ class CoordinateSystem(Module, ICoordinateSystemContainer, BaseTensorLikeWrapper
             "to_voxel_coordinates"
         ]
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, TensorLike]:
         return {
             "from_voxel_coordinates": self._from_voxel_coordinates,
             "to_voxel_coordinates": self._to_voxel_coordinates,
         }
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "CoordinateSystem":
         if not isinstance(children["from_voxel_coordinates"], IHostAffineTransformation):
             raise ValueError("from_voxel_coordinates should be an affine transformation")

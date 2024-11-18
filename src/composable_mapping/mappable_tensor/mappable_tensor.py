@@ -25,7 +25,7 @@ from composable_mapping.affine_transformation import (
     IdentityAffineTransformation,
 )
 from composable_mapping.interface import Number
-from composable_mapping.tensor_like import BaseTensorLikeWrapper, ITensorLike
+from composable_mapping.tensor_like import TensorLike
 from composable_mapping.util import (
     broadcast_optional_shapes_in_parts_to_single_shape,
     broadcast_tensors_in_parts,
@@ -43,7 +43,7 @@ from .grid import GridDefinition
 REDUCE_TO_SLICE_TOLERANCE = 1e-5
 
 
-class MappableTensor(BaseTensorLikeWrapper):
+class MappableTensor(TensorLike):
     """A tensor wrapper used as inputs for composable mappings
 
     It is not recommended to create instances of this class directly, but to
@@ -184,8 +184,8 @@ class MappableTensor(BaseTensorLikeWrapper):
             tensors["mask"] = self._mask
         return tensors
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
-        children: Dict[str, ITensorLike] = {}
+    def _get_children(self) -> Mapping[str, TensorLike]:
+        children: Dict[str, TensorLike] = {}
         if self._affine_transformation is not None:
             children["affine_transformation"] = self._affine_transformation
         if self._grid is not None:
@@ -193,7 +193,7 @@ class MappableTensor(BaseTensorLikeWrapper):
         return children
 
     def _modified_copy(
-        self, tensors: Mapping[str, Tensor], children: Mapping[str, ITensorLike]
+        self, tensors: Mapping[str, Tensor], children: Mapping[str, TensorLike]
     ) -> "MappableTensor":
         affine_transformation: Optional[IAffineTransformation]
         if "affine_transformation" in children:

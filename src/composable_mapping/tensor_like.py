@@ -7,77 +7,30 @@ from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
 
-ITensorLikeT = TypeVar("ITensorLikeT", bound="ITensorLike")
+TensorLikeT = TypeVar("TensorLikeT", bound="TensorLike")
 
 
-class ITensorLike(ABC):
+class TensorLike(ABC):
     """Interface for classes having tensor like properties.
 
     Usually contains wrapped tensors with device, dtype, and detachment
     functionalities corresponding directly to the wrapped tensors.
     """
 
-    @property
-    @abstractmethod
-    def dtype(
-        self,
-    ) -> torch_dtype:
-        """PyTorch data type."""
-
-    @property
-    @abstractmethod
-    def device(
-        self,
-    ) -> torch_device:
-        """PyTorch device."""
-
-    @abstractmethod
-    def cast(
-        self: ITensorLikeT,
-        dtype: Optional[torch_dtype] = None,
-        device: Optional[torch_device] = None,
-        non_blocking: bool = False,
-    ) -> ITensorLikeT:
-        """Cast to given data type and device.
-
-        We will not use method name "to" as it would create conflict with
-        torch.nn.Module.to method which does casting in-place.
-
-        Args:
-            dtype: Data type to cast to.
-            device: Device to cast to.
-            non_blocking: Whether to perform the operation asynchronously (if
-                possible).
-
-        Returns:
-            New tensor like object with the casted tensor(s).
-        """
-
-    @abstractmethod
-    def detach(self: ITensorLikeT) -> ITensorLikeT:
-        """Detach the wrapped tensors from computational graph."""
-
-
-BaseTensorLikeWrapperT = TypeVar("BaseTensorLikeWrapperT", bound="BaseTensorLikeWrapper")
-
-
-class BaseTensorLikeWrapper(ITensorLike):
-    """Base tensor wrapper implementation"""
-
     def _get_tensors(self) -> Mapping[str, Tensor]:
         """Obtain list of wrapped tensors"""
         return {}
 
-    def _get_children(self) -> Mapping[str, ITensorLike]:
+    def _get_children(self) -> Mapping[str, "TensorLike"]:
         """Obtain list of tensor like objects contained within the current object"""
         return {}
 
     @abstractmethod
     def _modified_copy(
-        self: BaseTensorLikeWrapperT,
+        self: TensorLikeT,
         tensors: Mapping[str, Tensor],
-        children: Mapping[str, ITensorLike],
-    ) -> BaseTensorLikeWrapperT:
+        children: Mapping[str, "TensorLike"],
+    ) -> TensorLikeT:
         """Create a modified copy of the object with new tensors and children.
 
         Args:
@@ -92,6 +45,7 @@ class BaseTensorLikeWrapper(ITensorLike):
     def dtype(
         self,
     ) -> torch_dtype:
+        """PyTorch data type."""
         tensors = self._get_tensors()
         if not tensors:
             return next(iter(self._get_children().values())).dtype
@@ -101,17 +55,32 @@ class BaseTensorLikeWrapper(ITensorLike):
     def device(
         self,
     ) -> torch_device:
+        """PyTorch data device."""
         tensors = self._get_tensors()
         if not tensors:
             return next(iter(self._get_children().values())).device
         return next(iter(tensors.values())).device
 
     def cast(
-        self: BaseTensorLikeWrapperT,
+        self: TensorLikeT,
         dtype: Optional[torch_dtype] = None,
         device: Optional[torch_device] = None,
         non_blocking: bool = False,
-    ) -> BaseTensorLikeWrapperT:
+    ) -> TensorLikeT:
+        """Cast to given data type and device.
+
+        We will not use method name "to" as it would create conflict with
+        torch.nn.Module.to method which does casting in-place.
+
+        Args:
+            dtype: Data type to cast to.
+            device: Device to cast to.
+            non_blocking: Whether to perform the operation asynchronously (if
+                possible).
+
+        Returns:
+            New tensor like object with the casted tensor(s).
+        """
         if dtype is None:
             dtype = self.dtype
         if device is None:
@@ -126,7 +95,8 @@ class BaseTensorLikeWrapper(ITensorLike):
         }
         return self._modified_copy(modified_tensors, modified_children)
 
-    def detach(self: BaseTensorLikeWrapperT) -> BaseTensorLikeWrapperT:
+    def detach(self: TensorLikeT) -> TensorLikeT:
+        """Detach the wrapped tensors from computational graph."""
         modified_tensors = {key: tensor.detach() for key, tensor in self._get_tensors().items()}
         modified_children = {key: child.detach() for key, child in self._get_children().items()}
         return self._modified_copy(modified_tensors, modified_children)
