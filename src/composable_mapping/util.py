@@ -741,7 +741,7 @@ def crop_and_then_pad_spatial(
     Returns:
         Padded or cropped tensor.
     """
-    spatial_shape = get_spatial_shape(tensor.shape, n_channel_dims)
+    batch_shape, channels_shape, spatial_shape = split_shape(tensor.shape, n_channel_dims)
     n_spatial_dims = len(spatial_shape)
     if len(pads_or_crops) != n_spatial_dims:
         raise ValueError("Number of paddings must match number of spatial dimensions")
@@ -773,12 +773,15 @@ def crop_and_then_pad_spatial(
             torch_paddings.append(min(padding_end, output_dim_size))
         else:
             torch_paddings.append(0)
-    return pad(
+    tensor = tensor.view(batch_shape + (-1,) + spatial_shape)
+    cropped_and_padded = pad(
         tensor[(...,) + tuple(crops)],
         torch_paddings,
         mode=mode,
         value=value,
     )
+    cropped_and_padded_spatial_shape = get_spatial_shape(cropped_and_padded.shape, n_channel_dims=1)
+    return cropped_and_padded.view(batch_shape + channels_shape + cropped_and_padded_spatial_shape)
 
 
 def is_croppable_first(
