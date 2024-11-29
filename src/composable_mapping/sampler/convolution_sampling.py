@@ -210,7 +210,7 @@ def _optionally_inclusive_floor(
     inclusive: bool,
 ) -> int:
     if inclusive:
-        return int(floor(value))
+        return int(floor(value + 1e-5))
     return int(ceil(value - 1))
 
 

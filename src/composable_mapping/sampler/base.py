@@ -2,7 +2,6 @@
 
 from abc import abstractmethod
 from contextlib import AbstractContextManager
-from math import ceil, floor
 from threading import local
 from typing import (
     TYPE_CHECKING,
@@ -460,12 +459,6 @@ class BaseSeparableSampler(ISampler):
             ),
             n_channel_dims=volume.n_channel_dims,
         )
-
-    @staticmethod
-    def _get_flooring_function(inclusive: bool) -> Callable[[Union[float, int]], int]:
-        if inclusive:
-            return lambda x: int(floor(x))
-        return lambda x: int(ceil(x - 1))
 
     def _separable_conv(
         self,
