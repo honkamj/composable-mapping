@@ -28,6 +28,7 @@ from composable_mapping.util import (
     get_spatial_dims,
     includes_padding,
     is_croppable_first,
+    split_shape,
 )
 
 from .convolution_sampling import (
@@ -384,7 +385,7 @@ class BaseSeparableSampler(ISampler):
         ) = conv_parameters
         padding_mode, padding_value = self._padding_mode_and_value
 
-        values = volume.generate_values()
+        values = volume.generate_values().view(volume.batch_shape + (-1,) + volume.spatial_shape)
         interpolated_values = apply_flipping_permutation_to_volume(
             values,
             n_channel_dims=volume.n_channel_dims,
@@ -414,6 +415,12 @@ class BaseSeparableSampler(ISampler):
             value=padding_value,
             n_channel_dims=volume.n_channel_dims,
         )
+        interpolated_batch_shape, _, interpolated_spatial_shape = split_shape(
+            interpolated_values.shape, n_channel_dims=1
+        )
+        interpolated_values = interpolated_values.view(
+            interpolated_batch_shape + volume.channels_shape + interpolated_spatial_shape
+        )
         interpolated_mask: Optional[Tensor] = None
         if self._mask_extrapolated_regions:
             mask = volume.generate_mask(
@@ -421,6 +428,7 @@ class BaseSeparableSampler(ISampler):
                 cast_mask=False,
             )
             if mask is not None:
+                mask = mask.view(volume.batch_shape + (1,) + volume.spatial_shape)
                 interpolated_mask = apply_flipping_permutation_to_volume(
                     mask,
                     n_channel_dims=volume.n_channel_dims,
@@ -455,8 +463,16 @@ class BaseSeparableSampler(ISampler):
                     value=False,
                     n_channel_dims=volume.n_channel_dims,
                 )
+                interpolated_mask_batch_shape, _, interpolated_mask_spatial_shape = split_shape(
+                    interpolated_mask.shape, n_channel_dims=1
+                )
+                interpolated_mask = interpolated_mask.view(
+                    interpolated_mask_batch_shape
+                    + (1,) * volume.n_channel_dims
+                    + interpolated_mask_spatial_shape
+                )
         return mappable(
-            interpolated_values,
+            interpolated_values.view(volume.shape),
             combine_optional_masks(
                 interpolated_mask,
                 voxel_coordinates.generate_mask(generate_missing_mask=False, cast_mask=False),
