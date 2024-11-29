@@ -20,7 +20,6 @@ from torch import Tensor, ones
 from torch.autograd.functional import vjp
 from torch.nn import functional as torch_functional
 
-from composable_mapping.interface import Number
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import (
     combine_optional_masks,
@@ -134,7 +133,6 @@ class BaseSeparableSampler(ISampler):
         convolution_threshold: float,
         mask_threshold: float,
         limit_direction: Union[LimitDirection, Callable[[int], LimitDirection]],
-        normalize_kernel: Optional[Number] = None,
     ) -> None:
         if extrapolation_mode not in ("zeros", "border", "reflection"):
             raise ValueError("Unknown extrapolation mode")
@@ -147,7 +145,6 @@ class BaseSeparableSampler(ISampler):
             if isinstance(limit_direction, LimitDirection)
             else limit_direction
         )
-        self._normalize_kernel = normalize_kernel
 
     @abstractmethod
     def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
@@ -488,8 +485,6 @@ class BaseSeparableSampler(ISampler):
         for spatial_dims, kernel, single_kernel_transposed in zip(
             kernel_spatial_dims, kernels, kernel_transposed
         ):
-            if self._normalize_kernel is not None and kernel is not None:
-                kernel = self._normalize_kernel * kernel / kernel.sum()
             if kernel is None or kernel.shape.numel() == 1 and not single_kernel_transposed:
                 slicing_tuple: Tuple[slice, ...] = tuple()
                 for dim in range(n_spatial_dims):
