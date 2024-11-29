@@ -1,7 +1,7 @@
 """Core functions for convolution sampling."""
 
 from math import ceil, floor
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from torch import Tensor
 from torch import device as torch_device
@@ -124,8 +124,19 @@ def extract_conv_samplable_parameters(
     rounded_diagonal_matrix = diag(downsampling_factor)
     difference_matrix = grid_affine_matrix[:, :, :-1] - rounded_diagonal_matrix
     shape_tensor = tensor(grid_spatial_shape, device=device, dtype=grid_affine_matrix.dtype)
-    max_conv_coordinate_difference_upper_bound = (
+    max_diagonal_coordinate_difference_upper_bound = (
         (difference_matrix * shape_tensor).abs().amax(dim=(0, 2))
+    )
+    if grid_affine_matrix.size(0) == 1:
+        max_translation_coordinate_difference: Tensor = tensor(
+            0.0, device=device, dtype=diagonal.dtype
+        )
+    else:
+        max_translation_coordinate_difference = (
+            (grid_affine_matrix[1:, :, -1] - grid_affine_matrix[0, :, -1]).abs().amax(dim=0)
+        )
+    max_conv_coordinate_difference_upper_bound = (
+        max_diagonal_coordinate_difference_upper_bound + max_translation_coordinate_difference
     )
     if (max_conv_coordinate_difference_upper_bound > convolution_threshold).any():
         return None
@@ -136,17 +147,14 @@ def extract_conv_samplable_parameters(
         ],
         device=device,
     )
-    translation = grid_affine_matrix[0, :, -1]
+    translation = grid_affine_matrix[0, :, -1].clone().contiguous()
+    rounded_translation = translation.round()
+    small_translation = (
+        (translation - rounded_translation).abs() + max_conv_coordinate_difference_upper_bound
+    ) < convolution_threshold
+    translation[small_translation] = rounded_translation[small_translation]
     if (interpolating_kernel & (~transposed_convolve)).any():
-        translation = translation.clone().contiguous()
-        rounded_translation = translation.round()
-        max_slicing_coordinate_difference_upper_bound = (
-            (translation - rounded_translation).abs() + max_conv_coordinate_difference_upper_bound
-        ).amax()
-        convolve = (
-            (~interpolating_kernel)
-            | (max_slicing_coordinate_difference_upper_bound > convolution_threshold)
-        ) & (~transposed_convolve)
+        convolve = ((~interpolating_kernel) | (~small_translation)) & (~transposed_convolve)
         no_convolve_or_transposed_convolve = (~transposed_convolve) & (~convolve)
         translation[no_convolve_or_transposed_convolve] = translation[
             no_convolve_or_transposed_convolve
@@ -210,7 +218,7 @@ def _optionally_inclusive_floor(
     inclusive: bool,
 ) -> int:
     if inclusive:
-        return int(floor(value + 1e-5))
+        return int(floor(value))
     return int(ceil(value - 1))
 
 
