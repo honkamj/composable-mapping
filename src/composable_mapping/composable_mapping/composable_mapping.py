@@ -771,13 +771,15 @@ class SamplableVolume(GridComposableMapping):
         self._data_format = data_format
         self._sampler = get_sampler(sampler)
 
+    @classmethod
     def from_tensor(
-        self,
+        cls,
         data: Tensor,
         coordinate_system: "CoordinateSystem",
         mask: Optional[Tensor] = None,
         data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
+        n_channel_dims: int = 1,
     ):
         """Create a samplable volume from a tensor.
 
@@ -791,12 +793,13 @@ class SamplableVolume(GridComposableMapping):
             data_format: Data format of the grid values.
             sampler: Sampler turning the grid values into a continuously defined mapping
                 over spatial coordinates.
+            n_channel_dims: Number of channel dimensions.
 
         Returns:
             Samplable volume.
         """
         return SamplableVolume(
-            data=mappable(data, mask),
+            data=mappable(data, mask, n_channel_dims=n_channel_dims),
             coordinate_system=coordinate_system,
             data_format=data_format,
             sampler=sampler,
@@ -880,16 +883,19 @@ def samplable_volume(
     mask: Optional[Tensor] = None,
     data_format: DataFormat = DataFormat.world_coordinates(),
     sampler: Optional[ISampler] = None,
+    n_channel_dims: int = 1,
 ) -> GridComposableMapping:
     """Create a samplable volume from a tensor.
 
     See: `SamplableVolume.from_tensor`.
     """
-    return SamplableVolume(
-        data=mappable(data, mask),
+    return SamplableVolume.from_tensor(
+        data=data,
         coordinate_system=coordinate_system,
+        mask=mask,
         data_format=data_format,
         sampler=sampler,
+        n_channel_dims=n_channel_dims,
     )
 
 
