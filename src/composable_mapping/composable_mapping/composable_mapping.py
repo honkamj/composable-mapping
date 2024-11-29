@@ -780,7 +780,7 @@ class SamplableVolume(GridComposableMapping):
         data_format: DataFormat = DataFormat.world_coordinates(),
         sampler: Optional[ISampler] = None,
         n_channel_dims: int = 1,
-    ):
+    ) -> "SamplableVolume":
         """Create a samplable volume from a tensor.
 
         Args:
@@ -884,7 +884,7 @@ def samplable_volume(
     data_format: DataFormat = DataFormat.world_coordinates(),
     sampler: Optional[ISampler] = None,
     n_channel_dims: int = 1,
-) -> GridComposableMapping:
+) -> SamplableVolume:
     """Create a samplable volume from a tensor.
 
     See: `SamplableVolume.from_tensor`.
