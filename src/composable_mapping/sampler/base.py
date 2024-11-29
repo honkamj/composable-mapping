@@ -472,7 +472,7 @@ class BaseSeparableSampler(ISampler):
                     + interpolated_mask_spatial_shape
                 )
         return mappable(
-            interpolated_values.view(volume.shape),
+            interpolated_values,
             combine_optional_masks(
                 interpolated_mask,
                 voxel_coordinates.generate_mask(generate_missing_mask=False, cast_mask=False),
