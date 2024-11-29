@@ -123,7 +123,7 @@
 </span><span id="L-8"><a href="#L-8"><span class="linenos">  8</span></a><span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">get_default_device</span><span class="p">,</span> <span class="n">get_default_dtype</span><span class="p">,</span> <span class="n">ones</span><span class="p">,</span> <span class="n">tensor</span><span class="p">,</span> <span class="n">zeros</span>
 </span><span id="L-9"><a href="#L-9"><span class="linenos">  9</span></a>
 </span><span id="L-10"><a href="#L-10"><span class="linenos"> 10</span></a><span class="kn">from</span> <span class="nn">composable_mapping.interface</span> <span class="kn">import</span> <span class="n">Number</span>
-</span><span id="L-11"><a href="#L-11"><span class="linenos"> 11</span></a><span class="kn">from</span> <span class="nn">composable_mapping.tensor_like</span> <span class="kn">import</span> <span class="n">BaseTensorLikeWrapper</span><span class="p">,</span> <span class="n">ITensorLike</span>
+</span><span id="L-11"><a href="#L-11"><span class="linenos"> 11</span></a><span class="kn">from</span> <span class="nn">composable_mapping.tensor_like</span> <span class="kn">import</span> <span class="n">TensorLike</span>
 </span><span id="L-12"><a href="#L-12"><span class="linenos"> 12</span></a><span class="kn">from</span> <span class="nn">composable_mapping.util</span> <span class="kn">import</span> <span class="p">(</span>
 </span><span id="L-13"><a href="#L-13"><span class="linenos"> 13</span></a>    <span class="n">broadcast_optional_shapes_in_parts_splitted</span><span class="p">,</span>
 </span><span id="L-14"><a href="#L-14"><span class="linenos"> 14</span></a>    <span class="n">broadcast_shapes_in_parts_to_single_shape</span><span class="p">,</span>
@@ -142,7 +142,7 @@
 </span><span id="L-27"><a href="#L-27"><span class="linenos"> 27</span></a><span class="p">)</span>
 </span><span id="L-28"><a href="#L-28"><span class="linenos"> 28</span></a>
 </span><span id="L-29"><a href="#L-29"><span class="linenos"> 29</span></a>
-</span><span id="L-30"><a href="#L-30"><span class="linenos"> 30</span></a><span class="k">class</span> <span class="nc">DiagonalAffineMatrixDefinition</span><span class="p">(</span><span class="n">BaseTensorLikeWrapper</span><span class="p">):</span>
+</span><span id="L-30"><a href="#L-30"><span class="linenos"> 30</span></a><span class="k">class</span> <span class="nc">DiagonalAffineMatrixDefinition</span><span class="p">(</span><span class="n">TensorLike</span><span class="p">):</span>
 </span><span id="L-31"><a href="#L-31"><span class="linenos"> 31</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Definition of a diagonal affine matrix</span>
 </span><span id="L-32"><a href="#L-32"><span class="linenos"> 32</span></a>
 </span><span id="L-33"><a href="#L-33"><span class="linenos"> 33</span></a><span class="sd">    Arguments:</span>
@@ -206,7 +206,7 @@
 </span><span id="L-91"><a href="#L-91"><span class="linenos"> 91</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_diagonal</span> <span class="o">=</span> <span class="n">diagonal</span>
 </span><span id="L-92"><a href="#L-92"><span class="linenos"> 92</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_translation</span> <span class="o">=</span> <span class="n">translation</span>
 </span><span id="L-93"><a href="#L-93"><span class="linenos"> 93</span></a>
-</span><span id="L-94"><a href="#L-94"><span class="linenos"> 94</span></a>    <span class="k">def</span> <span class="nf">_get_children</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ITensorLike</span><span class="p">]:</span>
+</span><span id="L-94"><a href="#L-94"><span class="linenos"> 94</span></a>    <span class="k">def</span> <span class="nf">_get_children</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TensorLike</span><span class="p">]:</span>
 </span><span id="L-95"><a href="#L-95"><span class="linenos"> 95</span></a>        <span class="k">return</span> <span class="p">{}</span>
 </span><span id="L-96"><a href="#L-96"><span class="linenos"> 96</span></a>
 </span><span id="L-97"><a href="#L-97"><span class="linenos"> 97</span></a>    <span class="k">def</span> <span class="nf">_get_tensors</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>
@@ -218,7 +218,7 @@
 </span><span id="L-103"><a href="#L-103"><span class="linenos">103</span></a>        <span class="k">return</span> <span class="n">tensors</span>
 </span><span id="L-104"><a href="#L-104"><span class="linenos">104</span></a>
 </span><span id="L-105"><a href="#L-105"><span class="linenos">105</span></a>    <span class="k">def</span> <span class="nf">_modified_copy</span><span class="p">(</span>
-</span><span id="L-106"><a href="#L-106"><span class="linenos">106</span></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">tensors</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">children</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ITensorLike</span><span class="p">]</span>
+</span><span id="L-106"><a href="#L-106"><span class="linenos">106</span></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">tensors</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">children</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TensorLike</span><span class="p">]</span>
 </span><span id="L-107"><a href="#L-107"><span class="linenos">107</span></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;DiagonalAffineMatrixDefinition&quot;</span><span class="p">:</span>
 </span><span id="L-108"><a href="#L-108"><span class="linenos">108</span></a>        <span class="n">diagonal</span> <span class="o">=</span> <span class="n">tensors</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;diagonal&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_diagonal</span><span class="p">)</span>
 </span><span id="L-109"><a href="#L-109"><span class="linenos">109</span></a>        <span class="n">translation</span> <span class="o">=</span> <span class="n">tensors</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;translation&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_translation</span><span class="p">)</span>
@@ -787,13 +787,13 @@
 <div class="attr class">
             
     <span class="def">class</span>
-    <span class="name">DiagonalAffineMatrixDefinition</span><wbr>(<span class="base">composable_mapping.tensor_like.BaseTensorLikeWrapper</span>):
+    <span class="name">DiagonalAffineMatrixDefinition</span><wbr>(<span class="base">composable_mapping.tensor_like.TensorLike</span>):
 
                 <label class="view-source-button" for="DiagonalAffineMatrixDefinition-view-source"><span>View Source</span></label>
 
     </div>
     <a class="headerlink" href="#DiagonalAffineMatrixDefinition"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="DiagonalAffineMatrixDefinition-31"><a href="#DiagonalAffineMatrixDefinition-31"><span class="linenos"> 31</span></a><span class="k">class</span> <span class="nc">DiagonalAffineMatrixDefinition</span><span class="p">(</span><span class="n">BaseTensorLikeWrapper</span><span class="p">):</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="DiagonalAffineMatrixDefinition-31"><a href="#DiagonalAffineMatrixDefinition-31"><span class="linenos"> 31</span></a><span class="k">class</span> <span class="nc">DiagonalAffineMatrixDefinition</span><span class="p">(</span><span class="n">TensorLike</span><span class="p">):</span>
 </span><span id="DiagonalAffineMatrixDefinition-32"><a href="#DiagonalAffineMatrixDefinition-32"><span class="linenos"> 32</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Definition of a diagonal affine matrix</span>
 </span><span id="DiagonalAffineMatrixDefinition-33"><a href="#DiagonalAffineMatrixDefinition-33"><span class="linenos"> 33</span></a>
 </span><span id="DiagonalAffineMatrixDefinition-34"><a href="#DiagonalAffineMatrixDefinition-34"><span class="linenos"> 34</span></a><span class="sd">    Arguments:</span>
@@ -857,7 +857,7 @@
 </span><span id="DiagonalAffineMatrixDefinition-92"><a href="#DiagonalAffineMatrixDefinition-92"><span class="linenos"> 92</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_diagonal</span> <span class="o">=</span> <span class="n">diagonal</span>
 </span><span id="DiagonalAffineMatrixDefinition-93"><a href="#DiagonalAffineMatrixDefinition-93"><span class="linenos"> 93</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_translation</span> <span class="o">=</span> <span class="n">translation</span>
 </span><span id="DiagonalAffineMatrixDefinition-94"><a href="#DiagonalAffineMatrixDefinition-94"><span class="linenos"> 94</span></a>
-</span><span id="DiagonalAffineMatrixDefinition-95"><a href="#DiagonalAffineMatrixDefinition-95"><span class="linenos"> 95</span></a>    <span class="k">def</span> <span class="nf">_get_children</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ITensorLike</span><span class="p">]:</span>
+</span><span id="DiagonalAffineMatrixDefinition-95"><a href="#DiagonalAffineMatrixDefinition-95"><span class="linenos"> 95</span></a>    <span class="k">def</span> <span class="nf">_get_children</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TensorLike</span><span class="p">]:</span>
 </span><span id="DiagonalAffineMatrixDefinition-96"><a href="#DiagonalAffineMatrixDefinition-96"><span class="linenos"> 96</span></a>        <span class="k">return</span> <span class="p">{}</span>
 </span><span id="DiagonalAffineMatrixDefinition-97"><a href="#DiagonalAffineMatrixDefinition-97"><span class="linenos"> 97</span></a>
 </span><span id="DiagonalAffineMatrixDefinition-98"><a href="#DiagonalAffineMatrixDefinition-98"><span class="linenos"> 98</span></a>    <span class="k">def</span> <span class="nf">_get_tensors</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>
@@ -869,7 +869,7 @@
 </span><span id="DiagonalAffineMatrixDefinition-104"><a href="#DiagonalAffineMatrixDefinition-104"><span class="linenos">104</span></a>        <span class="k">return</span> <span class="n">tensors</span>
 </span><span id="DiagonalAffineMatrixDefinition-105"><a href="#DiagonalAffineMatrixDefinition-105"><span class="linenos">105</span></a>
 </span><span id="DiagonalAffineMatrixDefinition-106"><a href="#DiagonalAffineMatrixDefinition-106"><span class="linenos">106</span></a>    <span class="k">def</span> <span class="nf">_modified_copy</span><span class="p">(</span>
-</span><span id="DiagonalAffineMatrixDefinition-107"><a href="#DiagonalAffineMatrixDefinition-107"><span class="linenos">107</span></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">tensors</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">children</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ITensorLike</span><span class="p">]</span>
+</span><span id="DiagonalAffineMatrixDefinition-107"><a href="#DiagonalAffineMatrixDefinition-107"><span class="linenos">107</span></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">tensors</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">children</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TensorLike</span><span class="p">]</span>
 </span><span id="DiagonalAffineMatrixDefinition-108"><a href="#DiagonalAffineMatrixDefinition-108"><span class="linenos">108</span></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;DiagonalAffineMatrixDefinition&quot;</span><span class="p">:</span>
 </span><span id="DiagonalAffineMatrixDefinition-109"><a href="#DiagonalAffineMatrixDefinition-109"><span class="linenos">109</span></a>        <span class="n">diagonal</span> <span class="o">=</span> <span class="n">tensors</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;diagonal&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_diagonal</span><span class="p">)</span>
 </span><span id="DiagonalAffineMatrixDefinition-110"><a href="#DiagonalAffineMatrixDefinition-110"><span class="linenos">110</span></a>        <span class="n">translation</span> <span class="o">=</span> <span class="n">tensors</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;translation&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_translation</span><span class="p">)</span>
@@ -1509,7 +1509,7 @@ possible).</li>
                             <div class="inherited">
                                 <h5>Inherited Members</h5>
                                 <dl>
-                                    <div><dt>composable_mapping.tensor_like.BaseTensorLikeWrapper</dt>
+                                    <div><dt>composable_mapping.tensor_like.TensorLike</dt>
                                 <dd id="DiagonalAffineMatrixDefinition.detach" class="function">detach</dd>
 
             </div>
