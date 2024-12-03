@@ -1,7 +1,7 @@
 """Core functions for convolution sampling."""
 
 from math import ceil, floor
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 from torch import Tensor
 from torch import device as torch_device
