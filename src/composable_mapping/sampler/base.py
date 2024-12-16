@@ -456,6 +456,7 @@ class BaseSeparableSampler(ISampler):
             combine_optional_masks(
                 interpolated_mask,
                 voxel_coordinates.generate_mask(generate_missing_mask=False, cast_mask=False),
+                n_channel_dims=(volume.n_channel_dims, voxel_coordinates.n_channel_dims),
             ),
             n_channel_dims=volume.n_channel_dims,
         )
