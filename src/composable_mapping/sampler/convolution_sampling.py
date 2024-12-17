@@ -228,7 +228,7 @@ def obtain_conv_parameters(
     grid_spatial_shape: List[int],
     grid_affine_matrix: Tensor,
     is_interpolating_kernel: List[bool],
-    kernel_support: List[Tuple[float, bool, bool]],
+    kernel_support: List[Tuple[float, float, bool, bool]],
     convolution_threshold: float,
     target_device: torch_device,
 ) -> Optional[
@@ -305,17 +305,17 @@ def obtain_conv_parameters(
     ):
         kernel_dim = spatial_permutation[spatial_dim]
         flip_kernel = kernel_dim in flipped_spatial_dims
-        (kernel_width, inclusive_min, inclusive_max) = kernel_support[kernel_dim]
+        (kernel_min, kernel_max, inclusive_min, inclusive_max) = kernel_support[kernel_dim]
         if flip_kernel:
             inclusive_min, inclusive_max = inclusive_max, inclusive_min
         min_coordinate = dim_translation
         max_coordinate = dim_translation + dim_downsampling_factor * (dim_size_grid - 1)
         if dim_convolve or dim_transposed_convolve:
             pre_pad_or_crop_lower = _optionally_inclusive_floor(
-                kernel_width / 2 - dim_translation, inclusive=inclusive_min
+                -kernel_min - dim_translation, inclusive=inclusive_min
             )
             pre_pad_or_crop_upper = _optionally_inclusive_floor(
-                kernel_width / 2
+                kernel_max
                 + dim_translation
                 + dim_downsampling_factor * (dim_size_grid - 1)
                 - (dim_size_volume - 1),
@@ -326,7 +326,7 @@ def obtain_conv_parameters(
                     1
                     - dim_translation
                     + _optionally_inclusive_floor(
-                        (kernel_width / 2 - (1 - dim_translation)) / dim_downsampling_factor,
+                        (kernel_max - (1 - dim_translation)) / dim_downsampling_factor,
                         inclusive=inclusive_max,
                     )
                     * dim_downsampling_factor
@@ -334,7 +334,7 @@ def obtain_conv_parameters(
                 end_kernel_coordinate = (
                     -dim_translation
                     - _optionally_inclusive_floor(
-                        (kernel_width / 2 - dim_translation) / dim_downsampling_factor,
+                        (-kernel_min - dim_translation) / dim_downsampling_factor,
                         inclusive=inclusive_min,
                     )
                     * dim_downsampling_factor
@@ -344,12 +344,12 @@ def obtain_conv_parameters(
                 relative_coordinate = dim_translation - floor(dim_translation)
                 start_kernel_coordinate = (
                     -_optionally_inclusive_floor(
-                        kernel_width / 2 - relative_coordinate, inclusive=inclusive_min
+                        -kernel_min - relative_coordinate, inclusive=inclusive_min
                     )
                     - relative_coordinate
                 )
                 end_kernel_coordinate = _optionally_inclusive_floor(
-                    kernel_width / 2 - (1 - relative_coordinate), inclusive=inclusive_max
+                    kernel_max - (1 - relative_coordinate), inclusive=inclusive_max
                 ) + (1 - relative_coordinate)
                 kernel_step_size = 1.0
             kernel_coordinates = linspace(

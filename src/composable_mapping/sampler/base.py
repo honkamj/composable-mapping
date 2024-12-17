@@ -58,7 +58,7 @@ class ISeparableKernelSupport:
     """Interface for defining kernel supports for a kernel and its derivatives"""
 
     @abstractmethod
-    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, bool, bool]:
+    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, float, bool, bool]:
         """Interpolation kernel support for the convolution and whether min and max
         are inclusive or not"""
 
@@ -78,17 +78,22 @@ class SymmetricPolynomialKernelSupport(ISeparableKernelSupport):
         self._kernel_width = kernel_width
         self._polynomial_degree = polynomial_degree
 
-    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, bool, bool]:
+    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, float, bool, bool]:
         if self._polynomial_degree < 0:
             # kernel is zeros
-            return (1.0, True, False)
+            return (-0.5, 0.5, True, False)
         bound_inclusive = self._polynomial_degree == 0
         if limit_direction == LimitDirection.left():
-            return (self._kernel_width, bound_inclusive, False)
+            return (-self._kernel_width / 2, self._kernel_width / 2, bound_inclusive, False)
         if limit_direction == LimitDirection.right():
-            return (self._kernel_width, False, bound_inclusive)
+            return (-self._kernel_width / 2, self._kernel_width / 2, False, bound_inclusive)
         if limit_direction == LimitDirection.average():
-            return (self._kernel_width, bound_inclusive, bound_inclusive)
+            return (
+                -self._kernel_width / 2,
+                self._kernel_width / 2,
+                bound_inclusive,
+                bound_inclusive,
+            )
         raise ValueError("Unknown limit direction")
 
     @staticmethod
