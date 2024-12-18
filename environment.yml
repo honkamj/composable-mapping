@@ -9,6 +9,7 @@ dependencies:
   - pytorch::torchvision
   - pytorch::torchaudio
   - pytorch::pytorch=2.4
+  - nibabel
   - ipykernel
   - matplotlib
   - mypy
@@ -17,4 +18,5 @@ dependencies:
   - isort
   - twine
   - pip:
+    - nibabel
     - deformation-inversion-layer >= 1.1.2

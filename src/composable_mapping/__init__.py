@@ -51,6 +51,7 @@ from .derivative import (
     estimate_coordinate_mapping_spatial_derivatives,
     estimate_spatial_jacobian_matrices,
 )
+from .factory import from_file
 from .interface import Number
 from .mappable_tensor import (
     MappableTensor,
@@ -135,6 +136,7 @@ __all__ = [
     "diagonal_affine",
     "estimate_coordinate_mapping_spatial_derivatives",
     "estimate_spatial_jacobian_matrices",
+    "from_file",
     "get_default_sampler",
     "get_sampler",
     "mappable",
