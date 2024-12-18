@@ -7,7 +7,7 @@ from torch import Tensor
 from torch import bool as torch_bool
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import from_numpy
+from torch import equal, from_numpy
 
 from .composable_mapping import SamplableVolume
 from .coordinate_system import CoordinateSystem
@@ -63,11 +63,19 @@ def from_file(
                 tuple(range(n_channel_dims_mask)),
             )
         mask = mask[(None,) * (data.ndim - mask.ndim)]
-    coordinate_system = CoordinateSystem.from_affine_matrix(
-        spatial_shape=data.shape[-n_dims:],
-        affine_matrix=affine.to(dtype=data.dtype),
-        device=data.device,
-    )
+    if equal(affine[:-1, :-1], affine[:-1, :-1].diag().diag()):
+        coordinate_system = CoordinateSystem.from_diagonal_affine_matrix(
+            spatial_shape=data.shape[-n_dims:],
+            diagonal=affine[:-1, :-1].diag().to(dtype=data.dtype),
+            translation=affine[:-1, -1].to(dtype=data.dtype),
+            device=data.device,
+        )
+    else:
+        coordinate_system = CoordinateSystem.from_affine_matrix(
+            spatial_shape=data.shape[-n_dims:],
+            affine_matrix=affine.to(dtype=data.dtype),
+            device=data.device,
+        )
     return SamplableVolume.from_tensor(
         data=data,
         coordinate_system=coordinate_system,
