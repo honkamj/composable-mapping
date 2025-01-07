@@ -821,6 +821,15 @@ class SamplableVolume(GridComposableMapping):
             sampler=sampler,
         )
 
+    def clear_mask(self) -> "SamplableVolume":
+        """Clear data mask."""
+        return SamplableVolume(
+            data=self._data.clear_mask(),
+            coordinate_system=self._coordinate_system,
+            data_format=self._data_format,
+            sampler=self._sampler,
+        )
+
     @property
     def coordinate_system(self) -> "CoordinateSystem":
         return self._coordinate_system
