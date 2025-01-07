@@ -626,7 +626,7 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         parent_limit_direction: Callable[[int], LimitDirection],
         extrapolation_mode: str = "border",
         mask_extrapolated_regions: bool = True,
-        convolution_threshold: float = 1e-4,
+        convolution_threshold: float = 1e-3,
         mask_threshold: float = 1e-5,
     ) -> None:
         super().__init__(
