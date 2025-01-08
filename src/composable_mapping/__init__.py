@@ -30,6 +30,7 @@ from .affine_mapping import Affine, affine, diagonal_affine
 from .composable_mapping import (
     ComposableMapping,
     GridComposableMapping,
+    ICoordinateSystemContainer,
     Identity,
     SamplableVolume,
     concatenate_mappings,
@@ -108,6 +109,7 @@ __all__ = [
     "GridComposableMapping",
     "GridVisualizationArguments",
     "Identity",
+    "ICoordinateSystemContainer",
     "ISampler",
     "ISeparableKernelSupport",
     "ImageVisualizationArguments",
