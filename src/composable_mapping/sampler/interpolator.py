@@ -14,7 +14,7 @@ from composable_mapping.util import (
     split_shape,
 )
 
-from .base import BaseSeparableSampler, SymmetricPolynomialKernelSupport
+from .base import BaseSeparableSampler, NthDegreeSymmetricKernelSupport
 from .interface import LimitDirection
 from .interpolate import interpolate
 
@@ -48,7 +48,7 @@ class LinearInterpolator(BaseSeparableSampler):
         )
 
     def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return SymmetricPolynomialKernelSupport(kernel_width=2.0, polynomial_degree=1)
+        return NthDegreeSymmetricKernelSupport(kernel_width=2.0, degree=1)
 
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
@@ -121,7 +121,7 @@ class NearestInterpolator(BaseSeparableSampler):
         )
 
     def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return SymmetricPolynomialKernelSupport(kernel_width=1.0, polynomial_degree=0)
+        return NthDegreeSymmetricKernelSupport(kernel_width=1.0, degree=0)
 
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
@@ -187,7 +187,7 @@ class BicubicInterpolator(BaseSeparableSampler):
         self._mask_threshold = mask_threshold
 
     def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return SymmetricPolynomialKernelSupport(kernel_width=4.0, polynomial_degree=3)
+        return NthDegreeSymmetricKernelSupport(kernel_width=4.0, degree=3)
 
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True

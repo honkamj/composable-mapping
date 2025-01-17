@@ -6,7 +6,7 @@ from torch import Tensor
 
 from composable_mapping.sampler.base import ISeparableKernelSupport
 
-from .base import BaseSeparableSampler, SymmetricPolynomialKernelSupport
+from .base import BaseSeparableSampler, NthDegreeSymmetricKernelSupport
 from .interface import LimitDirection
 
 
@@ -50,7 +50,7 @@ class CubicSplineSampler(BaseSeparableSampler):
         self._prefilter = prefilter
 
     def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return SymmetricPolynomialKernelSupport(kernel_width=4.0, polynomial_degree=3)
+        return NthDegreeSymmetricKernelSupport(kernel_width=4.0, degree=3)
 
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return self._prefilter

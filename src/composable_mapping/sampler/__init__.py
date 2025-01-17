@@ -6,7 +6,7 @@ from .base import (
     EnumeratedSamplingParameterCache,
     GenericSeparableDerivativeSampler,
     ISeparableKernelSupport,
-    SymmetricPolynomialKernelSupport,
+    NthDegreeSymmetricKernelSupport,
     no_sampling_parameter_cache,
 )
 from .default import (
@@ -33,7 +33,7 @@ __all__ = [
     "LinearInterpolator",
     "NearestInterpolator",
     "ScalingAndSquaring",
-    "SymmetricPolynomialKernelSupport",
+    "NthDegreeSymmetricKernelSupport",
     "clear_default_sampler",
     "default_sampler",
     "get_default_sampler",

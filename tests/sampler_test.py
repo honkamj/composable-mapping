@@ -28,7 +28,7 @@ from composable_mapping.affine_transformation.matrix import embed_matrix
 from composable_mapping.sampler.base import (
     BaseSeparableSampler,
     ISeparableKernelSupport,
-    SymmetricPolynomialKernelSupport,
+    NthDegreeSymmetricKernelSupport,
 )
 from composable_mapping.sampler.convolution_sampling import (
     apply_flipping_permutation_to_affine_matrix,
@@ -109,9 +109,9 @@ class _NonSymmetricInterpolator(BaseSeparableSampler):
         )
 
     def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return SymmetricPolynomialKernelSupport(
+        return NthDegreeSymmetricKernelSupport(
             kernel_width=[4, 5, 6][spatial_dim],
-            polynomial_degree=1,
+            degree=1,
         )
 
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:

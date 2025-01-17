@@ -67,22 +67,24 @@ class ISeparableKernelSupport:
         """Obtain kernel support function of the derivative kernel"""
 
 
-class SymmetricPolynomialKernelSupport(ISeparableKernelSupport):
-    """Kernel support function for polynomial kernels"""
+class NthDegreeSymmetricKernelSupport(ISeparableKernelSupport):
+    """Symmetric kernel support function for kernels which are zero at borders
+    for degree - 1 number of derivations, after which they are non-zero for one
+    derivation, and after which they are zero functions."""
 
     def __init__(
         self,
         kernel_width: float,
-        polynomial_degree: int,
+        degree: int,
     ) -> None:
         self._kernel_width = kernel_width
-        self._polynomial_degree = polynomial_degree
+        self._degree = degree
 
     def __call__(self, limit_direction: LimitDirection) -> Tuple[float, float, bool, bool]:
-        if self._polynomial_degree < 0:
+        if self._degree < 0:
             # kernel is zeros
             return (-0.5, 0.5, True, False)
-        bound_inclusive = self._polynomial_degree == 0
+        bound_inclusive = self._degree == 0
         if limit_direction == LimitDirection.left():
             return (-self._kernel_width / 2, self._kernel_width / 2, bound_inclusive, False)
         if limit_direction == LimitDirection.right():
@@ -107,10 +109,10 @@ class SymmetricPolynomialKernelSupport(ISeparableKernelSupport):
 
         return updated_func
 
-    def derivative(self) -> "SymmetricPolynomialKernelSupport":
-        return SymmetricPolynomialKernelSupport(
+    def derivative(self) -> "NthDegreeSymmetricKernelSupport":
+        return NthDegreeSymmetricKernelSupport(
             kernel_width=self._kernel_width,
-            polynomial_degree=self._polynomial_degree - 1,
+            degree=self._degree - 1,
         )
 
 
