@@ -173,10 +173,11 @@ class ImageVisualizationArguments(NamedTuple):
     figure_height: Number = 5
     mask_color: Optional[Any] = "red"
     mask_alpha: Number = 0.5
-    vmin: Optional[Number] = None
-    vmax: Optional[Number] = None
+    vmin: Optional[Union[Number, Sequence[Number]]] = None
+    vmax: Optional[Union[Number, Sequence[Number]]] = None
     imshow_kwargs: Optional[Mapping[str, Any]] = None
-    draw_colorbar: bool = True
+    draw_colorbar: Optional[bool] = None
+    separate_channels: Optional[bool] = None
 
 
 def visualize_image(
@@ -197,28 +198,32 @@ def visualize_image(
     if not isinstance(voxel_size, Tensor):
         voxel_size = tensor(voxel_size, device=torch_device("cpu"))
     voxel_size = voxel_size.expand(volume.batch_shape[0], len(volume.spatial_shape))
-    if volume.channels_shape[0] == 1:
-        cmap: Optional[Any] = "gray"
-    else:
-        cmap = None
+
     n_dims = len(volume.spatial_shape)
     planes, mask_planes, dimension_pairs = obtain_central_planes(volume)
-    vmin = (
-        min(amin(plane[arguments.batch_index]) for plane in planes)
-        if arguments.vmin is None
-        else arguments.vmin
+
+    separate_channels = arguments.separate_channels or (
+        arguments.separate_channels is None and volume.channels_shape[0] not in (1, 3, 4)
     )
-    vmax = (
-        max(amax(plane[arguments.batch_index]) for plane in planes)
-        if arguments.vmax is None
-        else arguments.vmax
+    draw_colorbar = arguments.draw_colorbar or (
+        arguments.draw_colorbar is None and (separate_channels or volume.channels_shape[0] == 1)
     )
-    figure, axes = plt.subplots(
-        1,
-        len(planes),
-        figsize=(arguments.figure_height * len(planes), arguments.figure_height),
-        squeeze=False,
+
+    channels_per_plot = (
+        [[index] for index in range(volume.channels_shape[0])]
+        if separate_channels
+        else [list(range(volume.channels_shape[0]))]
     )
+    figure = plt.figure(
+        constrained_layout=True,
+        figsize=(
+            arguments.figure_height
+            * (len(planes) + (0.2 if draw_colorbar else 0.0))
+            / len(channels_per_plot),
+            arguments.figure_height,
+        ),
+    )
+    channel_figures = figure.subfigures(nrows=len(channels_per_plot), squeeze=False)[:, 0]
     if arguments.imshow_kwargs is None:
         imshow_kwargs: Mapping[str, Any] = {}
     else:
@@ -228,40 +233,71 @@ def visualize_image(
     else:
         mask_color = array(colors.to_rgba(arguments.mask_color))[None, None]
         mask_color[..., -1] = arguments.mask_alpha
-    for axis, plane, mask_plane, (dim_1, dim_2) in zip(
-        axes.flatten(), planes, mask_planes, dimension_pairs
-    ):
-        aspect = (
-            voxel_size[arguments.batch_index, dim_1].item()
-            / voxel_size[arguments.batch_index, dim_2].item()
+    for index, (channels, channel_figure) in enumerate(zip(channels_per_plot, channel_figures)):
+        if len(channels_per_plot) > 1:
+            channel_figure.suptitle(
+                f"Channel(s) {', '.join((str(channel) for channel in channels))}"
+            )
+        channel_axes = channel_figure.subplots(
+            ncols=len(planes) + (1 if draw_colorbar else 0),
+            squeeze=False,
+            gridspec_kw={"width_ratios": [1] * len(planes) + [0.1] * draw_colorbar},
+        )[0]
+        vmin = (
+            min(amin(plane[arguments.batch_index, channels]) for plane in planes)
+            if arguments.vmin is None
+            else (
+                arguments.vmin
+                if isinstance(arguments.vmin, (float, int))
+                else arguments.vmin[index]
+            )
         )
-        plane = moveaxis(plane[arguments.batch_index], 0, -1)
-        axis.set_ylabel(dimension_to_letter(dim_1, n_dims))
-        axis.set_xlabel(dimension_to_letter(dim_2, n_dims))
+        vmax = (
+            max(amax(plane[arguments.batch_index, channels]) for plane in planes)
+            if arguments.vmax is None
+            else (
+                arguments.vmax
+                if isinstance(arguments.vmax, (float, int))
+                else arguments.vmax[index]
+            )
+        )
+        for axis, plane, mask_plane, (dim_1, dim_2) in zip(
+            channel_axes[: len(planes)], planes, mask_planes, dimension_pairs
+        ):
+            aspect = (
+                voxel_size[arguments.batch_index, dim_1].item()
+                / voxel_size[arguments.batch_index, dim_2].item()
+            )
+            plane = moveaxis(plane[arguments.batch_index, channels], 0, -1)
 
-        image = axis.imshow(
-            plane,
-            origin="lower",
-            aspect=aspect,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            **imshow_kwargs,
-        )
-        if mask_color is not None:
-            mask_plane = moveaxis(mask_plane[arguments.batch_index], 0, -1)
-            coloured_mask_plane = (1 - mask_plane) * mask_color
-            axis.imshow(
-                coloured_mask_plane,
+            if plane.shape[-1] == 1:
+                cmap: Optional[Any] = "gray"
+            else:
+                cmap = None
+            axis.set_ylabel(dimension_to_letter(dim_1, n_dims))
+            axis.set_xlabel(dimension_to_letter(dim_2, n_dims))
+
+            image = axis.imshow(
+                plane,
                 origin="lower",
                 aspect=aspect,
-                vmin=0.0,
-                vmax=1.0,
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+                **imshow_kwargs,
             )
-    if arguments.draw_colorbar:
-        figure.subplots_adjust(right=0.8)
-        colorbar_ax = figure.add_axes([0.85, 0.15, 0.05 / len(planes), 0.7])
-        figure.colorbar(image, cax=colorbar_ax)
+            if mask_color is not None:
+                mask_plane = moveaxis(mask_plane[arguments.batch_index], 0, -1)
+                coloured_mask_plane = (1 - mask_plane) * mask_color
+                axis.imshow(
+                    coloured_mask_plane,
+                    origin="lower",
+                    aspect=aspect,
+                    vmin=0.0,
+                    vmax=1.0,
+                )
+        if draw_colorbar:
+            figure.colorbar(image, cax=channel_axes[-1])
 
     return figure
 
