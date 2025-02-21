@@ -24,7 +24,6 @@ from composable_mapping.util import (
     combine_optional_masks,
     crop_and_then_pad_spatial,
     get_spatial_dims,
-    get_spatial_shape,
     includes_padding,
     is_croppable_first,
     split_shape,
