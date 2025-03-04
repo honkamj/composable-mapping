@@ -152,7 +152,6 @@ def extract_conv_samplable_parameters(
     small_translation = (
         (translation - rounded_translation).abs() + max_conv_coordinate_difference_upper_bound
     ) < convolution_threshold
-    translation[small_translation] = rounded_translation[small_translation]
     if (interpolating_kernel & (~transposed_convolve)).any():
         convolve = ((~interpolating_kernel) | (~small_translation)) & (~transposed_convolve)
         no_convolve_or_transposed_convolve = (~transposed_convolve) & (~convolve)

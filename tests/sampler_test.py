@@ -1,7 +1,7 @@
 """Tests for the sampler module."""
 
 from abc import abstractmethod
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 from unittest import TestCase
 
 from torch import Tensor
@@ -117,10 +117,16 @@ class _NonSymmetricInterpolator(BaseSeparableSampler):
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return False
 
-    def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        raise NotImplementedError()
+    def _piece_edges(self, spatial_dim: int) -> Tuple[float, ...]:
+        if spatial_dim == 0:
+            return (-2.0, 2.0)
+        if spatial_dim == 1:
+            return (-2.5, 2.5)
+        if spatial_dim == 2:
+            return (-3.0, 3.0)
+        raise ValueError("Invalid spatial_dim.")
 
-    def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
+    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
         return coordinates + 1
 
     def sample_mask(self, mask: Tensor, coordinates: Tensor) -> Tensor:

@@ -55,29 +55,16 @@ class CubicSplineSampler(BaseSeparableSampler):
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return self._prefilter
 
-    def _kernel_parts(self, coordinates: Tensor) -> Tuple[Tensor, Tensor]:
+    def _piece_edges(self, spatial_dim: int) -> Tuple[int, ...]:
+        return (-2, -1, 0, 1, 2)
+
+    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
         abs_coordinates = coordinates.abs()
-        center_part = 2 / 3 + (0.5 * abs_coordinates - 1) * abs_coordinates**2
-        surrounding_part = -((abs_coordinates - 2) ** 3) / 6
-        return center_part, surrounding_part
-
-    def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_part = self._kernel_parts(coordinates)
-        return (
-            surrounding_part * ((coordinates > -2) & (coordinates <= -1))
-            + center_part * ((coordinates > -1) & (coordinates <= 0))
-            + center_part * ((coordinates > 0) & (coordinates <= 1))
-            + surrounding_part * ((coordinates > 1) & (coordinates <= 2))
-        )
-
-    def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_part = self._kernel_parts(coordinates)
-        return (
-            surrounding_part * ((coordinates >= -2) & (coordinates < -1))
-            + center_part * ((coordinates >= -1) & (coordinates < 0))
-            + center_part * ((coordinates >= 0) & (coordinates < 1))
-            + surrounding_part * ((coordinates >= 1) & (coordinates < 2))
-        )
+        if piece_index in (0, 3):
+            return -((abs_coordinates - 2) ** 3) / 6
+        if piece_index in (1, 2):
+            return 2 / 3 + (0.5 * abs_coordinates - 1) * abs_coordinates**2
+        raise ValueError(f"Invalid piece index {piece_index}")
 
     def sample_values(
         self,

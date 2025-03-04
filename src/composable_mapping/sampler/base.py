@@ -15,10 +15,11 @@ from typing import (
     Union,
 )
 
-from torch import Tensor, ones
+from torch import Tensor, ones, zeros_like
 from torch.autograd.functional import vjp
 from torch.nn import functional as torch_functional
 
+from composable_mapping.interface import Number
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import (
     combine_optional_masks,
@@ -87,13 +88,23 @@ class NthDegreeSymmetricKernelSupport(ISeparableKernelSupport):
             return (-0.5, 0.5, True, False)
         bound_inclusive = self._degree == 0
         if limit_direction == LimitDirection.left():
-            return (-self._kernel_width / 2, self._kernel_width / 2, bound_inclusive, False)
-        if limit_direction == LimitDirection.right():
-            return (-self._kernel_width / 2, self._kernel_width / 2, False, bound_inclusive)
-        if limit_direction == LimitDirection.average():
             return (
                 -self._kernel_width / 2,
                 self._kernel_width / 2,
+                bound_inclusive,
+                False,
+            )
+        if limit_direction == LimitDirection.right():
+            return (
+                -self._kernel_width / 2,
+                self._kernel_width / 2,
+                False,
+                bound_inclusive,
+            )
+        if limit_direction == LimitDirection.average():
+            return (
+                -self._kernel_width / 2 - limit_direction.average_tolerance,
+                self._kernel_width / 2 + limit_direction.average_tolerance,
                 bound_inclusive,
                 bound_inclusive,
             )
@@ -176,42 +187,74 @@ class BaseSeparableSampler(ISampler):
         """
 
     @abstractmethod
-    def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        """Evaluate the interpolation kernel for the given 1d coordinates with the
-        discontinuous points evaluated as left limit.
-
-        Args:
-            coordinates: 1d coordinates with shape (n_coordinates,)
-            spatial_dim: Spatial dimension for which to evaluate the kernel
-
-        Returns:
-            Interpolation kernel evaluated at the given coordinates.
-        """
+    def _piece_edges(self, spatial_dim: int) -> Sequence[Number]:
+        """Defines the edge points of the piecewise smooth kernel."""
 
     @abstractmethod
-    def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        """Evaluate the interpolation kernel for the given 1d coordinates with the
-        discontinuous points evaluated as right limit.
+    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
+        """Evaluate the interpolation kernel for the given 1d coordinates.
+
+        Kernels are defined as piecewise smooth functions and the piece index
+        should be used to determine the piece to evaluate. The method _piece_edges
+        is used to determine the edge points of the piecewise smooth kernel. Coordinates
+        are guaranteed to lie within the range for the given piece.
 
         Args:
             coordinates: 1d coordinates with shape (n_coordinates,)
             spatial_dim: Spatial dimension for which to evaluate the kernel
+            piece_index: Index of the piecewise smooth kernel
 
         Returns:
             Interpolation kernel evaluated at the given coordinates.
         """
 
     def _kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        if self._limit_direction(spatial_dim) == LimitDirection.right():
-            return self._left_limit_kernel(coordinates, spatial_dim)
-        if self._limit_direction(spatial_dim) == LimitDirection.left():
-            return self._right_limit_kernel(coordinates, spatial_dim)
-        if self._limit_direction(spatial_dim) == LimitDirection.average():
-            return 0.5 * (
-                self._left_limit_kernel(coordinates, spatial_dim)
-                + self._right_limit_kernel(coordinates, spatial_dim)
-            )
-        raise ValueError("Unknown limit direction")
+        limit_direction = self._limit_direction(spatial_dim)
+        output: Tensor = zeros_like(coordinates)
+        edges = self._piece_edges(spatial_dim)
+        average_tolerance = limit_direction.average_tolerance
+        for pience_index in range(len(edges) - 1):
+            piece_start = edges[pience_index]
+            piece_end = edges[pience_index + 1]
+            if limit_direction == LimitDirection.left():
+                coordinate_mask = (coordinates > piece_start) & (coordinates <= piece_end)
+                output = (
+                    output
+                    + self._piecewise_kernel(
+                        coordinates.clamp(min=piece_start, max=piece_end), spatial_dim, pience_index
+                    )
+                    * coordinate_mask
+                )
+            elif limit_direction == LimitDirection.right():
+                coordinate_mask = (coordinates >= piece_start) & (coordinates < piece_end)
+                output = (
+                    output
+                    + self._piecewise_kernel(
+                        coordinates.clamp(min=piece_start, max=piece_end), spatial_dim, pience_index
+                    )
+                    * coordinate_mask
+                )
+            elif limit_direction == LimitDirection.average():
+                coordinate_mask = (coordinates > piece_start + average_tolerance) & (
+                    coordinates < piece_end - average_tolerance
+                )
+                coordinate_mask_edge = (
+                    (coordinates >= piece_start - average_tolerance)
+                    & (coordinates <= piece_start + average_tolerance)
+                ) | (
+                    (coordinates >= piece_end - average_tolerance)
+                    & (coordinates <= piece_end + average_tolerance)
+                )
+                kernel_values = self._piecewise_kernel(
+                    coordinates.clamp(min=piece_start, max=piece_end), spatial_dim, pience_index
+                )
+                output = (
+                    output
+                    + kernel_values * coordinate_mask
+                    + kernel_values * coordinate_mask_edge / 2
+                )
+
+        return output
 
     def derivative(
         self,
@@ -221,8 +264,8 @@ class BaseSeparableSampler(ISampler):
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
             limit_direction=limit_direction,
-            parent_left_limit_kernel=self._left_limit_kernel,
-            parent_right_limit_kernel=self._right_limit_kernel,
+            parent_piecewise_kernel=self._piecewise_kernel,
+            parent_piece_edges=self._piece_edges,
             parent_kernel_support=self._kernel_support,
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
             parent_limit_direction=self._limit_direction,
@@ -631,8 +674,8 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         self,
         spatial_dim: int,
         limit_direction: LimitDirection,
-        parent_left_limit_kernel: Callable[[Tensor, int], Tensor],
-        parent_right_limit_kernel: Callable[[Tensor, int], Tensor],
+        parent_piecewise_kernel: Callable[[Tensor, int, int], Tensor],
+        parent_piece_edges: Callable[[int], Sequence[Number]],
         parent_kernel_support: Callable[[int], ISeparableKernelSupport],
         parent_is_interpolating_kernel: Callable[[int], bool],
         parent_limit_direction: Callable[[int], LimitDirection],
@@ -651,10 +694,10 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             ),
         )
         self._spatial_dim = spatial_dim
-        self._parent_left_limit_kernel = parent_left_limit_kernel
-        self._parent_right_limit_kernel = parent_right_limit_kernel
-        self._parent_is_interpolating_kernel = parent_is_interpolating_kernel
+        self._parent_piecewise_kernel = parent_piecewise_kernel
+        self._parent_piece_edges = parent_piece_edges
         self._parent_kernel_support = parent_kernel_support
+        self._parent_is_interpolating_kernel = parent_is_interpolating_kernel
 
     def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
         if spatial_dim == self._spatial_dim:
@@ -669,8 +712,8 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
         return GenericSeparableDerivativeSampler(
             spatial_dim=spatial_dim,
             limit_direction=limit_direction,
-            parent_left_limit_kernel=self._left_limit_kernel,
-            parent_right_limit_kernel=self._right_limit_kernel,
+            parent_piecewise_kernel=self._piecewise_kernel,
+            parent_piece_edges=self._piece_edges,
             parent_kernel_support=self._kernel_support,
             parent_is_interpolating_kernel=self._is_interpolating_kernel,
             parent_limit_direction=self._limit_direction,
@@ -685,14 +728,25 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             return False
         return self._parent_is_interpolating_kernel(spatial_dim)
 
-    def _derive_function(
+    def _piece_edges(self, spatial_dim: int) -> Sequence[Number]:
+        return self._parent_piece_edges(spatial_dim)
+
+    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
+        if spatial_dim == self._spatial_dim:
+            return self._kernel_derivative(
+                self._parent_piecewise_kernel, coordinates, spatial_dim, piece_index
+            )
+        return self._parent_piecewise_kernel(coordinates, spatial_dim, piece_index)
+
+    def _kernel_derivative(
         self,
-        kernel_function: Callable[[Tensor, int], Tensor],
+        kernel_function: Callable[[Tensor, int, int], Tensor],
         coordinates: Tensor,
         spatial_dim: int,
+        piece_index: int,
     ) -> Tensor:
         def partial_kernel_function(coordinates: Tensor) -> Tensor:
-            return -kernel_function(coordinates, spatial_dim)
+            return -kernel_function(coordinates, spatial_dim, piece_index)
 
         _output, derivatives = vjp(
             partial_kernel_function,
@@ -701,26 +755,6 @@ class GenericSeparableDerivativeSampler(BaseSeparableSampler):
             create_graph=coordinates.requires_grad,
         )
         return derivatives
-
-    def _kernel_derivative(
-        self,
-        kernel_function: Callable[[Tensor, int], Tensor],
-        coordinates: Tensor,
-        spatial_dim: int,
-    ) -> Tensor:
-        if spatial_dim == self._spatial_dim:
-            return self._derive_function(kernel_function, coordinates, spatial_dim)
-        return kernel_function(coordinates, spatial_dim)
-
-    def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return self._kernel_derivative(
-            self._parent_left_limit_kernel, coordinates=coordinates, spatial_dim=spatial_dim
-        )
-
-    def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return self._kernel_derivative(
-            self._parent_right_limit_kernel, coordinates=coordinates, spatial_dim=spatial_dim
-        )
 
     def sample_values(
         self,
