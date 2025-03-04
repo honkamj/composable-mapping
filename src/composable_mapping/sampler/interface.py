@@ -17,12 +17,14 @@ class LimitDirection:
     Arguments:
         direction: Direction of the limit. Can be one of "left", "right", or
             "average".
+        average_tolerance: See: `LimitDirection.average`.
     """
 
-    def __init__(self, direction: str) -> None:
+    def __init__(self, direction: str, average_tolerance: float = 0.0) -> None:
         if direction not in ["left", "right", "average"]:
             raise ValueError("Invalid direction")
         self.direction = direction
+        self.average_tolerance = average_tolerance
 
     @classmethod
     def left(cls) -> "LimitDirection":
@@ -35,9 +37,15 @@ class LimitDirection:
         return cls("right")
 
     @classmethod
-    def average(cls) -> "LimitDirection":
-        """Average of left and right limit directions."""
-        return cls("average")
+    def average(cls, tolerance: float = 1e-3) -> "LimitDirection":
+        """Average of left and right limit directions.
+
+        Args:
+            tolerance: How close to the edge between piecewise smooth
+                functions the sampling location has to be to compute the output
+                as average of both sides.
+        """
+        return cls("average", tolerance)
 
     def for_all_spatial_dims(self) -> Callable[[int], "LimitDirection"]:
         """Obtain callable with spatial dimension as input, and the
@@ -168,7 +176,7 @@ class ISampler(ABC):
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: LimitDirection = LimitDirection.average(),
+        limit_direction: LimitDirection = LimitDirection.left(),
     ) -> "ISampler":
         """Obtain sampler for sampling derivatives corresponding to the current sampler.
 

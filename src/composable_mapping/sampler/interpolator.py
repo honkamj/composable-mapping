@@ -53,15 +53,15 @@ class LinearInterpolator(BaseSeparableSampler):
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
-    def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return (1 + coordinates) * ((coordinates > -1) & (coordinates <= 0)) + (1 - coordinates) * (
-            (coordinates > 0) & (coordinates <= 1)
-        )
+    def _piece_edges(self, spatial_dim: int) -> Tuple[float, ...]:
+        return (-1, 0, 1)
 
-    def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return (1 + coordinates) * ((coordinates >= -1) & (coordinates < 0)) + (1 - coordinates) * (
-            (coordinates >= 0) & (coordinates < 1)
-        )
+    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
+        if piece_index == 0:
+            return 1 + coordinates
+        if piece_index == 1:
+            return 1 - coordinates
+        raise ValueError(f"Invalid piece index {piece_index}")
 
     def sample_values(
         self,
@@ -126,11 +126,11 @@ class NearestInterpolator(BaseSeparableSampler):
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
-    def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return ones_like(coordinates) * ((coordinates > -0.5) & (coordinates <= 0.5))
+    def _piece_edges(self, spatial_dim: int) -> Tuple[float, ...]:
+        return (-0.5, 0.5)
 
-    def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        return ones_like(coordinates) * ((coordinates >= -0.5) & (coordinates < 0.5))
+    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
+        return ones_like(coordinates)
 
     def sample_values(
         self,
@@ -192,32 +192,17 @@ class BicubicInterpolator(BaseSeparableSampler):
     def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
-    def _kernel_parts(self, coordinates: Tensor) -> Tuple[Tensor, Tensor]:
+    def _piece_edges(self, spatial_dim):
+        return (-2, -1, 0, 1, 2)
+
+    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
         abs_coordinates = coordinates.abs()
         alpha = -0.75
-        center_part = (alpha + 2) * abs_coordinates**3 - (alpha + 3) * abs_coordinates**2 + 1
-        surrounding_part = alpha * (
-            abs_coordinates**3 - 5 * abs_coordinates**2 + 8 * abs_coordinates - 4
-        )
-        return center_part, surrounding_part
-
-    def _left_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_part = self._kernel_parts(coordinates)
-        return (
-            surrounding_part * ((coordinates > -2) & (coordinates <= -1))
-            + center_part * ((coordinates > -1) & (coordinates <= 0))
-            + center_part * ((coordinates > 0) & (coordinates <= 1))
-            + surrounding_part * ((coordinates > 1) & (coordinates <= 2))
-        )
-
-    def _right_limit_kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
-        center_part, surrounding_part = self._kernel_parts(coordinates)
-        return (
-            surrounding_part * ((coordinates >= -2) & (coordinates < -1))
-            + center_part * ((coordinates >= -1) & (coordinates < 0))
-            + center_part * ((coordinates >= 0) & (coordinates < 1))
-            + surrounding_part * ((coordinates >= 1) & (coordinates < 2))
-        )
+        if piece_index in (0, 3):
+            return alpha * (abs_coordinates**3 - 5 * abs_coordinates**2 + 8 * abs_coordinates - 4)
+        if piece_index in (1, 2):
+            return (alpha + 2) * abs_coordinates**3 - (alpha + 3) * abs_coordinates**2 + 1
+        raise ValueError(f"Invalid piece index {piece_index}")
 
     def sample_values(
         self,
