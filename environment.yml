@@ -9,7 +9,6 @@ dependencies:
   - pytorch::torchvision
   - pytorch::torchaudio
   - pytorch::pytorch=2.4
-  - nibabel
   - ipykernel
   - matplotlib
   - mypy
