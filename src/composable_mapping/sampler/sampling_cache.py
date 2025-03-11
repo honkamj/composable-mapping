@@ -6,7 +6,7 @@ from threading import local
 from typing import Any, Callable, List, Optional
 
 _CACHE_VARIABLES = local()
-_CACHE_VARIABLES.active_stack = {}
+_CACHE_VARIABLES.active_stack = []
 _CACHE_VARIABLES.passive_stack = {}
 
 
