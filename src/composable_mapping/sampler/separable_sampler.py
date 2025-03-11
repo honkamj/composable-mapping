@@ -1,8 +1,6 @@
 """Sampling with separable kernels"""
 
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager
-from threading import local
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -38,6 +36,7 @@ from .convolution_sampling import (
 )
 from .interface import DataFormat, ISampler, LimitDirection
 from .inverse import FixedPointInverseSampler
+from .sampling_cache import get_cached_sampling_parameters
 
 if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
@@ -217,7 +216,9 @@ class SeparableSampler(ISampler):
         limit_tol: The setting allows for tolerance for being on the different side
             of discontinuous point than the limit direction for the limit to still
             be computed based on the other side. Needed for numerically stable use
-            of limit directions.
+            of limit directions. Additionally, if a kernel which goes to zero on
+            bounds, the actual kernel bounds are shrunk by this tolerance to avoid
+            having practically zero values at the bounds.
         limit_direction: Side of evaluation in discontinuous points (or in their
             neighborhood if limit_tol > 0).
     """
@@ -445,22 +446,9 @@ class SeparableSampler(ISampler):
         volume: MappableTensor,
         voxel_coordinates: MappableTensor,
     ) -> Optional[MappableTensor]:
-        sampling_parameter_cache = _get_sampling_parameter_cache()
-        if sampling_parameter_cache is not None:
-            if sampling_parameter_cache.has_sampling_parameters():
-                conv_parameters: _ConvParametersType = (
-                    sampling_parameter_cache.get_sampling_parameters()
-                )
-            else:
-                conv_parameters = self._obtain_conv_parameters(
-                    volume=volume, voxel_coordinates=voxel_coordinates
-                )
-                sampling_parameter_cache.append_sampling_parameters(conv_parameters)
-            sampling_parameter_cache.increment_index()
-        else:
-            conv_parameters = self._obtain_conv_parameters(
-                volume=volume, voxel_coordinates=voxel_coordinates
-            )
+        conv_parameters = get_cached_sampling_parameters(
+            lambda: self._obtain_conv_parameters(volume, voxel_coordinates)
+        )
         if conv_parameters is None:
             return None
         (
@@ -710,72 +698,3 @@ class SeparableSampler(ISampler):
             "Inverse sampler has been currently implemented only for voxel "
             "displacements data format."
         )
-
-
-_SAMPLING_PARAMETER_CACHE_STACK = local()
-_SAMPLING_PARAMETER_CACHE_STACK.stack = []
-
-
-def _get_sampling_parameter_cache() -> Optional["EnumeratedSamplingParameterCache"]:
-    if _SAMPLING_PARAMETER_CACHE_STACK.stack:
-        return _SAMPLING_PARAMETER_CACHE_STACK.stack[-1]
-    return None
-
-
-class EnumeratedSamplingParameterCache(AbstractContextManager):
-    """Context manager for caching convolution parameters for sampling
-    with separable kernels.
-
-    Is intended for situations where same order of sampling operations is
-    repeated multiple times, e.g. when iterating a training step.
-
-    One can then use this context manager to cache the convolution parameters
-    for the sampling operations and avoid recomputing them. That can save
-    few milliseconds per sampling operation.
-    """
-
-    def __init__(self) -> None:
-        self._sampling_parameters: List[Any] = []
-        self._index: Optional[int] = None
-
-    def __enter__(self) -> None:
-        self._index = 0
-        _SAMPLING_PARAMETER_CACHE_STACK.stack.append(self)
-
-    def increment_index(self) -> None:
-        """Increment the index in the cache"""
-        if self._index is None:
-            raise ValueError("Cache not active.")
-        self._index += 1
-
-    def has_sampling_parameters(self) -> bool:
-        """Check if there are any sampling parameters in the cache"""
-        if self._index is None:
-            raise ValueError("Cache not active.")
-        return self._index < len(self._sampling_parameters)
-
-    def get_sampling_parameters(self) -> Optional[Any]:
-        """Get the next set of sampling parameters from the cache"""
-        if self._index is None:
-            raise ValueError("Cache not active.")
-        return self._sampling_parameters[self._index]
-
-    def append_sampling_parameters(self, sampling_parameters: Any) -> None:
-        """Append the next set of sampling parameters to the cache"""
-        self._sampling_parameters.append(sampling_parameters)
-
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        _SAMPLING_PARAMETER_CACHE_STACK.stack.pop()
-        self._index = None
-
-
-class no_sampling_parameter_cache(  # this is supposed to appear as function - pylint: disable=invalid-name
-    AbstractContextManager
-):
-    """Context manager for disabling the sampling parameter cache."""
-
-    def __enter__(self) -> None:
-        _SAMPLING_PARAMETER_CACHE_STACK.stack.append(None)
-
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        _SAMPLING_PARAMETER_CACHE_STACK.stack.pop()
