@@ -1,6 +1,6 @@
 """Scaling and squaring sampler."""
 
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from torch import Tensor
 
@@ -8,7 +8,7 @@ from composable_mapping.mappable_tensor import MappableTensor, voxel_grid
 from composable_mapping.util import get_spatial_shape
 
 from .default import get_sampler
-from .interface import DataFormat, ISampler, LimitDirection
+from .interface import DataFormat, ISampler
 
 if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
@@ -48,9 +48,6 @@ class ScalingAndSquaring(ISampler):
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: Union[
-            LimitDirection, Callable[[int], LimitDirection]
-        ] = LimitDirection.average(),
     ) -> "ISampler":
         raise NotImplementedError("Derivative sampling is not implemented for scaling and squaring")
 

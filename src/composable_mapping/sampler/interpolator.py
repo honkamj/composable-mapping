@@ -1,11 +1,15 @@
 """Interpolating samplers."""
 
-from typing import Callable, Tuple
+from typing import Callable
 
 import torch.nn
-from torch import Tensor, ones_like
+from torch import Tensor
+from torch import bool as torch_bool
+from torch import cat
+from torch import device as torch_device
+from torch import dtype as torch_dtype
+from torch import linspace, ones, ones_like, stack, zeros
 
-from composable_mapping.sampler.base import ISeparableKernelSupport
 from composable_mapping.util import (
     get_batch_shape,
     get_channels_shape,
@@ -14,54 +18,47 @@ from composable_mapping.util import (
     split_shape,
 )
 
-from .base import BaseSeparableSampler, NthDegreeSymmetricKernelSupport
-from .interface import LimitDirection
 from .interpolate import interpolate
+from .separable_sampler import PiecewiseKernelDefinition, SeparableSampler
 
 
-class LinearInterpolator(BaseSeparableSampler):
-    """Linear interpolation in voxel coordinates
+class LinearKernel(PiecewiseKernelDefinition):
+    """Kernel for linear interpolation."""
 
-    Arguments:
-        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions: Whether to mask extrapolated regions.
-        convolution_threshold: Maximum allowed difference in coordinates
-            for using convolution-based sampling (the difference might be upper
-            bounded when doing the decision).
-        mask_threshold: Maximum allowed weight for masked regions in a
-            sampled location to still consider it valid (non-masked).
-    """
-
-    def __init__(
-        self,
-        extrapolation_mode: str = "border",
-        mask_extrapolated_regions: bool = True,
-        convolution_threshold: float = 1e-3,
-        mask_threshold: float = 1e-5,
-    ) -> None:
-        super().__init__(
-            extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions=mask_extrapolated_regions,
-            convolution_threshold=convolution_threshold,
-            mask_threshold=mask_threshold,
-            limit_direction=LimitDirection.right(),
-        )
-
-    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return NthDegreeSymmetricKernelSupport(kernel_width=2.0, degree=1)
-
-    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
-    def _piece_edges(self, spatial_dim: int) -> Tuple[float, ...]:
-        return (-1, 0, 1)
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        return stack(
+            [
+                ones(3, device=device, dtype=torch_bool),  # Original
+                zeros(3, device=device, dtype=torch_bool),  # First derivative
+                ones(3, device=device, dtype=torch_bool),  # Second derivative and beyond
+            ],
+            dim=0,
+        )
 
-    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
-        if piece_index == 0:
-            return 1 + coordinates
-        if piece_index == 1:
-            return 1 - coordinates
-        raise ValueError(f"Invalid piece index {piece_index}")
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
+        return linspace(-1, 1, 3, dtype=dtype, device=device)
+
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
+        return stack(
+            [
+                1 + coordinates[0, :],
+                1 - coordinates[1, :],
+            ],
+            dim=0,
+        )
+
+
+class LinearInterpolator(SeparableSampler):
+    """Linear interpolation in voxel coordinates
+
+    For the arguments see `.separable_sampler.SeparableSampler`.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(kernel=LinearKernel(), **kwargs)
 
     def sample_values(
         self,
@@ -86,51 +83,42 @@ class LinearInterpolator(BaseSeparableSampler):
             mode="bilinear",
             padding_mode="zeros",
         )
-        return interpolated_mask >= 1 - self._mask_threshold
+        return interpolated_mask >= 1 - self._mask_tol
 
 
-class NearestInterpolator(BaseSeparableSampler):
-    """Nearest neighbour interpolation in voxel coordinates.
+class NearestKernel(PiecewiseKernelDefinition):
+    """Kernel for nearest neighbour interpolation."""
 
-    Arguments:
-        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions: Whether to mask extrapolated regions.
-        convolution_threshold: Maximum allowed difference in coordinates
-            for using convolution-based sampling (the difference might be upper
-            bounded when doing the decision).
-        mask_threshold: Maximum allowed weight for masked regions in a
-            sampled location to still consider it valid (non-masked).
-        limit_direction: How to handle points at equal distances. This
-            option currently applies only to convolution based sampling.
-    """
-
-    def __init__(
-        self,
-        extrapolation_mode: str = "border",
-        mask_extrapolated_regions: bool = True,
-        convolution_threshold: float = 1e-3,
-        mask_threshold: float = 1e-5,
-        limit_direction: LimitDirection = LimitDirection.right(),
-    ) -> None:
-        super().__init__(
-            extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions=mask_extrapolated_regions,
-            convolution_threshold=convolution_threshold,
-            mask_threshold=mask_threshold,
-            limit_direction=limit_direction,
-        )
-
-    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return NthDegreeSymmetricKernelSupport(kernel_width=1.0, degree=0)
-
-    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
-    def _piece_edges(self, spatial_dim: int) -> Tuple[float, ...]:
-        return (-0.5, 0.5)
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        return stack(
+            [
+                zeros(2, device=device, dtype=torch_bool),  # Original
+                ones(2, device=device, dtype=torch_bool),  # First derivative and beyond
+            ],
+            dim=0,
+        )
 
-    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
+        return linspace(-0.5, 0.5, 2, dtype=dtype, device=device)
+
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
         return ones_like(coordinates)
+
+
+class NearestInterpolator(SeparableSampler):
+    """Nearest neighbour interpolation in voxel coordinates.
+
+    For the arguments see `.separable_sampler.SeparableSampler`.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(
+            kernel=NearestKernel(),
+            **kwargs,
+        )
 
     def sample_values(
         self,
@@ -157,52 +145,61 @@ class NearestInterpolator(BaseSeparableSampler):
         ).to(mask.dtype)
 
 
-class BicubicInterpolator(BaseSeparableSampler):
-    """Bicubic interpolation in voxel coordinates.
+class BicubicKernel(PiecewiseKernelDefinition):
+    """Kernel for bicubic interpolation."""
 
-    Arguments:
-        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions: Whether to mask extrapolated regions.
-        convolution_threshold: Maximum allowed difference in coordinates
-            for using convolution-based sampling (the difference might be upper
-            bounded when doing the decision).
-        mask_threshold: Maximum allowed weight for masked regions in a
-            sampled location to still consider it valid (non-masked).
-    """
-
-    def __init__(
-        self,
-        extrapolation_mode: str = "border",
-        mask_extrapolated_regions: bool = True,
-        convolution_threshold: float = 1e-3,
-        mask_threshold: float = 1e-5,
-    ) -> None:
-        super().__init__(
-            extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions=mask_extrapolated_regions,
-            convolution_threshold=convolution_threshold,
-            mask_threshold=mask_threshold,
-            limit_direction=LimitDirection.right(),
-        )
-        self._mask_threshold = mask_threshold
-
-    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return NthDegreeSymmetricKernelSupport(kernel_width=4.0, degree=3)
-
-    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return True
 
-    def _piece_edges(self, spatial_dim):
-        return (-2, -1, 0, 1, 2)
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        return cat(
+            [
+                ones((2, 5), device=device, dtype=torch_bool),  # Original and first derivative
+                cat(  # Second derivative
+                    (
+                        zeros((1, 1), device=device, dtype=torch_bool),
+                        ones((1, 3), device=device, dtype=torch_bool),
+                        zeros((1, 1), device=device, dtype=torch_bool),
+                    ),
+                    dim=1,
+                ),
+                zeros((1, 5), device=device, dtype=torch_bool),  # Third derivative
+                ones((1, 5), device=device, dtype=torch_bool),  # Fourth derivative and beyond
+            ],
+            dim=0,
+        )
 
-    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
-        abs_coordinates = coordinates.abs()
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
+        return linspace(-2.0, 2.0, 5, dtype=dtype, device=device)
+
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
         alpha = -0.75
-        if piece_index in (0, 3):
-            return alpha * (abs_coordinates**3 - 5 * abs_coordinates**2 + 8 * abs_coordinates - 4)
-        if piece_index in (1, 2):
-            return (alpha + 2) * abs_coordinates**3 - (alpha + 3) * abs_coordinates**2 + 1
-        raise ValueError(f"Invalid piece index {piece_index}")
+        return stack(
+            [
+                alpha
+                * (
+                    -coordinates[0, :] ** 3 - 5 * coordinates[0, :] ** 2 - 8 * coordinates[0, :] - 4
+                ),
+                -(alpha + 2) * coordinates[1, :] ** 3 - (alpha + 3) * coordinates[1, :] ** 2 + 1,
+                (alpha + 2) * coordinates[2, :] ** 3 - (alpha + 3) * coordinates[2, :] ** 2 + 1,
+                alpha
+                * (coordinates[3, :] ** 3 - 5 * coordinates[3, :] ** 2 + 8 * coordinates[3, :] - 4),
+            ],
+            dim=0,
+        )
+
+
+class BicubicInterpolator(SeparableSampler):
+    """Bicubic interpolation in voxel coordinates.
+
+    For the arguments see `.separable_sampler.SeparableSampler`.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(
+            kernel=BicubicKernel(),
+            **kwargs,
+        )
 
     def sample_values(
         self,
@@ -240,7 +237,7 @@ class BicubicInterpolator(BaseSeparableSampler):
                 + channels_shape
                 + get_spatial_shape(interpolated_mask.shape, n_channel_dims=1)
             )
-            >= 1 - self._mask_threshold
+            >= 1 - self._mask_tol
         )
 
 

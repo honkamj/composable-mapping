@@ -1,6 +1,6 @@
-"""Base sampler implementations"""
+"""Sampling with separable kernels"""
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from threading import local
 from typing import (
@@ -15,11 +15,13 @@ from typing import (
     Union,
 )
 
-from torch import Tensor, ones, zeros_like
+from torch import Tensor
+from torch import device as torch_device
+from torch import dtype as torch_dtype
+from torch import ones, zeros_like
 from torch.autograd.functional import vjp
 from torch.nn import functional as torch_functional
 
-from composable_mapping.interface import Number
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import (
     combine_optional_masks,
@@ -31,8 +33,8 @@ from composable_mapping.util import (
 )
 
 from .convolution_sampling import (
-    apply_flipping_permutation_to_volume,
-    obtain_conv_parameters,
+    apply_flips_and_permutation_to_volume,
+    calculate_convolutional_sampling_kernel_coordinates,
 )
 from .interface import DataFormat, ISampler, LimitDirection
 from .inverse import FixedPointInverseSampler
@@ -54,129 +56,20 @@ _ConvParametersType = Optional[
         List[int],
     ]
 ]
+from torch import Tensor
+from torch import device as torch_device
+from torch import dtype as torch_dtype
+from torch import ones, zeros_like
+from torch.autograd.functional import vjp
+
+from .interface import ISampler, LimitDirection
 
 
-class ISeparableKernelSupport:
-    """Interface for defining kernel supports for a kernel and its derivatives"""
-
-    @abstractmethod
-    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, float, bool, bool]:
-        """Interpolation kernel support for the convolution and whether min and max
-        are inclusive or not"""
-
-    @abstractmethod
-    def derivative(self) -> "ISeparableKernelSupport":
-        """Obtain kernel support function of the derivative kernel"""
-
-
-class NthDegreeSymmetricKernelSupport(ISeparableKernelSupport):
-    """Symmetric kernel support function for kernels which are zero at borders
-    for degree - 1 number of derivations, after which they are non-zero for one
-    derivation, and after which they are zero functions."""
-
-    def __init__(
-        self,
-        kernel_width: float,
-        degree: int,
-    ) -> None:
-        self._kernel_width = kernel_width
-        self._degree = degree
-
-    def __call__(self, limit_direction: LimitDirection) -> Tuple[float, float, bool, bool]:
-        if self._degree < 0:
-            # kernel is zeros
-            return (-0.5, 0.5, True, False)
-        bound_inclusive = self._degree == 0
-        if limit_direction == LimitDirection.left():
-            return (
-                -self._kernel_width / 2,
-                self._kernel_width / 2,
-                bound_inclusive,
-                False,
-            )
-        if limit_direction == LimitDirection.right():
-            return (
-                -self._kernel_width / 2,
-                self._kernel_width / 2,
-                False,
-                bound_inclusive,
-            )
-        if limit_direction == LimitDirection.average():
-            return (
-                -self._kernel_width / 2 - limit_direction.average_tolerance,
-                self._kernel_width / 2 + limit_direction.average_tolerance,
-                bound_inclusive,
-                bound_inclusive,
-            )
-        raise ValueError("Unknown limit direction")
-
-    @staticmethod
-    def _update_polynomial_degree_func(
-        spatial_dim: int, func: Callable[[int], int]
-    ) -> Callable[[int], int]:
-        def updated_func(spatial_dim_: int) -> int:
-            if spatial_dim_ != spatial_dim:
-                return func(spatial_dim_)
-            return func(spatial_dim_) - 1
-
-        return updated_func
-
-    def derivative(self) -> "NthDegreeSymmetricKernelSupport":
-        return NthDegreeSymmetricKernelSupport(
-            kernel_width=self._kernel_width,
-            degree=self._degree - 1,
-        )
-
-
-class BaseSeparableSampler(ISampler):
-    """Base sampler in voxel coordinates which can be implemented as a
-    separable convolution
-
-    Arguments:
-        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions: Whether to mask extrapolated regions.
-        convolution_threshold: Maximum allowed difference in coordinates
-            for using convolution-based sampling (the difference might be upper
-            bounded when doing the decision).
-        mask_threshold: Maximum allowed weight for masked regions in a
-            sampled location to still consider it valid (non-masked).
-        limit_direction: Direction for evaluating the kernel at
-            discontinuous points.
-    """
-
-    def __init__(
-        self,
-        extrapolation_mode: str,
-        mask_extrapolated_regions: bool,
-        convolution_threshold: float,
-        mask_threshold: float,
-        limit_direction: Union[LimitDirection, Callable[[int], LimitDirection]],
-    ) -> None:
-        if extrapolation_mode not in ("zeros", "border", "reflection"):
-            raise ValueError("Unknown extrapolation mode")
-        self._extrapolation_mode = extrapolation_mode
-        self._mask_extrapolated_regions = mask_extrapolated_regions
-        self._convolution_threshold = convolution_threshold
-        self._mask_threshold = mask_threshold
-        self._limit_direction = (
-            limit_direction.for_all_spatial_dims()
-            if isinstance(limit_direction, LimitDirection)
-            else limit_direction
-        )
+class PiecewiseKernelDefinition(ABC):
+    """Piecewise kernel definition"""
 
     @abstractmethod
-    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        """Kernel support function for the interpolation kernel
-
-        Args:
-            spatial_dim: Spatial dimension for which to obtain the kernel support
-
-        Returns:
-            Kernel support function for the kernel.
-        """
-
-    @abstractmethod
-    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
         """Is the kernel is interpolating.
 
         Args:
@@ -187,92 +80,229 @@ class BaseSeparableSampler(ISampler):
         """
 
     @abstractmethod
-    def _piece_edges(self, spatial_dim: int) -> Sequence[Number]:
-        """Defines the edge points of the piecewise smooth kernel."""
-
-    @abstractmethod
-    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
-        """Evaluate the interpolation kernel for the given 1d coordinates.
-
-        Kernels are defined as piecewise smooth functions and the piece index
-        should be used to determine the piece to evaluate. The method _piece_edges
-        is used to determine the edge points of the piecewise smooth kernel. Coordinates
-        are guaranteed to lie within the range for the given piece.
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        """Whether the edges are continuous between the pieces for the kernel, and
+        its derivatives.
 
         Args:
-            coordinates: 1d coordinates with shape (n_coordinates,)
-            spatial_dim: Spatial dimension for which to evaluate the kernel
-            piece_index: Index of the piecewise smooth kernel
+            spatial_dim: Spatial dimension for which to obtain the information.
+            device: Device for the edge continuity Tensor.
 
         Returns:
-            Interpolation kernel evaluated at the given coordinates.
+            Boolean Tensor with shape (any_size, n_edges) indicating whether the
+            edges are continuous between the pieces for the kernel, and its
+            derivatives. The first item in the second dimension is used for the
+            kernel itself, and the remaining items are used for the derivatives.
+            For derivatives after the last element, the last element is used.
         """
 
-    def _kernel(self, coordinates: Tensor, spatial_dim: int) -> Tensor:
+    def edge_continuity(self, spatial_dim: int, device: torch_device) -> Tensor:
+        """Whether the edges are continuous between the pieces
+
+        Args:
+            spatial_dim: Spatial dimension for which to obtain the information.
+            device: Device for the edge continuity Tensor.
+
+        Returns:
+            Whether the edges are continuous between the pieces for the kernel.
+        """
+        return self.edge_continuity_schedule(spatial_dim, device)[0]
+
+    @abstractmethod
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
+        """Defines the edge points of the piecewise smooth kernel.
+
+        Args:
+            spatial_dim: Spatial dimension for which to obtain the edge points.
+            dtype: Data type for the edge points.
+            device: Device for the edge points.
+
+        Returns:
+            Edge points of the piecewise smooth kernel, Tensor with shape
+            (n_edges,), and a boolean tensor indicating whether the edge is
+            continuous.
+        """
+
+    @abstractmethod
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
+        """Evaluate the interpolation kernel for the given coordinates.
+
+        Function values produced need to be valid only for coordinates within
+        the range of each piecewise smooth kernel. Each coordinate location
+        for each piece should be computed independently.
+
+
+        Args:
+            spatial_dim: Spatial dimension for which to evaluate the kernel.
+            coordinates: Coordinates with shape (n_pieces, n_coordinates)
+
+        Returns:
+            Interpolation kernel evaluated at the given coordinates for each of
+            the piecewise smooth functions. Tensor with shape (n_pieces, n_coordinates).
+        """
+
+    def derivative(self, spatial_dim: int) -> "PiecewiseKernelDefinition":
+        """Derivative of the piecewise kernel.
+
+        Args:
+            spatial_dim: Spatial dimension for which to obtain the derivative.
+
+        Returns:
+            Derivative of the piecewise kernel.
+        """
+        return PiecewiseKernelDerivative(self, spatial_dim)
+
+
+class PiecewiseKernelDerivative(PiecewiseKernelDefinition):
+    """Derivative of a piecewise kernel"""
+
+    def __init__(self, kernel: PiecewiseKernelDefinition, spatial_dim: int):
+        super().__init__()
+        self._kernel = kernel
+        self._spatial_dim = spatial_dim
+
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
+        if spatial_dim == self._spatial_dim:
+            return False
+        return self._kernel.is_interpolating_kernel(spatial_dim)
+
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        schedule = self._kernel.edge_continuity_schedule(spatial_dim, device)
+        if spatial_dim != self._spatial_dim or schedule.size(0) == 1:
+            return schedule
+        return self._kernel.edge_continuity_schedule(spatial_dim, device)[1:]
+
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
+        return self._kernel.piece_edges(spatial_dim, dtype, device)
+
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
+        if spatial_dim == self._spatial_dim:
+            return self._kernel_derivative(self._kernel.evaluate, spatial_dim, coordinates)
+        return self._kernel.evaluate(spatial_dim, coordinates)
+
+    def _kernel_derivative(
+        self,
+        kernel_function: Callable[[int, Tensor], Tensor],
+        spatial_dim: int,
+        coordinates: Tensor,
+    ) -> Tensor:
+        def partial_kernel_function(coordinates: Tensor) -> Tensor:
+            return -kernel_function(spatial_dim, coordinates)
+
+        _output, derivatives = vjp(
+            partial_kernel_function,
+            inputs=coordinates,
+            v=ones(coordinates.shape, device=coordinates.device, dtype=coordinates.dtype),
+            create_graph=coordinates.requires_grad,
+        )
+        return derivatives
+
+
+class SeparableSampler(ISampler):
+    """Sampler in voxel coordinates which can be implemented as a
+    separable convolution
+
+    Kernel is assumed to be defined as a piecewise smooth function. Note that
+    the custom kernel allows only for convolution based sampling.
+
+    Arguments:
+        kernel: Piecewise kernel definition for convolution-based sampling.
+        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
+        mask_extrapolated_regions: Whether to mask extrapolated regions.
+        conv_tol: Maximum allowed difference in coordinates
+            for using convolution-based sampling (the difference might be upper
+            bounded when doing the decision).
+        mask_tol: Maximum allowed weight for masked regions in a
+            sampled location to still consider it valid (non-masked).
+        limit_tol: The setting allows for tolerance for being on the different side
+            of discontinuous point than the limit direction for the limit to still
+            be computed based on the other side. Needed for numerically stable use
+            of limit directions.
+        limit_direction: Side of evaluation in discontinuous points (or in their
+            neighborhood if limit_tol > 0).
+    """
+
+    def __init__(
+        self,
+        kernel: PiecewiseKernelDefinition,
+        extrapolation_mode: str = "border",
+        mask_extrapolated_regions: bool = True,
+        conv_tol: float = 1e-3,
+        mask_tol: float = 1e-3,
+        limit_tol: float = 1e-3,
+        limit_direction: Union[
+            LimitDirection, Callable[[int], LimitDirection]
+        ] = LimitDirection.left(),
+    ) -> None:
+        if extrapolation_mode not in ("zeros", "border", "reflection"):
+            raise ValueError("Unknown extrapolation mode")
+        self._extrapolation_mode = extrapolation_mode
+        self._mask_extrapolated_regions = mask_extrapolated_regions
+        self._conv_tol = conv_tol
+        self._mask_tol = mask_tol
+        self._limit_tol = limit_tol
+        self._limit_direction = (
+            limit_direction.for_all_spatial_dims()
+            if isinstance(limit_direction, LimitDirection)
+            else limit_direction
+        )
+        self._kernel = kernel
+
+    def _evaluate_kernel(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
         limit_direction = self._limit_direction(spatial_dim)
         output: Tensor = zeros_like(coordinates)
-        edges = self._piece_edges(spatial_dim)
-        average_tolerance = limit_direction.average_tolerance
-        for pience_index in range(len(edges) - 1):
-            piece_start = edges[pience_index]
-            piece_end = edges[pience_index + 1]
-            if limit_direction == LimitDirection.left():
-                coordinate_mask = (coordinates > piece_start) & (coordinates <= piece_end)
-                output = (
-                    output
-                    + self._piecewise_kernel(
-                        coordinates.clamp(min=piece_start, max=piece_end), spatial_dim, pience_index
-                    )
-                    * coordinate_mask
-                )
-            elif limit_direction == LimitDirection.right():
-                coordinate_mask = (coordinates >= piece_start) & (coordinates < piece_end)
-                output = (
-                    output
-                    + self._piecewise_kernel(
-                        coordinates.clamp(min=piece_start, max=piece_end), spatial_dim, pience_index
-                    )
-                    * coordinate_mask
-                )
-            elif limit_direction == LimitDirection.average():
-                coordinate_mask = (coordinates > piece_start + average_tolerance) & (
-                    coordinates < piece_end - average_tolerance
-                )
-                coordinate_mask_edge = (
-                    (coordinates >= piece_start - average_tolerance)
-                    & (coordinates <= piece_start + average_tolerance)
-                ) | (
-                    (coordinates >= piece_end - average_tolerance)
-                    & (coordinates <= piece_end + average_tolerance)
-                )
-                kernel_values = self._piecewise_kernel(
-                    coordinates.clamp(min=piece_start, max=piece_end), spatial_dim, pience_index
-                )
-                output = (
-                    output
-                    + kernel_values * coordinate_mask
-                    + kernel_values * coordinate_mask_edge / 2
-                )
-
+        edges = self._kernel.piece_edges(
+            spatial_dim, dtype=coordinates.dtype, device=coordinates.device
+        )
+        edge_continuity = self._kernel.edge_continuity(spatial_dim, device=coordinates.device)
+        piece_start = edges[:-1]
+        piece_end = edges[1:]
+        piece_start_continuity = edge_continuity[:-1]
+        piece_end_continuity = edge_continuity[1:]
+        start_tolerance = self._limit_tol * (~piece_start_continuity)
+        end_tolerance = self._limit_tol * (~piece_end_continuity)
+        if limit_direction == LimitDirection.left():
+            coordinate_mask = (coordinates[None, :] >= (piece_start - start_tolerance)[:, None]) & (
+                coordinates[None, :] < (piece_end - end_tolerance)[:, None]
+            )
+        elif limit_direction == LimitDirection.right():
+            coordinate_mask = (coordinates[None, :] > (piece_start + start_tolerance)[:, None]) & (
+                coordinates[None, :] <= (piece_end + end_tolerance)[:, None]
+            )
+        elif limit_direction == LimitDirection.average():
+            coordinate_mask = (coordinates[None, :] > (piece_start + start_tolerance)[:, None]) & (
+                coordinates[None, :] < (piece_end - end_tolerance)[:, None]
+            )
+        else:
+            raise ValueError("Unknown limit direction")
+        evaluated = self._kernel.evaluate(
+            spatial_dim,
+            coordinates[None, :].clamp(min=piece_start[:, None], max=piece_end[:, None]),
+        )
+        output = (evaluated * coordinate_mask).sum(dim=0)
+        if limit_direction == LimitDirection.average():
+            coordinate_mask_edge = (
+                (coordinates[None, :] >= (piece_start - start_tolerance)[:, None])
+                & (coordinates[None, :] <= (piece_start + start_tolerance)[:, None])
+            ) | (
+                (coordinates[None, :] >= (piece_end - end_tolerance)[:, None])
+                & (coordinates[None, :] <= (piece_end + end_tolerance)[:, None])
+            )
+            output = output + (evaluated * coordinate_mask_edge / 2).sum(dim=0)
         return output
 
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: LimitDirection = LimitDirection.average(),
-    ) -> "GenericSeparableDerivativeSampler":
-        return GenericSeparableDerivativeSampler(
-            spatial_dim=spatial_dim,
-            limit_direction=limit_direction,
-            parent_piecewise_kernel=self._piecewise_kernel,
-            parent_piece_edges=self._piece_edges,
-            parent_kernel_support=self._kernel_support,
-            parent_is_interpolating_kernel=self._is_interpolating_kernel,
-            parent_limit_direction=self._limit_direction,
+    ) -> "SeparableSampler":
+        return SeparableSampler(
+            kernel=self._kernel.derivative(spatial_dim),
             extrapolation_mode=self._extrapolation_mode,
             mask_extrapolated_regions=self._mask_extrapolated_regions,
-            convolution_threshold=self._convolution_threshold,
-            mask_threshold=self._mask_threshold,
+            conv_tol=self._conv_tol,
+            mask_tol=self._mask_tol,
+            limit_tol=self._limit_tol,
+            limit_direction=self._limit_direction,
         )
 
     def __call__(self, volume: MappableTensor, coordinates: MappableTensor) -> MappableTensor:
@@ -326,19 +356,34 @@ class BaseSeparableSampler(ISampler):
         grid_affine_matrix = grid.affine_transformation.as_host_matrix()
         if grid_affine_matrix is None:
             return None
-        conv_parameters = obtain_conv_parameters(
+        kernel_support = []
+        is_zero_on_bounds = []
+        for spatial_dim in range(len(grid.spatial_shape)):
+            piece_edges = self._kernel.piece_edges(
+                spatial_dim, device=torch_device("cpu"), dtype=voxel_coordinates.dtype
+            )
+            edge_continuity = self._kernel.edge_continuity(
+                spatial_dim,
+                device=torch_device("cpu"),
+            )
+            kernel_support.append((piece_edges[0], piece_edges[-1]))
+            is_zero_on_bounds.append((edge_continuity[0], edge_continuity[-1]))
+        conv_parameters = calculate_convolutional_sampling_kernel_coordinates(
             volume_spatial_shape=volume.spatial_shape,
             grid_spatial_shape=grid.spatial_shape,
             grid_affine_matrix=grid_affine_matrix,
             is_interpolating_kernel=[
-                self._is_interpolating_kernel(spatial_dim)
-                for spatial_dim in range(len(grid.spatial_shape))
+                self._kernel.is_interpolating_kernel(spatial_dim)
+                for spatial_dim in range(len(volume.spatial_shape))
             ],
-            kernel_support=[
-                self._kernel_support(spatial_dim)(self._limit_direction(spatial_dim))
-                for spatial_dim in range(len(grid.spatial_shape))
+            kernel_support=kernel_support,
+            is_zero_on_bounds=is_zero_on_bounds,
+            limit_direction=[
+                self._limit_direction(spatial_dim).direction
+                for spatial_dim in range(len(volume.spatial_shape))
             ],
-            convolution_threshold=self._convolution_threshold,
+            conv_tol=self._conv_tol,
+            limit_tol=self._limit_tol,
             target_device=voxel_coordinates.device,
         )
         if conv_parameters is None:
@@ -350,14 +395,14 @@ class BaseSeparableSampler(ISampler):
             transposed_convolve,
             pre_pads_or_crops,
             post_pads_or_crops,
-            spatial_permutation,
+            inverse_spatial_permutation,
             flipped_spatial_dims,
         ) = conv_parameters
         conv_kernels = [
             (
-                self._kernel(
+                self._evaluate_kernel(
+                    spatial_dim,
                     kernel_coordinates,
-                    spatial_dim=spatial_permutation[spatial_dim],
                 )
                 if kernel_coordinates is not None
                 else None
@@ -391,7 +436,7 @@ class BaseSeparableSampler(ISampler):
             conv_paddings,
             pre_pads_or_crops,
             post_pads_or_crops,
-            spatial_permutation,
+            inverse_spatial_permutation,
             flipped_spatial_dims,
         )
 
@@ -426,20 +471,14 @@ class BaseSeparableSampler(ISampler):
             conv_paddings,
             pre_pads_or_crops,
             post_pads_or_crops,
-            spatial_permutation,
+            inverse_spatial_permutation,
             flipped_spatial_dims,
         ) = conv_parameters
         padding_mode, padding_value = self._padding_mode_and_value
 
         values = volume.generate_values()
-        interpolated_values = apply_flipping_permutation_to_volume(
-            values,
-            n_channel_dims=volume.n_channel_dims,
-            spatial_permutation=spatial_permutation,
-            flipped_spatial_dims=flipped_spatial_dims,
-        )
         interpolated_values = crop_and_then_pad_spatial(
-            interpolated_values,
+            values,
             pads_or_crops=pre_pads_or_crops,
             mode=padding_mode,
             value=padding_value,
@@ -461,6 +500,12 @@ class BaseSeparableSampler(ISampler):
             value=padding_value,
             n_channel_dims=volume.n_channel_dims,
         )
+        interpolated_values = apply_flips_and_permutation_to_volume(
+            interpolated_values,
+            n_channel_dims=volume.n_channel_dims,
+            spatial_permutation=inverse_spatial_permutation,
+            flipped_spatial_dims=flipped_spatial_dims,
+        )
         interpolated_mask: Optional[Tensor] = None
         if self._mask_extrapolated_regions:
             mask = volume.generate_mask(
@@ -468,14 +513,8 @@ class BaseSeparableSampler(ISampler):
                 cast_mask=False,
             )
             if mask is not None:
-                interpolated_mask = apply_flipping_permutation_to_volume(
-                    mask,
-                    n_channel_dims=volume.n_channel_dims,
-                    spatial_permutation=spatial_permutation,
-                    flipped_spatial_dims=flipped_spatial_dims,
-                )
                 interpolated_mask = crop_and_then_pad_spatial(
-                    interpolated_mask,
+                    mask,
                     pads_or_crops=pre_pads_or_crops,
                     mode="constant",
                     value=False,
@@ -493,7 +532,7 @@ class BaseSeparableSampler(ISampler):
                         padding=conv_paddings,
                         n_channel_dims=volume.n_channel_dims,
                     )
-                    <= self._mask_threshold
+                    <= self._mask_tol
                 )
                 interpolated_mask = crop_and_then_pad_spatial(
                     interpolated_mask,
@@ -501,6 +540,12 @@ class BaseSeparableSampler(ISampler):
                     mode="constant",
                     value=False,
                     n_channel_dims=volume.n_channel_dims,
+                )
+                interpolated_mask = apply_flips_and_permutation_to_volume(
+                    interpolated_mask,
+                    n_channel_dims=volume.n_channel_dims,
+                    spatial_permutation=inverse_spatial_permutation,
+                    flipped_spatial_dims=flipped_spatial_dims,
                 )
         return mappable(
             interpolated_values,
@@ -625,6 +670,24 @@ class BaseSeparableSampler(ISampler):
             n_channel_dims=volume.n_channel_dims,
         )
 
+    def sample_values(
+        self,
+        volume: Tensor,
+        coordinates: Tensor,
+    ) -> Tensor:
+        raise NotImplementedError(
+            "Sampling at arbitrary coordinates is not implemented for this sampler."
+        )
+
+    def sample_mask(
+        self,
+        mask: Tensor,
+        coordinates: Tensor,
+    ) -> Tensor:
+        raise NotImplementedError(
+            "Sampling at arbitrary coordinates is not implemented for this sampler."
+        )
+
     def inverse(
         self,
         coordinate_system: "CoordinateSystem",
@@ -646,138 +709,6 @@ class BaseSeparableSampler(ISampler):
         raise ValueError(
             "Inverse sampler has been currently implemented only for voxel "
             "displacements data format."
-        )
-
-
-class GenericSeparableDerivativeSampler(BaseSeparableSampler):
-    """Sampler for sampling spatial derivatives of a separable kernel
-    sampler.
-
-    Args:
-        spatial_dim: Spatial dimension over which the derivative is taken.
-        parent_left_limit_kernel: Parent sampler's left limit kernel function.
-        parent_right_limit_kernel: Parent sampler's right limit kernel function.
-        parent_kernel_support: Parent sampler's kernel support function.
-        parent_is_interpolating_kernel: Parent sampler's information on whether the kernel
-            is interpolating.
-        limit_direction: Direction for evaluating the kernel at discontinuous points.
-        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions: Whether to mask extrapolated regions.
-        convolution_threshold: Maximum allowed difference in coordinates
-            for using convolution-based sampling.
-        mask_threshold: Maximum allowed weight for masked regions in a
-            sampled location to still consider it valid (non-masked).
-
-    """
-
-    def __init__(
-        self,
-        spatial_dim: int,
-        limit_direction: LimitDirection,
-        parent_piecewise_kernel: Callable[[Tensor, int, int], Tensor],
-        parent_piece_edges: Callable[[int], Sequence[Number]],
-        parent_kernel_support: Callable[[int], ISeparableKernelSupport],
-        parent_is_interpolating_kernel: Callable[[int], bool],
-        parent_limit_direction: Callable[[int], LimitDirection],
-        extrapolation_mode: str = "border",
-        mask_extrapolated_regions: bool = True,
-        convolution_threshold: float = 1e-3,
-        mask_threshold: float = 1e-5,
-    ) -> None:
-        super().__init__(
-            extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions=mask_extrapolated_regions,
-            convolution_threshold=convolution_threshold,
-            mask_threshold=mask_threshold,
-            limit_direction=LimitDirection.modify(
-                parent_limit_direction, spatial_dim, limit_direction
-            ),
-        )
-        self._spatial_dim = spatial_dim
-        self._parent_piecewise_kernel = parent_piecewise_kernel
-        self._parent_piece_edges = parent_piece_edges
-        self._parent_kernel_support = parent_kernel_support
-        self._parent_is_interpolating_kernel = parent_is_interpolating_kernel
-
-    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        if spatial_dim == self._spatial_dim:
-            return self._parent_kernel_support(spatial_dim).derivative()
-        return self._parent_kernel_support(spatial_dim)
-
-    def derivative(
-        self,
-        spatial_dim: int,
-        limit_direction: LimitDirection = LimitDirection.average(),
-    ) -> "GenericSeparableDerivativeSampler":
-        return GenericSeparableDerivativeSampler(
-            spatial_dim=spatial_dim,
-            limit_direction=limit_direction,
-            parent_piecewise_kernel=self._piecewise_kernel,
-            parent_piece_edges=self._piece_edges,
-            parent_kernel_support=self._kernel_support,
-            parent_is_interpolating_kernel=self._is_interpolating_kernel,
-            parent_limit_direction=self._limit_direction,
-            extrapolation_mode=self._extrapolation_mode,
-            mask_extrapolated_regions=self._mask_extrapolated_regions,
-            convolution_threshold=self._convolution_threshold,
-            mask_threshold=self._mask_threshold,
-        )
-
-    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
-        if spatial_dim == self._spatial_dim:
-            return False
-        return self._parent_is_interpolating_kernel(spatial_dim)
-
-    def _piece_edges(self, spatial_dim: int) -> Sequence[Number]:
-        return self._parent_piece_edges(spatial_dim)
-
-    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
-        if spatial_dim == self._spatial_dim:
-            return self._kernel_derivative(
-                self._parent_piecewise_kernel, coordinates, spatial_dim, piece_index
-            )
-        return self._parent_piecewise_kernel(coordinates, spatial_dim, piece_index)
-
-    def _kernel_derivative(
-        self,
-        kernel_function: Callable[[Tensor, int, int], Tensor],
-        coordinates: Tensor,
-        spatial_dim: int,
-        piece_index: int,
-    ) -> Tensor:
-        def partial_kernel_function(coordinates: Tensor) -> Tensor:
-            return -kernel_function(coordinates, spatial_dim, piece_index)
-
-        _output, derivatives = vjp(
-            partial_kernel_function,
-            inputs=coordinates,
-            v=ones(coordinates.shape, device=coordinates.device, dtype=coordinates.dtype),
-            create_graph=coordinates.requires_grad,
-        )
-        return derivatives
-
-    def sample_values(
-        self,
-        volume: Tensor,
-        coordinates: Tensor,
-    ) -> Tensor:
-        raise NotImplementedError(
-            "Sampling derivatives at arbitrary coordinates is not currently implemented. "
-            "Contact the developers if you would like this to be included. Currently only "
-            "cases where the coordinates are on a regular grid with the axes "
-            "aligned with the spatial dimensions are supported (implementable with convolution)."
-        )
-
-    def sample_mask(
-        self,
-        mask: Tensor,
-        coordinates: Tensor,
-    ) -> Tensor:
-        raise NotImplementedError(
-            "Sampling derivatives at arbitrary coordinates is not currently implemented. "
-            "Contact the developers if you would like this to be included. Currently only "
-            "cases where the coordinates are on a regular grid with the axes "
-            "aligned with the spatial dimensions are supported (implementable with convolution)."
         )
 
 

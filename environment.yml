@@ -15,6 +15,7 @@ dependencies:
   - mypy
   - pip
   - pylint
+  - black
   - isort
   - twine
   - pip:
