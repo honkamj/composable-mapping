@@ -35,6 +35,11 @@ class sampling_cache(  # this is supposed to appear as function - pylint: disabl
             # code block with sampling operations
     ```
 
+    This context can be used to store the sampling parameters for the current
+    iteration and reuse them in the next iteration. If the same sampling
+    parameters are used in multiple iterations, this can save some computation
+    time, especially if CPU otherwise would be the bottleneck.
+
     Arguments:
         identifier: Optional identifier for the cache. If multiple caches are
             used alternately, they have to be distinguished by the identifier.
