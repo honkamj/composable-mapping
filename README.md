@@ -22,7 +22,7 @@ compared to more manual implementation.
 
 Install using pip by running the command
 
-    pip install git+https://github.com/honkamj/composable-mapping
+    pip install composable-mapping
 
 ## Requirements
 
