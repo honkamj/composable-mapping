@@ -1,12 +1,15 @@
 """Tests for the sampler module."""
 
 from abc import abstractmethod
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Sequence, Tuple
 from unittest import TestCase
 
 from torch import Tensor
+from torch import bool as torch_bool
+from torch import cat
 from torch import device as torch_device
-from torch import eye, float32, manual_seed, ones, randint, randn, randperm, tensor
+from torch import dtype as torch_dtype
+from torch import float32, linspace, manual_seed, ones, randn, stack, tensor, zeros
 from torch.testing import assert_close
 
 from composable_mapping import (
@@ -20,22 +23,16 @@ from composable_mapping import (
     mappable,
     voxel_grid,
 )
-from composable_mapping.affine_transformation import (
-    AffineTransformation,
-    HostAffineTransformation,
-)
-from composable_mapping.affine_transformation.matrix import embed_matrix
-from composable_mapping.sampler.base import (
-    BaseSeparableSampler,
-    ISeparableKernelSupport,
-    NthDegreeSymmetricKernelSupport,
-)
+from composable_mapping.affine_transformation import HostAffineTransformation
 from composable_mapping.sampler.convolution_sampling import (
-    apply_flipping_permutation_to_affine_matrix,
-    apply_flipping_permutation_to_volume,
-    obtain_normalizing_flipping_permutation,
+    apply_flips_and_permutation_to_volume,
+    normalize_sampling_grid,
 )
 from composable_mapping.sampler.interface import LimitDirection
+from composable_mapping.sampler.separable_sampler import (
+    PiecewiseKernelDefinition,
+    SeparableSampler,
+)
 
 
 class ICountingInterpolator(ISampler):
@@ -95,45 +92,57 @@ class CountingBicubicInterpolator(BicubicInterpolator, ICountingInterpolator):
         return super().sample_values(volume, coordinates)
 
 
-class _NonSymmetricInterpolator(BaseSeparableSampler):
-
-    def __init__(
-        self,
-    ) -> None:
-        super().__init__(
-            extrapolation_mode="border",
-            mask_extrapolated_regions=True,
-            convolution_threshold=1e-4,
-            mask_threshold=1e-5,
-            limit_direction=LimitDirection.left(),
-        )
-
-    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return NthDegreeSymmetricKernelSupport(
-            kernel_width=[4, 5, 6][spatial_dim],
-            degree=1,
-        )
-
-    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
+class _NonSymmetricKernel(PiecewiseKernelDefinition):
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
         return False
 
-    def _piece_edges(self, spatial_dim: int) -> Tuple[float, ...]:
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        return stack(
+            [
+                zeros(2, device=device, dtype=torch_bool),
+                ones(2, device=device, dtype=torch_bool),
+            ],
+            dim=0,
+        )
+
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
         if spatial_dim == 0:
-            return (-2.0, 2.0)
+            return linspace(-2.0, 2.0, steps=2, dtype=dtype, device=device)
         if spatial_dim == 1:
-            return (-2.5, 2.5)
+            return linspace(-2.5, 2.5, steps=2, dtype=dtype, device=device)
         if spatial_dim == 2:
-            return (-3.0, 3.0)
+            return linspace(-3.0, 3.0, steps=2, dtype=dtype, device=device)
         raise ValueError("Invalid spatial_dim.")
 
-    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
         return coordinates + 1
 
-    def sample_mask(self, mask: Tensor, coordinates: Tensor) -> Tensor:
-        raise NotImplementedError()
 
-    def sample_values(self, volume: Tensor, coordinates: Tensor) -> Tensor:
-        raise NotImplementedError()
+class _ShiftedLinearKernel(PiecewiseKernelDefinition):
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
+        return False
+
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        return stack(
+            [
+                ones(3, device=device, dtype=torch_bool),  # Original
+                zeros(3, device=device, dtype=torch_bool),  # First derivative
+                ones(3, device=device, dtype=torch_bool),  # Second derivative and beyond
+            ],
+            dim=0,
+        )
+
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
+        return linspace(0.0, 2.0, steps=3, dtype=dtype, device=device)
+
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
+        return stack(
+            [
+                1 + (coordinates[0, :] - 1),
+                1 - (coordinates[1, :] - 1),
+            ],
+            dim=0,
+        )
 
 
 class InterpolatorTest(TestCase):
@@ -440,6 +449,35 @@ class InterpolatorTest(TestCase):
         )
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
 
+    def test_non_central_kernel_consistency(self):
+        """Test consistency of non-central kernels with shifted linear kernel"""
+        grids = [
+            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu")) + 5.2,
+            0.25 * voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
+            + 5.2,
+        ]
+        for grid in grids:
+            test_volume = mappable(
+                randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")),
+            )
+            non_central_sampler = SeparableSampler(
+                kernel=_ShiftedLinearKernel(),
+                conv_tol=1e-4,
+                mask_tol=1e-5,
+            )
+            central_sampler = LinearInterpolator(
+                extrapolation_mode="border",
+                conv_tol=1e-4,
+                mask_tol=1e-5,
+            )
+            interpolated_non_central = non_central_sampler(test_volume, coordinates=grid)
+            interpolated_central = central_sampler(test_volume, coordinates=grid + 1)
+            assert_close(
+                interpolated_non_central.generate_values(),
+                interpolated_central.generate_values(),
+                check_layout=False,
+            )
+
     def test_permuted_consistency_with_non_symmetric_kernel_with_integer_translation(self):
         """Test that interpolation is consistent with a non-symmetric kernel and
         integer translation"""
@@ -478,8 +516,16 @@ class InterpolatorTest(TestCase):
         test_volume = mappable(
             randn((1, 1, 15, 14, 13), dtype=float32, device=torch_device("cpu")), mask=mask
         )
-        interpolated_1 = _NonSymmetricInterpolator()(test_volume, coordinates=grid_1)
-        interpolated_2 = _NonSymmetricInterpolator()(test_volume, coordinates=grid_2)
+        non_symmetric_sampler = SeparableSampler(
+            kernel=_NonSymmetricKernel(),
+            extrapolation_mode="border",
+            mask_extrapolated_regions=True,
+            conv_tol=1e-4,
+            mask_tol=1e-5,
+            limit_direction=LimitDirection.left(),
+        )
+        interpolated_1 = non_symmetric_sampler(test_volume, coordinates=grid_1)
+        interpolated_2 = non_symmetric_sampler(test_volume, coordinates=grid_2)
         assert_close(
             interpolated_1.generate_values(), interpolated_2.generate_values(), check_layout=False
         )
@@ -524,8 +570,16 @@ class InterpolatorTest(TestCase):
         test_volume = mappable(
             randn((1, 1, 15, 14, 13), dtype=float32, device=torch_device("cpu")), mask=mask
         )
-        interpolated_1 = _NonSymmetricInterpolator()(test_volume, coordinates=grid_1)
-        interpolated_2 = _NonSymmetricInterpolator()(test_volume, coordinates=grid_2)
+        non_symmetric_sampler = SeparableSampler(
+            kernel=_NonSymmetricKernel(),
+            extrapolation_mode="border",
+            mask_extrapolated_regions=True,
+            conv_tol=1e-4,
+            mask_tol=1e-5,
+            limit_direction=LimitDirection.left(),
+        )
+        interpolated_1 = non_symmetric_sampler(test_volume, coordinates=grid_1)
+        interpolated_2 = non_symmetric_sampler(test_volume, coordinates=grid_2)
         assert_close(
             interpolated_1.generate_values(),
             interpolated_2.generate_values(),
@@ -567,69 +621,41 @@ class InterpolatorTest(TestCase):
                     )
 
 
-class FlippingPermutationTest(TestCase):
-    """Tests for flipping permutation"""
+class NormalizeSamplingGridTest(TestCase):
+    """Tests for normalizing sampling grid"""
 
-    def test_flipping_permutation(self):
-        """Test that one ends in same coordinate with permuting the volume and
-        applying the transformation"""
-        for _ in range(100):
-            spatial_permutation = randperm(5).tolist()
-            flipped_spatial_dims = randperm(5)[: randint(high=5, size=tuple()).item()].tolist()
-            matrix = eye(5, 6, dtype=float32)
-            flipping_permutation_matrix = apply_flipping_permutation_to_affine_matrix(
-                matrix=matrix[None],
-                spatial_permutation=spatial_permutation,
-                flipped_spatial_dims=flipped_spatial_dims,
-                volume_spatial_shape=[5, 6, 7, 8, 9],
-            )[0]
-            transformation = AffineTransformation(embed_matrix(flipping_permutation_matrix, (6, 6)))
+    def test_normalize_sampling_grid(self):
+        """Test normalize_sampling_grid"""
+        affine_matrix = tensor(
+            [
+                [0, -2.0, 0.0, -5.2],
+                [3.0, 0.0, 0.0, 3.7],
+                [0.0, 0.0, -1.0, 2.1],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        grid_shape = (3, 4, 5)
+        (
+            normalized_grid_shape,
+            normalized_affine_matrix,
+            inverse_spatial_permutation,
+            flipped_spatial_dims,
+        ) = normalize_sampling_grid(grid_shape, affine_matrix)
 
-            test_value = tensor(
-                [
-                    randint(high=5, size=tuple(), dtype=float32).item(),
-                    randint(high=6, size=tuple(), dtype=float32).item(),
-                    randint(high=7, size=tuple(), dtype=float32).item(),
-                    randint(high=8, size=tuple(), dtype=float32).item(),
-                    randint(high=9, size=tuple(), dtype=float32).item(),
-                ],
-                dtype=float32,
-            )
+        assert_close(
+            normalized_affine_matrix[0, :, :-1].diag().diag(), normalized_affine_matrix[0, :, :-1]
+        )
+        assert_close(normalized_affine_matrix[0, :, :-1].abs(), normalized_affine_matrix[0, :, :-1])
 
-            grid = voxel_grid(
-                (5, 6, 7, 8, 9), dtype=float32, device=torch_device("cpu")
-            ).generate_values()
+        grid_1 = Affine.from_matrix(affine_matrix)(voxel_grid(grid_shape)).generate_values()
+        grid_2 = Affine.from_matrix(
+            cat((normalized_affine_matrix, tensor([0.0, 0.0, 0.0, 1.0])[None, None]), dim=1)
+        )(voxel_grid(normalized_grid_shape)).generate_values()
 
-            assert_close(
-                grid[(...,) + tuple(test_value.long().tolist())],
-                apply_flipping_permutation_to_volume(
-                    grid,
-                    n_channel_dims=1,
-                    spatial_permutation=spatial_permutation,
-                    flipped_spatial_dims=flipped_spatial_dims,
-                )[(...,) + tuple(transformation(test_value).long().tolist())],
-            )
-
-    def test_flipping_permutation_normalization(self):
-        """Test that one ends in same coordinate with permuting the volume and
-        applying the transformation"""
-        for _ in range(100):
-            random_permutation = randperm(5)
-            matrix = eye(6, dtype=float32)
-            random_flips = 2 * randint(0, 2, (5,), dtype=float32) - 1
-            matrix[:-1, :-1] = random_flips * matrix[:-1, :-1]
-            matrix[:-1, :-1] = matrix[:-1, :-1][random_permutation.long()]
-            spatial_permutation, flipped_spatial_dims = obtain_normalizing_flipping_permutation(
-                matrix[:-1]
-            )
-            normalized_matrix = apply_flipping_permutation_to_affine_matrix(
-                matrix=matrix[None, :-1],
-                spatial_permutation=spatial_permutation,
-                flipped_spatial_dims=flipped_spatial_dims,
-                volume_spatial_shape=[5, 6, 7, 8, 9],
-            )[0]
-            normalized_matrix = embed_matrix(normalized_matrix, (6, 6))
-            assert_close(
-                normalized_matrix[:-1, :-1],
-                eye(5, dtype=float32),
-            )
+        back_transformed_grid_2 = apply_flips_and_permutation_to_volume(
+            grid_2,
+            n_channel_dims=1,
+            spatial_permutation=inverse_spatial_permutation,
+            flipped_spatial_dims=flipped_spatial_dims,
+        )
+        assert_close(grid_1, back_transformed_grid_2)

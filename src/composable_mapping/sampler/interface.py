@@ -17,14 +17,12 @@ class LimitDirection:
     Arguments:
         direction: Direction of the limit. Can be one of "left", "right", or
             "average".
-        average_tolerance: See: `LimitDirection.average`.
     """
 
-    def __init__(self, direction: str, average_tolerance: float = 0.0) -> None:
+    def __init__(self, direction: str) -> None:
         if direction not in ["left", "right", "average"]:
             raise ValueError("Invalid direction")
         self.direction = direction
-        self.average_tolerance = average_tolerance
 
     @classmethod
     def left(cls) -> "LimitDirection":
@@ -37,15 +35,9 @@ class LimitDirection:
         return cls("right")
 
     @classmethod
-    def average(cls, tolerance: float = 1e-3) -> "LimitDirection":
-        """Average of left and right limit directions.
-
-        Args:
-            tolerance: How close to the edge between piecewise smooth
-                functions the sampling location has to be to compute the output
-                as average of both sides.
-        """
-        return cls("average", tolerance)
+    def average(cls) -> "LimitDirection":
+        """Average of left and right limit directions."""
+        return cls("average")
 
     def for_all_spatial_dims(self) -> Callable[[int], "LimitDirection"]:
         """Obtain callable with spatial dimension as input, and the
@@ -55,26 +47,6 @@ class LimitDirection:
         for all spatial dimensions.
         """
         return _SameLimitDirectionForAllSpatialDims(limit_direction=self)
-
-    @staticmethod
-    def modify(
-        old_limit_directions: Callable[[int], "LimitDirection"],
-        spatial_dim: int,
-        new_limit_direction: "LimitDirection",
-    ) -> Callable[[int], "LimitDirection"]:
-        """Modify the limit direction for a specific spatial dimension.
-
-        Args:
-            limit_directions: Callable that returns the limit direction for
-                each spatial dimension.
-            spatial_dim: Spatial dimension to modify.
-            new_limit_direction: New limit direction for the spatial dimension.
-        """
-        return _ModifiedLimitDirections(
-            old_limit_directions=old_limit_directions,
-            spatial_dim=spatial_dim,
-            new_limit_direction=new_limit_direction,
-        )
 
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, LimitDirection):
@@ -91,25 +63,6 @@ class _SameLimitDirectionForAllSpatialDims:
 
     def __call__(self, _: int) -> "LimitDirection":
         return self.limit_direction
-
-
-class _ModifiedLimitDirections:
-    def __init__(
-        self,
-        old_limit_directions: Callable[[int], "LimitDirection"],
-        spatial_dim: int,
-        new_limit_direction: LimitDirection,
-    ) -> None:
-        self.old_limit_directions = old_limit_directions
-        self.spatial_dim = spatial_dim
-        self.new_limit_direction = new_limit_direction
-
-    def __call__(self, spatial_dim: int) -> LimitDirection:
-        return (
-            self.new_limit_direction
-            if spatial_dim == self.spatial_dim
-            else self.old_limit_directions(spatial_dim)
-        )
 
 
 class DataFormat:
@@ -176,13 +129,11 @@ class ISampler(ABC):
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: LimitDirection = LimitDirection.left(),
     ) -> "ISampler":
         """Obtain sampler for sampling derivatives corresponding to the current sampler.
 
         Args:
             spatial_dim: Spatial dimension along which to compute the derivative.
-            limit_direction: Direction in which to compute the derivative.
 
         Returns:
             Sampler for sampling derivatives.

@@ -571,6 +571,11 @@ class MappableTensor(TensorLike):
             n_channel_dims=n_channel_dims,
         )
 
+    def __rmul__(self, other: Union[Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, (Tensor, int, float)):
+            return self.__mul__(other)
+        return NotImplemented
+
     def __mul__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
         if isinstance(other, MappableTensor):
             return self._mul_mappable_tensor(other)
@@ -622,6 +627,11 @@ class MappableTensor(TensorLike):
             mask=mask,
             n_channel_dims=n_channel_dims,
         )
+
+    def __radd__(self, other: Union[Number, Tensor]) -> "MappableTensor":
+        if isinstance(other, (Tensor, int, float)):
+            return self.__add__(other)
+        return NotImplemented
 
     def __add__(self, other: Union["MappableTensor", Number, Tensor]) -> "MappableTensor":
         if isinstance(other, MappableTensor):

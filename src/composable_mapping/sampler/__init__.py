@@ -1,14 +1,6 @@
 """Sampler module for sampling volumes defined on regular grids."""
 
 from .b_spline import CubicSplineSampler
-from .base import (
-    BaseSeparableSampler,
-    EnumeratedSamplingParameterCache,
-    GenericSeparableDerivativeSampler,
-    ISeparableKernelSupport,
-    NthDegreeSymmetricKernelSupport,
-    no_sampling_parameter_cache,
-)
 from .default import (
     clear_default_sampler,
     default_sampler,
@@ -18,26 +10,32 @@ from .default import (
 )
 from .interface import DataFormat, ISampler, LimitDirection
 from .interpolator import BicubicInterpolator, LinearInterpolator, NearestInterpolator
+from .sampling_cache import clear_sampling_cache, no_sampling_cache, sampling_cache
 from .scaling_and_squaring import ScalingAndSquaring
+from .separable_sampler import (
+    PiecewiseKernelDefinition,
+    PiecewiseKernelDerivative,
+    SeparableSampler,
+)
 
 __all__ = [
-    "BaseSeparableSampler",
+    "SeparableSampler",
     "BicubicInterpolator",
     "CubicSplineSampler",
     "DataFormat",
-    "EnumeratedSamplingParameterCache",
-    "GenericSeparableDerivativeSampler",
     "ISampler",
-    "ISeparableKernelSupport",
     "LimitDirection",
     "LinearInterpolator",
     "NearestInterpolator",
+    "PiecewiseKernelDefinition",
+    "PiecewiseKernelDerivative",
     "ScalingAndSquaring",
-    "NthDegreeSymmetricKernelSupport",
+    "clear_sampling_cache",
     "clear_default_sampler",
     "default_sampler",
     "get_default_sampler",
     "get_sampler",
-    "no_sampling_parameter_cache",
+    "no_sampling_cache",
+    "sampling_cache",
     "set_default_sampler",
 ]

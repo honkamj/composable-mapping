@@ -1,6 +1,6 @@
 """Samplers for inverting coordinate mappings."""
 
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from deformation_inversion_layer import (
     DeformationInversionArguments,
@@ -13,7 +13,7 @@ from torch import dtype as torch_dtype
 from composable_mapping.mappable_tensor import MappableTensor, mappable
 from composable_mapping.util import combine_optional_masks
 
-from .interface import DataFormat, ISampler, LimitDirection
+from .interface import DataFormat, ISampler
 
 if TYPE_CHECKING:
     from composable_mapping.coordinate_system import CoordinateSystem
@@ -90,9 +90,6 @@ class FixedPointInverseSampler(ISampler):
     def derivative(
         self,
         spatial_dim: int,
-        limit_direction: Union[
-            LimitDirection, Callable[[int], LimitDirection]
-        ] = LimitDirection.average(),
     ) -> "ISampler":
         raise NotImplementedError(
             "Derivative sampling is not implemented for the inverse sampler. "

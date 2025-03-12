@@ -14,8 +14,10 @@ dependencies:
   - mypy
   - pip
   - pylint
+  - black
   - isort
   - twine
   - pip:
     - nibabel
+    - pdoc
     - deformation-inversion-layer >= 1.1.2

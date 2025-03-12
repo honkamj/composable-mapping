@@ -1,38 +1,63 @@
 """B-spline samplers"""
 
-from typing import Tuple
-
 from torch import Tensor
+from torch import bool as torch_bool
+from torch import cat
+from torch import device as torch_device
+from torch import dtype as torch_dtype
+from torch import linspace, ones, stack, zeros
 
-from composable_mapping.sampler.base import ISeparableKernelSupport
-
-from .base import BaseSeparableSampler, NthDegreeSymmetricKernelSupport
-from .interface import LimitDirection
+from .separable_sampler import PiecewiseKernelDefinition, SeparableSampler
 
 
-class CubicSplineSampler(BaseSeparableSampler):
+class CubicSplineKernel(PiecewiseKernelDefinition):
+    """Kernel for Cubic splines."""
+
+    def is_interpolating_kernel(self, spatial_dim: int) -> bool:
+        return False
+
+    def edge_continuity_schedule(self, spatial_dim: int, device: torch_device) -> Tensor:
+        return cat(
+            [
+                ones(  # Original, and first and second derivative
+                    (3, 5), device=device, dtype=torch_bool
+                ),
+                zeros((1, 5), device=device, dtype=torch_bool),  # Third derivative
+                ones((1, 5), device=device, dtype=torch_bool),  # Fourth derivative and beyond
+            ],
+            dim=0,
+        )
+
+    def piece_edges(self, spatial_dim: int, dtype: torch_dtype, device: torch_device) -> Tensor:
+        return linspace(-2.0, 2.0, 5, dtype=dtype, device=device)
+
+    def evaluate(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
+        return stack(
+            [
+                -((-coordinates[0, :] - 2) ** 3) / 6,
+                2 / 3 + (-0.5 * coordinates[1, :] - 1) * coordinates[1, :] ** 2,
+                2 / 3 + (0.5 * coordinates[2, :] - 1) * coordinates[2, :] ** 2,
+                -((coordinates[3, :] - 2) ** 3) / 6,
+            ],
+            dim=0,
+        )
+
+
+class CubicSplineSampler(SeparableSampler):
     """Sampling based on regularly spaced cubic spline control points in voxel
     coordinates
 
     Arguments:
-        prefilter: Whether to prefilter the volume before sampling making
-            the sampler an interpolator. Currently not implemented.
-        extrapolation_mode: Extrapolation mode for out-of-bound coordinates.
-        mask_extrapolated_regions: Whether to mask extrapolated regions.
-        convolution_threshold: Maximum allowed difference in coordinates
-            for using convolution-based sampling (the difference might be upper
-            bounded when doing the decision).
-        mask_threshold: Maximum allowed weight for masked regions in a
-            sampled location to still consider it valid (non-masked).
+        prefilter: Whether to prefilter the volume before sampling. Currently
+            not implemented.
+
+    For the other arguments see `.separable_sampler.SeparableSampler`.
     """
 
     def __init__(
         self,
         prefilter: bool = False,
-        extrapolation_mode: str = "border",
-        mask_extrapolated_regions: bool = True,
-        convolution_threshold: float = 1e-3,
-        mask_threshold: float = 1e-5,
+        **kwargs,
     ) -> None:
         if prefilter:
             raise NotImplementedError(
@@ -40,48 +65,6 @@ class CubicSplineSampler(BaseSeparableSampler):
                 "Contact the developers if you would want it included."
             )
         super().__init__(
-            extrapolation_mode=extrapolation_mode,
-            mask_extrapolated_regions=mask_extrapolated_regions,
-            convolution_threshold=convolution_threshold,
-            mask_threshold=mask_threshold,
-            limit_direction=LimitDirection.right(),
-        )
-        self._mask_threshold = mask_threshold
-        self._prefilter = prefilter
-
-    def _kernel_support(self, spatial_dim: int) -> ISeparableKernelSupport:
-        return NthDegreeSymmetricKernelSupport(kernel_width=4.0, degree=3)
-
-    def _is_interpolating_kernel(self, spatial_dim: int) -> bool:
-        return self._prefilter
-
-    def _piece_edges(self, spatial_dim: int) -> Tuple[int, ...]:
-        return (-2, -1, 0, 1, 2)
-
-    def _piecewise_kernel(self, coordinates: Tensor, spatial_dim: int, piece_index: int) -> Tensor:
-        abs_coordinates = coordinates.abs()
-        if piece_index in (0, 3):
-            return -((abs_coordinates - 2) ** 3) / 6
-        if piece_index in (1, 2):
-            return 2 / 3 + (0.5 * abs_coordinates - 1) * abs_coordinates**2
-        raise ValueError(f"Invalid piece index {piece_index}")
-
-    def sample_values(
-        self,
-        volume: Tensor,
-        coordinates: Tensor,
-    ) -> Tensor:
-        raise NotImplementedError(
-            "Sampling volume at arbitrary coordinates is not currently implemented. "
-            "Contact the developers if you would want it included."
-        )
-
-    def sample_mask(
-        self,
-        mask: Tensor,
-        coordinates: Tensor,
-    ) -> Tensor:
-        raise NotImplementedError(
-            "Sampling mask at arbitrary coordinates is not currently implemented. "
-            "Contact the developers if you would want it included."
+            kernel=CubicSplineKernel(),
+            **kwargs,
         )
