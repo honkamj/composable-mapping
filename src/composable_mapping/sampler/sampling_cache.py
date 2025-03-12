@@ -18,7 +18,8 @@ def get_cached_sampling_parameters(func: Callable[[], Any]) -> Any:
     """
     if _CACHE_VARIABLES.active_stack:
         cache = _CACHE_VARIABLES.active_stack[-1]
-        return cache.get_sampling_parameters(func)
+        if cache is not None:
+            return cache.get_sampling_parameters(func)
     return func()
 
 
