@@ -12,6 +12,8 @@ Install using pip by running the command
 
 - `Python 3.8+`
 - `PyTorch 1.10+`
+- `nibabel`
+- `matplotlib` (optional)
 
 ## Source code
 

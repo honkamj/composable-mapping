@@ -28,6 +28,8 @@ Install using pip by running the command
 
 - `Python 3.8+`
 - `PyTorch 2.0+`
+- `nibabel`
+- `matplotlib` (optional)
 
 ## Documentation
 
