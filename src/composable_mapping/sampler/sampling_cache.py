@@ -70,10 +70,10 @@ class no_sampling_cache(  # this is supposed to appear as function - pylint: dis
     """Context manager for locally disabling sampling parameter cache."""
 
     def __enter__(self) -> None:
-        _CACHE_VARIABLES.stack.append(None)
+        _CACHE_VARIABLES.active_stack.append(None)
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        _CACHE_VARIABLES.stack.pop()
+        _CACHE_VARIABLES.active_stack.pop()
 
 
 def clear_sampling_cache(identifier: Optional[str] = None) -> None:
