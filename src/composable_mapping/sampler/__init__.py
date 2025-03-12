@@ -10,13 +10,12 @@ from .default import (
 )
 from .interface import DataFormat, ISampler, LimitDirection
 from .interpolator import BicubicInterpolator, LinearInterpolator, NearestInterpolator
+from .sampling_cache import clear_sampling_cache, no_sampling_cache, sampling_cache
 from .scaling_and_squaring import ScalingAndSquaring
 from .separable_sampler import (
-    EnumeratedSamplingParameterCache,
     PiecewiseKernelDefinition,
     PiecewiseKernelDerivative,
     SeparableSampler,
-    no_sampling_parameter_cache,
 )
 
 __all__ = [
@@ -24,7 +23,6 @@ __all__ = [
     "BicubicInterpolator",
     "CubicSplineSampler",
     "DataFormat",
-    "EnumeratedSamplingParameterCache",
     "ISampler",
     "LimitDirection",
     "LinearInterpolator",
@@ -32,10 +30,12 @@ __all__ = [
     "PiecewiseKernelDefinition",
     "PiecewiseKernelDerivative",
     "ScalingAndSquaring",
+    "clear_sampling_cache",
     "clear_default_sampler",
     "default_sampler",
     "get_default_sampler",
     "get_sampler",
-    "no_sampling_parameter_cache",
+    "no_sampling_cache",
+    "sampling_cache",
     "set_default_sampler",
 ]

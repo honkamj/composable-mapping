@@ -42,7 +42,8 @@ class sampling_cache(  # this is supposed to appear as function - pylint: disabl
 
     Arguments:
         identifier: Optional identifier for the cache. If multiple caches are
-            used alternately, they have to be distinguished by the identifier.
+            used, they have to be distinguished by the identifier (nesting
+            caches is fine without an identifier).
     """
 
     def __init__(self, identifier: Optional[str] = None) -> None:
@@ -75,7 +76,7 @@ class no_sampling_cache(  # this is supposed to appear as function - pylint: dis
         _CACHE_VARIABLES.stack.pop()
 
 
-def clear_cache(identifier: Optional[str] = None) -> None:
+def clear_sampling_cache(identifier: Optional[str] = None) -> None:
     """Clear the cache for the given identifier.
 
     Active caches are not affected.

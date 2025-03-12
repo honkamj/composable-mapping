@@ -32,7 +32,7 @@ from composable_mapping.util import (
 
 from .convolution_sampling import (
     apply_flips_and_permutation_to_volume,
-    calculate_convolutional_sampling_kernel_coordinates,
+    calculate_convolutional_sampling_parameters,
 )
 from .interface import DataFormat, ISampler, LimitDirection
 from .inverse import FixedPointInverseSampler
@@ -369,7 +369,7 @@ class SeparableSampler(ISampler):
             )
             kernel_support.append((piece_edges[0], piece_edges[-1]))
             is_zero_on_bounds.append((edge_continuity[0], edge_continuity[-1]))
-        conv_parameters = calculate_convolutional_sampling_kernel_coordinates(
+        conv_parameters = calculate_convolutional_sampling_parameters(
             volume_spatial_shape=volume.spatial_shape,
             grid_spatial_shape=grid.spatial_shape,
             grid_affine_matrix=grid_affine_matrix,

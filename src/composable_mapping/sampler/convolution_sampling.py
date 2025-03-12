@@ -133,7 +133,7 @@ def _infer_kernel_min_and_max_coordinates(
 
 
 @script
-def calculate_convolutional_sampling_parameters(
+def calculate_convolutional_sampling_args(
     grid_spatial_shape: List[int],
     grid_affine_matrix: Tensor,
     is_interpolating_kernel: List[bool],
@@ -245,7 +245,7 @@ def _optionally_inclusive_floor(
 
 
 @script
-def calculate_convolutional_sampling_kernel_coordinates(
+def calculate_convolutional_sampling_parameters(
     volume_spatial_shape: List[int],
     grid_spatial_shape: List[int],
     grid_affine_matrix: Tensor,
@@ -300,7 +300,7 @@ def calculate_convolutional_sampling_kernel_coordinates(
         flipped_spatial_dims,
     ) = normalized_grid_parameters
 
-    conv_sampling_parameters = calculate_convolutional_sampling_parameters(
+    conv_sampling_parameters = calculate_convolutional_sampling_args(
         grid_spatial_shape=grid_spatial_shape,
         grid_affine_matrix=grid_affine_matrix,
         is_interpolating_kernel=is_interpolating_kernel,
