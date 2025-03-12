@@ -10,7 +10,7 @@ from .composable_mapping import (
     SamplableVolume,
 )
 from .mappable_tensor import MappableTensor, mappable, stack_mappable_tensors
-from .sampler import DataFormat, ISampler, LimitDirection, get_sampler
+from .sampler import DataFormat, ISampler, get_sampler
 from .util import (
     broadcast_tensors_in_parts,
     get_batch_shape,
@@ -23,7 +23,6 @@ from .util import (
 def estimate_spatial_jacobian_matrices(
     mapping: GridComposableMapping,
     target: Optional[ICoordinateSystemContainer] = None,
-    limit_direction: Union[LimitDirection, Sequence[LimitDirection]] = LimitDirection.average(),
     sampler: Optional[ISampler] = None,
 ) -> MappableTensor:
     """Estimate spatial Jacobian matrices of a grid composable mapping.
@@ -34,9 +33,6 @@ def estimate_spatial_jacobian_matrices(
     Args:
         mapping: Grid composable mapping to estimate the Jacobian matrices for.
         target: Target locations at which to estimate the Jacobian matrices.
-        limit_direction: Direction in which to compute the derivatives, e.g. average
-            and LinearInterpolator corresponds to central finite differences when
-            estimated at the grid points.
         sampler: Sampler to use for the derivative estimation, e.g. LinearInterpolator
             corresponds to finite differences.
 
@@ -52,13 +48,11 @@ def estimate_spatial_jacobian_matrices(
         data_format=DataFormat.world_coordinates(),
     )
     n_dims = len(target.coordinate_system.spatial_shape)
-    if isinstance(limit_direction, LimitDirection):
-        limit_direction = [limit_direction] * n_dims
     sampled_jacobians = stack_mappable_tensors(
         *(
             resampled_mapping.modify_sampler(
                 sampler.derivative(
-                    spatial_dim=spatial_dim, limit_direction=limit_direction[spatial_dim]
+                    spatial_dim=spatial_dim,
                 ),
             ).sample_to(target)
             for spatial_dim in range(n_dims)
@@ -121,7 +115,6 @@ def estimate_coordinate_mapping_spatial_derivatives(
     coordinate_mapping: GridComposableMapping,
     spatial_dim: int,
     target: Optional[ICoordinateSystemContainer] = None,
-    limit_direction: LimitDirection = LimitDirection.average(),
     sampler: Optional[ISampler] = None,
 ) -> MappableTensor:
     """Estimate spatial derivative with respect to coordinates which are rotated
@@ -152,7 +145,7 @@ def estimate_coordinate_mapping_spatial_derivatives(
             coordinate_mapping.sample(data_format=DataFormat.voxel_coordinates()),
             coordinate_system=coordinate_mapping.coordinate_system,
             data_format=DataFormat.world_coordinates(),
-            sampler=sampler.derivative(spatial_dim=spatial_dim, limit_direction=limit_direction),
+            sampler=sampler.derivative(spatial_dim=spatial_dim),
         ).sample_to(target)
         * mappable(grid_spacing)
         / mappable(grid_spacing[..., None, spatial_dim])
