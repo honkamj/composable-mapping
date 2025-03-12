@@ -596,38 +596,29 @@ class SeparableSampler(ISampler):
         transposed: bool,
         n_channel_dims: int,
     ) -> Tensor:
-        batch_shape, channels_shape, spatial_shape = split_shape(
-            volume.shape,
-            n_channel_dims=n_channel_dims,
-        )
-        n_spatial_dims = len(spatial_shape)
-        full_stride = [1] * n_spatial_dims
-        full_padding = [0] * n_spatial_dims
-        full_kernel_shape = [1] * n_spatial_dims
-        for spatial_dim, dim_stride, dim_padding, dim_kernel_size in zip(
-            spatial_dims, stride, padding, kernel.shape
-        ):
-            full_stride[spatial_dim] = dim_stride
-            full_padding[spatial_dim] = dim_padding
-            full_kernel_shape[spatial_dim] = dim_kernel_size
-        kernel = kernel.view(*full_kernel_shape)
-        volume = volume.reshape(-1, 1, *spatial_shape)
+        n_kernel_dims = kernel.ndim
+        volume_spatial_dims = get_spatial_dims(volume.ndim, n_channel_dims)
+        convolved_dims = [volume_spatial_dims[dim] for dim in spatial_dims]
+        last_dims = list(range(-n_kernel_dims, 0))
+        volume = volume.moveaxis(convolved_dims, last_dims)
+        convolved_dims_excluded_shape = volume.shape[:-n_kernel_dims]
+        volume = volume.reshape(-1, 1, *volume.shape[-n_kernel_dims:])
         conv_function = (
-            cls._conv_nd_function(n_spatial_dims)
+            cls._conv_nd_function(n_kernel_dims)
             if not transposed
-            else cls._conv_transpose_nd_function(n_spatial_dims)
+            else cls._conv_transpose_nd_function(n_kernel_dims)
         )
         convolved = conv_function(  # pylint: disable=not-callable
             volume,
             kernel[None, None],
             bias=None,
-            stride=full_stride,
-            padding=full_padding,
+            stride=stride,
+            padding=padding,
         )
         convolved = convolved.reshape(
-            *batch_shape, *channels_shape, *convolved.shape[-n_spatial_dims:]
+            *convolved_dims_excluded_shape, *convolved.shape[-n_kernel_dims:]
         )
-        return convolved
+        return convolved.moveaxis(last_dims, convolved_dims)
 
     @staticmethod
     def _conv_nd_function(n_dims: int) -> Callable[..., Tensor]:
