@@ -1,6 +1,6 @@
 [project]
 name = "composable-mapping"
-version = "0.1.3"
+version = "0.1.4"
 authors = [
   { name="Joel Honkamaa" },
 ]
@@ -35,4 +35,4 @@ license = {file = "LICENSE"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"deformation_inversion_layer" = ["py.typed"]
+"composable_mapping" = ["py.typed", "**/*.cpp", "**/*.cu"]
