@@ -35,4 +35,4 @@ license = {file = "LICENSE"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"deformation_inversion_layer" = ["py.typed", "*.cpp", "*.cu"]
+"composable_mapping" = ["py.typed", "**/*.cpp", "**/*.cu"]
