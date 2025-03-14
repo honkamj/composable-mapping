@@ -1,10 +1,15 @@
 """Dense deformations utility functions."""
 
+from importlib import import_module
 from typing import List, Optional, Tuple
 
 from torch import Tensor, tensor
 from torch.jit import script
 from torch.nn.functional import grid_sample
+
+from ._second_order_differentiable_grid_sample.grid_sample import (
+    grid_sample as second_order_differentiable_grid_sample,
+)
 
 
 def interpolate(
@@ -12,6 +17,7 @@ def interpolate(
     grid: Tensor,
     mode: str = "bilinear",
     padding_mode: str = "border",
+    second_order_differentiable: bool = False,
 ) -> Tensor:
     """Interpolate in voxel coordinates.
 
@@ -19,10 +25,15 @@ def interpolate(
         volume: Tensor with shape
             (*batch_shape , *channels_shape, *spatial_shape).
         grid: Tensor with shape (*batch_shape, n_spatial_dims, *target_shape).
+        mode: Interpolation mode. Default is "bilinear".
+        padding_mode: Padding mode. Default is "border".
+        second_order_differentiable: Whether to use second order differentiable interpolation.
 
     Returns:
         Tensor with shape (*broadcasted_batch_shape, *channels_shape, *target_shape).
     """
+    if second_order_differentiable:
+        return _interpolate_second_order_differentiable(volume, grid, mode, padding_mode)
     return _interpolate(volume, grid, mode, padding_mode)
 
 
@@ -74,7 +85,10 @@ def _match_grid_shape_to_dims(grid: Tensor) -> Tensor:
 
 
 @script
-def _interpolate(volume: Tensor, grid: Tensor, mode: str, padding_mode: str) -> Tensor:
+def _handle_interpolation_inputs(
+    volume: Tensor,
+    grid: Tensor,
+) -> Tuple[Tensor, Tensor, List[int], List[int]]:
     if grid.ndim == 1:
         grid = grid[None]
     n_dims = grid.size(1)
@@ -96,10 +110,38 @@ def _interpolate(volume: Tensor, grid: Tensor, mode: str, padding_mode: str) -> 
     )
     permuted_grid = normalized_grid.moveaxis(1, -1)
     permuted_volume, permuted_grid = _broadcast_batch_size(permuted_volume, permuted_grid)
+    return permuted_volume, permuted_grid, list(channel_shape), list(target_shape)
+
+
+@script
+def _interpolate(
+    volume: Tensor,
+    grid: Tensor,
+    mode: str,
+    padding_mode: str,
+) -> Tensor:
+    permuted_volume, permuted_grid, channel_shape, target_shape = _handle_interpolation_inputs(
+        volume, grid
+    )
     return grid_sample(
         input=permuted_volume,
         grid=permuted_grid,
         align_corners=True,
         mode=mode,
         padding_mode=padding_mode,
-    ).view((-1,) + channel_shape + target_shape)
+    ).view([-1] + channel_shape + target_shape)
+
+
+def _interpolate_second_order_differentiable(
+    volume: Tensor, grid: Tensor, mode: str, padding_mode: str
+) -> Tensor:
+    permuted_volume, permuted_grid, channel_shape, target_shape = _handle_interpolation_inputs(
+        volume, grid
+    )
+    return second_order_differentiable_grid_sample(
+        input=permuted_volume,
+        grid=permuted_grid,
+        align_corners=True,
+        mode=mode,
+        padding_mode=padding_mode,
+    ).view([-1] + channel_shape + target_shape)
