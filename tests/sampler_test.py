@@ -145,6 +145,9 @@ class _ShiftedLinearKernel(PiecewiseKernelDefinition):
         )
 
 
+DEVICE = torch_device("cpu")
+
+
 class InterpolatorTest(TestCase):
     """Tests for interpolators"""
 
@@ -152,6 +155,7 @@ class InterpolatorTest(TestCase):
         CountingLinearInterpolator(extrapolation_mode="border"),
         CountingLinearInterpolator(extrapolation_mode="zeros"),
         CountingLinearInterpolator(extrapolation_mode="reflection"),
+        CountingLinearInterpolator(extrapolation_mode="border", second_order_differentiable=True),
     ]
 
     NEAREST_INTERPOLATORS: List[ICountingInterpolator] = [
@@ -172,12 +176,10 @@ class InterpolatorTest(TestCase):
 
     def test_voxel_grid_consistency(self):
         """Test interpolator with a voxel grid"""
-        grid = voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        grid = voxel_grid(spatial_shape=(3, 4), dtype=float32, device=DEVICE)
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(
             test_volume,
             grid,
@@ -198,16 +200,14 @@ class InterpolatorTest(TestCase):
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
-                device=torch_device("cpu"),
+                device=DEVICE,
             )
             .translate_voxel(0.01)
             .grid
         )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(
             test_volume,
             grid,
@@ -228,16 +228,14 @@ class InterpolatorTest(TestCase):
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
-                device=torch_device("cpu"),
+                device=DEVICE,
             )
             .translate_voxel(-0.01)
             .grid
         )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(
             test_volume,
             grid,
@@ -251,13 +249,11 @@ class InterpolatorTest(TestCase):
             spatial_shape=(3, 4),
             voxel_size=(2.0, 2.0),
             dtype=float32,
-            device=torch_device("cpu"),
+            device=DEVICE,
         ).grid
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(
             test_volume,
             grid,
@@ -278,16 +274,14 @@ class InterpolatorTest(TestCase):
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
-                device=torch_device("cpu"),
+                device=DEVICE,
             )
             .translate_voxel(0.3)
             .grid
         )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
 
     def test_strided_and_shifted_grid_consistency_with_extrapolation(self):
@@ -297,16 +291,14 @@ class InterpolatorTest(TestCase):
                 spatial_shape=(3, 4),
                 voxel_size=(2.0, 2.0),
                 dtype=float32,
-                device=torch_device("cpu"),
+                device=DEVICE,
             )
             .translate_voxel(-2.49)
             .grid
         )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(
             test_volume, grid, self.INTERPOLATORS, require_conv_interpolation=False
         )
@@ -322,15 +314,12 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
-        grid = Affine(affine)(
-            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
-        )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        grid = Affine(affine)(voxel_grid(spatial_shape=(3, 4), dtype=float32, device=DEVICE))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
 
     def test_flipped_grid_consistency(self):
@@ -344,15 +333,12 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
-        grid = Affine(affine)(
-            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
-        )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        grid = Affine(affine)(voxel_grid(spatial_shape=(3, 4), dtype=float32, device=DEVICE))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
 
     def test_permuted_flipped_grid_consistency(self):
@@ -366,15 +352,12 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
-        grid = Affine(affine)(
-            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
-        )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        grid = Affine(affine)(voxel_grid(spatial_shape=(3, 4), dtype=float32, device=DEVICE))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
 
     def test_upsampling_consistency(self):
@@ -384,17 +367,15 @@ class InterpolatorTest(TestCase):
                 spatial_shape=(3, 4),
                 voxel_size=(1.0, 1.0),
                 dtype=float32,
-                device=torch_device("cpu"),
+                device=DEVICE,
             )
             .reformat(upsampling_factor=(3, 2))
             .translate_voxel(0.8)
             .grid
         )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(
             test_volume,
             grid,
@@ -409,17 +390,15 @@ class InterpolatorTest(TestCase):
                 spatial_shape=(8, 9),
                 voxel_size=(1.0, 1.0),
                 dtype=float32,
-                device=torch_device("cpu"),
+                device=DEVICE,
             )
             .reformat(upsampling_factor=(2, 3))
             .translate_world(-3)
             .grid
         )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(
             test_volume,
             grid,
@@ -438,27 +417,23 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
-        grid = Affine(affine)(
-            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
-        )
-        mask = ones((2, 1, 14, 15), dtype=float32, device=torch_device("cpu"))
+        grid = Affine(affine)(voxel_grid(spatial_shape=(3, 4), dtype=float32, device=DEVICE))
+        mask = ones((2, 1, 14, 15), dtype=float32, device=DEVICE)
         mask[:, :, 2:4] = 0.0
-        test_volume = mappable(
-            randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((2, 3, 14, 15), dtype=float32, device=DEVICE), mask=mask)
         self._test_grid_interpolation_consistency_with_inputs(test_volume, grid, self.INTERPOLATORS)
 
     def test_non_central_kernel_consistency(self):
         """Test consistency of non-central kernels with shifted linear kernel"""
         grids = [
-            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu")) + 5.2,
-            0.25 * voxel_grid(spatial_shape=(3, 4), dtype=float32, device=torch_device("cpu"))
-            + 5.2,
+            voxel_grid(spatial_shape=(3, 4), dtype=float32, device=DEVICE) + 5.2,
+            0.25 * voxel_grid(spatial_shape=(3, 4), dtype=float32, device=DEVICE) + 5.2,
         ]
         for grid in grids:
             test_volume = mappable(
-                randn((2, 3, 14, 15), dtype=float32, device=torch_device("cpu")),
+                randn((2, 3, 14, 15), dtype=float32, device=DEVICE),
             )
             non_central_sampler = SeparableSampler(
                 kernel=_ShiftedLinearKernel(),
@@ -492,6 +467,7 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
         affine_2 = HostAffineTransformation(
             transformation_matrix_on_host=tensor(
@@ -503,19 +479,14 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
-        grid_1 = Affine(affine_1)(
-            voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=torch_device("cpu"))
-        )
-        grid_2 = Affine(affine_2)(
-            voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=torch_device("cpu"))
-        )
+        grid_1 = Affine(affine_1)(voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=DEVICE))
+        grid_2 = Affine(affine_2)(voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=DEVICE))
         assert_close(grid_1.generate_values(), grid_2.generate_values(), check_layout=False)
-        mask = ones((1, 1, 15, 14, 13), dtype=float32, device=torch_device("cpu"))
+        mask = ones((1, 1, 15, 14, 13), dtype=float32, device=DEVICE)
         mask[:, :, 2:5] = 0.0
-        test_volume = mappable(
-            randn((1, 1, 15, 14, 13), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((1, 1, 15, 14, 13), dtype=float32, device=DEVICE), mask=mask)
         non_symmetric_sampler = SeparableSampler(
             kernel=_NonSymmetricKernel(),
             extrapolation_mode="border",
@@ -546,6 +517,7 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
         affine_2 = HostAffineTransformation(
             transformation_matrix_on_host=tensor(
@@ -557,19 +529,14 @@ class InterpolatorTest(TestCase):
                 ],
                 dtype=float32,
             ),
+            device=DEVICE,
         )
-        grid_1 = Affine(affine_1)(
-            voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=torch_device("cpu"))
-        )
-        grid_2 = Affine(affine_2)(
-            voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=torch_device("cpu"))
-        )
+        grid_1 = Affine(affine_1)(voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=DEVICE))
+        grid_2 = Affine(affine_2)(voxel_grid(spatial_shape=(1, 1, 1), dtype=float32, device=DEVICE))
         assert_close(grid_1.generate_values(), grid_2.generate_values(), check_layout=False)
-        mask = ones((1, 1, 15, 14, 13), dtype=float32, device=torch_device("cpu"))
+        mask = ones((1, 1, 15, 14, 13), dtype=float32, device=DEVICE)
         mask[:, :, 2:5] = 0.0
-        test_volume = mappable(
-            randn((1, 1, 15, 14, 13), dtype=float32, device=torch_device("cpu")), mask=mask
-        )
+        test_volume = mappable(randn((1, 1, 15, 14, 13), dtype=float32, device=DEVICE), mask=mask)
         non_symmetric_sampler = SeparableSampler(
             kernel=_NonSymmetricKernel(),
             extrapolation_mode="border",

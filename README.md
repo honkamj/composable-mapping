@@ -30,6 +30,7 @@ Install using pip by running the command
 - `PyTorch 2.0+`
 - `nibabel`
 - `matplotlib` (optional)
+- `ninja` (optional)
 
 ## Documentation
 

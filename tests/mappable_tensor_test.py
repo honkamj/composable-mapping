@@ -54,7 +54,7 @@ class GridDefinitionTest(TestCase):
             generated_grid_1, generated_grid_2, n_channel_dims=1
         )
         grid_sum_2 = generated_grid_1 + generated_grid_2
-        self.assertTrue(grid_sum_1.allclose(grid_sum_2))
+        assert_close(grid_sum_1, grid_sum_2)
 
 
 class MappableTensorTest(TestCase):

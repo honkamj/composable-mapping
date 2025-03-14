@@ -15,7 +15,7 @@ def concatenate_mappable_tensors(
     """Concatenate mappable tensors along the channel dimension
 
     Args:
-        mappable_tensors: Masked tensors to concatenate
+        mappable_tensors: Mappable tensors to concatenate
         channel_index: Index of the channel dimension starting from the first
             channel dimension over which to concatenate.
 

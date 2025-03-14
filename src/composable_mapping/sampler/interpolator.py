@@ -54,11 +54,15 @@ class LinearKernel(PiecewiseKernelDefinition):
 class LinearInterpolator(SeparableSampler):
     """Linear interpolation in voxel coordinates
 
-    For the arguments see `.separable_sampler.SeparableSampler`.
+    Arguments:
+        second_order_differentiable: If `True`, the interpolation is differentiable up to the second order.
+            if `False`, the interpolation is differentiable up to the first order.
+        **kwargs: See `.separable_sampler.SeparableSampler`.
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, second_order_differentiable: bool = False, **kwargs) -> None:
         super().__init__(kernel=LinearKernel(), **kwargs)
+        self._second_order_differentiable = second_order_differentiable
 
     def sample_values(
         self,
@@ -70,6 +74,7 @@ class LinearInterpolator(SeparableSampler):
             coordinates,
             mode="bilinear",
             padding_mode=self._extrapolation_mode,
+            second_order_differentiable=self._second_order_differentiable,
         )
 
     def sample_mask(
