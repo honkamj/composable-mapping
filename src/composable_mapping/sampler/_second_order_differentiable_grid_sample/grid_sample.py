@@ -1,6 +1,7 @@
 """Grid sample implementation that allows for second order differentiation."""
 
 import logging
+from os import environ
 
 from torch import Tensor
 
@@ -20,7 +21,10 @@ def grid_sample(
     padding_mode: str = "zeros",
 ) -> Tensor:
     """Grid sample with second order gradients."""
-    if input.device.type == "cuda":
+    if input.device.type == "cuda" or environ.get(
+        "ALWAYS_USE_NAIVE_SECOND_ORDER_DIFFERENTIABLE_GRID_SAMPLE",
+        False,  # Naive implementation allows for forward-mode AD and higher order derivatives than 2
+    ):
         if mode != "bilinear":
             raise ValueError("Only bilinear interpolation supports second order gradients")
         if padding_mode == "reflection":
