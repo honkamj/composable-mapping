@@ -23,7 +23,7 @@ def grid_sample(
     padding_mode: str = "zeros",
 ) -> Tensor:
     """Grid sample with second order gradients."""
-    if input.device.type == "cuda" or environ.get(
+    if input.device.type == "cuda" and not environ.get(
         "ALWAYS_USE_NAIVE_SECOND_ORDER_DIFFERENTIABLE_GRID_SAMPLE",
         False,  # Naive implementation allows for forward-mode AD and higher order derivatives than 2
     ):
