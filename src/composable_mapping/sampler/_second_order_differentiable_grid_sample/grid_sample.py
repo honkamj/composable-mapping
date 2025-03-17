@@ -12,6 +12,8 @@ from .naive_gridsample import grid_sample_3d as naive_grid_sample_3d
 
 logger = logging.getLogger(__name__)
 
+_NAIVE_IMPLEMENTATION_WARNED = False
+
 
 def grid_sample(
     input: Tensor,
@@ -44,10 +46,13 @@ def grid_sample(
         raise ValueError("Only border padding is supported for second order gradients on CPU.")
     if not align_corners:
         raise ValueError("Only align_corners=True is supported for second order gradients on CPU.")
-    logger.warning(
-        "Using naive grid sample implementation for second order gradients "
-        "on CPU. Consider using the CUDA implementation for better performance."
-    )
+    global _NAIVE_IMPLEMENTATION_WARNED
+    if not _NAIVE_IMPLEMENTATION_WARNED:
+        logger.warning(
+            "Using naive implementation for second order differentiable grid sample. "
+            "Consider using the CUDA implementation for better performance."
+        )
+        _NAIVE_IMPLEMENTATION_WARNED = True
     if grid.shape[-1] == 2:
         return naive_grid_sample_2d(input, grid)
     if grid.shape[-1] == 3:

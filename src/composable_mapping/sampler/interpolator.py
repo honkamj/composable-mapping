@@ -83,8 +83,8 @@ class LinearInterpolator(SeparableSampler):
         coordinates: Tensor,
     ) -> Tensor:
         interpolated_mask = interpolate(
-            volume=mask.to(coordinates.dtype),
-            grid=coordinates,
+            volume=mask.detach().to(coordinates.dtype),
+            grid=coordinates.detach(),
             mode="bilinear",
             padding_mode="zeros",
         )
@@ -143,8 +143,8 @@ class NearestInterpolator(SeparableSampler):
         coordinates: Tensor,
     ) -> Tensor:
         return interpolate(
-            volume=mask.to(coordinates.dtype),
-            grid=coordinates,
+            volume=mask.detach().to(coordinates.dtype),
+            grid=coordinates.detach(),
             mode="nearest",
             padding_mode="zeros",
         ).to(mask.dtype)
@@ -228,11 +228,11 @@ class BicubicInterpolator(SeparableSampler):
         batch_shape, channels_shape, spatial_shape = split_shape(
             mask.shape, n_channel_dims=n_channel_dims
         )
-        mask = mask.view(batch_shape + (1,) + spatial_shape).to(coordinates.dtype)
+        mask = mask.detach().view(batch_shape + (1,) + spatial_shape).to(coordinates.dtype)
         mask = _avg_pool_nd_function(n_spatial_dims)(mask, kernel_size=3, stride=1, padding=1) >= 1
         interpolated_mask = interpolate(
             volume=mask.to(coordinates.dtype),
-            grid=coordinates,
+            grid=coordinates.detach(),
             mode="bilinear",
             padding_mode="zeros",
         )

@@ -31,6 +31,29 @@ def permute_sequence(sequence: List[int], permutation: List[int]) -> List[int]:
 
 
 @script
+def _to_int_list(tensor: Tensor) -> List[int]:
+    output_list: List[int] = []
+    for element in tensor:
+        output_list.append(int(element))
+    return output_list
+
+
+@script
+def _to_float_list(tensor: Tensor) -> List[float]:
+    output_list: List[float] = []
+    for element in tensor:
+        output_list.append(float(element))
+    return output_list
+
+
+@script
+def _to_bool_list(tensor: Tensor) -> List[bool]:
+    output_list: List[bool] = []
+    for element in tensor:
+        output_list.append(bool(element))
+    return output_list
+
+
 def normalize_sampling_grid(
     grid_spatial_shape: List[int],
     grid_affine_matrix: Tensor,
@@ -56,13 +79,13 @@ def normalize_sampling_grid(
     inverse_permutation = grid_affine_matrix[0, :, :-1].abs().argmax(dim=0)
     if len(unique(inverse_permutation)) != n_dims:
         return None
-    inverse_permutation_list: List[int] = inverse_permutation.tolist()
+    inverse_permutation_list: List[int] = _to_int_list(inverse_permutation)
     flipped_spatial_dims: List[int] = []
     for column, largest_row in enumerate(inverse_permutation_list):
         if grid_affine_matrix[0, largest_row, column] < 0:
             flipped_spatial_dims.append(largest_row)
     permutation = inverse_permutation.argsort()
-    permutation_list: List[int] = permutation.tolist()
+    permutation_list: List[int] = _to_int_list(permutation)
 
     grid_affine_matrix = grid_affine_matrix[
         :, :, cat((permutation, permutation.new_full((1,), n_dims)), dim=0)
@@ -315,11 +338,11 @@ def calculate_convolutional_sampling_parameters(
         convolution_mask_tensor,
         transposed_convolution_mask_tensor,
     ) = conv_sampling_parameters
-    downsampling_factor: List[float] = downsampling_factor_tensor.tolist()
-    translation: List[float] = translation_tensor.tolist()
-    slicing_mask: List[bool] = slicing_mask_tensor.tolist()
-    convolution_mask: List[bool] = convolution_mask_tensor.tolist()
-    transposed_convolution_mask: List[bool] = transposed_convolution_mask_tensor.tolist()
+    downsampling_factor: List[float] = _to_float_list(downsampling_factor_tensor)
+    translation: List[float] = _to_float_list(translation_tensor)
+    slicing_mask: List[bool] = _to_bool_list(slicing_mask_tensor)
+    convolution_mask: List[bool] = _to_bool_list(convolution_mask_tensor)
+    transposed_convolution_mask: List[bool] = _to_bool_list(transposed_convolution_mask_tensor)
 
     pre_pads_or_crops: List[Tuple[int, int]] = []
     post_pads_or_crops: List[Tuple[int, int]] = []
@@ -456,7 +479,7 @@ def calculate_convolutional_sampling_parameters(
         .round()
         .long()
     )
-    conv_strides_list: List[int] = conv_strides.tolist()
+    conv_strides_list: List[int] = _to_int_list(conv_strides)
     return (
         conv_kernel_coordinates,
         conv_strides_list,
