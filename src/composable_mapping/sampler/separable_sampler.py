@@ -251,7 +251,6 @@ class SeparableSampler(ISampler):
 
     def _evaluate_kernel(self, spatial_dim: int, coordinates: Tensor) -> Tensor:
         limit_direction = self._limit_direction(spatial_dim)
-        output: Tensor = zeros_like(coordinates)
         edges = self._kernel.piece_edges(
             spatial_dim, dtype=coordinates.dtype, device=coordinates.device
         )
