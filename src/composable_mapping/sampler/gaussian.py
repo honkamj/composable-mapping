@@ -92,9 +92,7 @@ class GaussianKernel(PiecewiseKernelDefinition):
             std_dim = std
         else:
             std_dim = std[spatial_dim]
-        values = exp(-((coordinates - mean_dim) ** 2) / (2 * std_dim**2)) / (
-            std[spatial_dim] * sqrt(2 * pi)
-        )
+        values = exp(-((coordinates - mean_dim) ** 2) / (2 * std_dim**2)) / (std_dim * sqrt(2 * pi))
         if self._normalize_kernel:
             values = values / values.sum()
         return values
