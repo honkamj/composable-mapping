@@ -97,7 +97,7 @@ class GaussianKernel(PiecewiseKernelDefinition):
         )
         if self._normalize_kernel:
             values = values / values.sum()
-        return values[None]
+        return values
 
     def derivative(self, spatial_dim: int) -> PiecewiseKernelDefinition:
         if self._normalize_kernel:
