@@ -8,6 +8,7 @@ from .default import (
     get_sampler,
     set_default_sampler,
 )
+from .gaussian import GaussianSampler
 from .interface import DataFormat, ISampler, LimitDirection
 from .interpolator import BicubicInterpolator, LinearInterpolator, NearestInterpolator
 from .sampling_cache import clear_sampling_cache, no_sampling_cache, sampling_cache
@@ -23,6 +24,7 @@ __all__ = [
     "BicubicInterpolator",
     "CubicSplineSampler",
     "DataFormat",
+    "GaussianSampler",
     "ISampler",
     "LimitDirection",
     "LinearInterpolator",

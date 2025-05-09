@@ -118,8 +118,7 @@ class PiecewiseKernelDefinition(ABC):
 
         Returns:
             Edge points of the piecewise smooth kernel, Tensor with shape
-            (n_edges,), and a boolean tensor indicating whether the edge is
-            continuous.
+            (n_edges,).
         """
 
     @abstractmethod
