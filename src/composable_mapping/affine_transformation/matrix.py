@@ -58,6 +58,9 @@ def embed_matrix(matrix: Tensor, target_shape: Sequence[int]) -> Tensor:
     )
     n_rows_needed = target_shape[0] - channel_shape[0]
     n_cols_needed = target_shape[1] - channel_shape[1]
+    unsqueezing_tuple = (
+        (None,) * len(batch_dimensions_shape) + (...,) + (None,) * len(spatial_shape)
+    )
     if n_rows_needed == 0 and n_cols_needed == 0:
         return matrix
     rows = cat(
@@ -76,7 +79,7 @@ def embed_matrix(matrix: Tensor, target_shape: Sequence[int]) -> Tensor:
             ),
         ],
         dim=1,
-    ).expand(*batch_dimensions_shape, -1, -1, *spatial_shape)
+    )[unsqueezing_tuple].expand(*batch_dimensions_shape, -1, -1, *spatial_shape)
     cols = cat(
         [
             zeros(
@@ -93,7 +96,7 @@ def embed_matrix(matrix: Tensor, target_shape: Sequence[int]) -> Tensor:
             ),
         ],
         dim=0,
-    ).expand(*batch_dimensions_shape, -1, -1, *spatial_shape)
+    )[unsqueezing_tuple].expand(*batch_dimensions_shape, -1, -1, *spatial_shape)
     channel_dims = get_channel_dims(matrix.ndim, n_channel_dims=2)
     embedded_matrix = matrix
     if rows.numel() > 0:
