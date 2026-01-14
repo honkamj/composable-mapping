@@ -1,5 +1,8 @@
 # Composable mapping
 
+NOTE: This project is continuing under new name
+[TorchMorph](https://github.com/honkamj/TorchMorph).
+
 *Composable mapping* is a PyTorch utility library developed for handling
 coordinate mappings between images (2D or 3D), develped as part of SITReg, a
 deep learning intra-modality image registration arhitecture fulfilling strict

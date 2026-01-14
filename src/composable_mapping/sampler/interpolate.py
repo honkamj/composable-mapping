@@ -1,9 +1,8 @@
 """Dense deformations utility functions."""
 
-from importlib import import_module
 from typing import List, Optional, Tuple
 
-from torch import Tensor, tensor
+from torch import Tensor, cat, full
 from torch.jit import script
 from torch.nn.functional import grid_sample
 
@@ -46,14 +45,13 @@ def _convert_voxel_to_normalized_coordinates(
     n_dims = coordinates.size(channel_dim)
     inferred_volume_shape = coordinates.shape[-n_dims:] if volume_shape is None else volume_shape
     add_spatial_dims_view = (-1,) + n_spatial_dims * (1,)
-    volume_shape_tensor = (
-        tensor(
-            inferred_volume_shape,
-            dtype=coordinates.dtype,
-        )
-        .view(add_spatial_dims_view)
-        .to(device=coordinates.device, non_blocking=coordinates.device.type != "cpu")
-    )
+    # We create the shape tensor this to avoid CPU-GPU synchronization
+    volume_shape_tensor = cat(
+        [
+            full((1,), dim_size, device=coordinates.device, dtype=coordinates.dtype)
+            for dim_size in inferred_volume_shape
+        ]
+    ).view(add_spatial_dims_view)
     return coordinates / (volume_shape_tensor - 1) * 2 - 1
 
 

@@ -1,5 +1,8 @@
 # Composable mapping
 
+NOTE: This project is continuing under new name
+[TorchMorph](https://pypi.org/project/torchmorph).
+
 *Composable mapping* is a PyTorch utility library for handling geometric deformations, develped as part of SITReg, a deep learning intra-modality image registration arhitecture fulfilling strict symmetry properties.
 
 ## Installation

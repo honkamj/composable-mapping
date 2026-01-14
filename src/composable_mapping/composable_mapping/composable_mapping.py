@@ -18,7 +18,7 @@ from typing import (
 from torch import Tensor
 from torch import device as torch_device
 from torch import dtype as torch_dtype
-from torch import get_default_device, get_default_dtype
+from torch import get_default_dtype
 
 from composable_mapping.affine_transformation import IAffineTransformation
 from composable_mapping.interface import Number
@@ -543,7 +543,7 @@ class Identity(ComposableMapping):
     ) -> None:
         super().__init__()
         self._dtype = get_default_dtype() if dtype is None else dtype
-        self._device = get_default_device() if device is None else device
+        self._device = torch_device("cpu") if device is None else device
 
     @property
     def dtype(self) -> torch_dtype:

@@ -1,6 +1,7 @@
 """Grid sample implementation that allows for second order differentiation."""
 
 import logging
+from os import environ
 
 from torch import Tensor
 
@@ -11,6 +12,8 @@ from .naive_gridsample import grid_sample_3d as naive_grid_sample_3d
 
 logger = logging.getLogger(__name__)
 
+_NAIVE_IMPLEMENTATION_WARNED = False
+
 
 def grid_sample(
     input: Tensor,
@@ -20,7 +23,14 @@ def grid_sample(
     padding_mode: str = "zeros",
 ) -> Tensor:
     """Grid sample with second order gradients."""
-    if input.device.type == "cuda":
+    if (
+        input.device.type == "cuda"
+        and environ.get(
+            "ALWAYS_USE_NAIVE_SECOND_ORDER_DIFFERENTIABLE_GRID_SAMPLE",
+            "False",  # Naive implementation allows for forward-mode AD and higher order derivatives than 2
+        ).lower()
+        != "true"
+    ):
         if mode != "bilinear":
             raise ValueError("Only bilinear interpolation supports second order gradients")
         if padding_mode == "reflection":
@@ -40,10 +50,13 @@ def grid_sample(
         raise ValueError("Only border padding is supported for second order gradients on CPU.")
     if not align_corners:
         raise ValueError("Only align_corners=True is supported for second order gradients on CPU.")
-    logger.warning(
-        "Using naive grid sample implementation for second order gradients "
-        "on CPU. Consider using the CUDA implementation for better performance."
-    )
+    global _NAIVE_IMPLEMENTATION_WARNED
+    if not _NAIVE_IMPLEMENTATION_WARNED:
+        logger.warning(
+            "Using naive implementation for second order differentiable grid sample. "
+            "Consider using the CUDA implementation for better performance."
+        )
+        _NAIVE_IMPLEMENTATION_WARNED = True
     if grid.shape[-1] == 2:
         return naive_grid_sample_2d(input, grid)
     if grid.shape[-1] == 3:

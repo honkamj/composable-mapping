@@ -12,6 +12,7 @@ https://github.com/AliaksandrSiarohin/cuda-gridsample-grad2
 import torch
 
 
+@torch.jit.script
 def grid_sample_3d(image: torch.Tensor, optical: torch.Tensor) -> torch.Tensor:
     """Naive grid sample 3D implementation with padding_mode="border"."""
     N, C, ID, IH, IW = image.shape
@@ -69,37 +70,37 @@ def grid_sample_3d(image: torch.Tensor, optical: torch.Tensor) -> torch.Tensor:
 
     with torch.no_grad():
 
-        torch.clamp(ix_tnw, 0, IW - 1, out=ix_tnw)
-        torch.clamp(iy_tnw, 0, IH - 1, out=iy_tnw)
-        torch.clamp(iz_tnw, 0, ID - 1, out=iz_tnw)
+        ix_tnw = torch.clamp(ix_tnw, 0, IW - 1)
+        iy_tnw = torch.clamp(iy_tnw, 0, IH - 1)
+        iz_tnw = torch.clamp(iz_tnw, 0, ID - 1)
 
-        torch.clamp(ix_tne, 0, IW - 1, out=ix_tne)
-        torch.clamp(iy_tne, 0, IH - 1, out=iy_tne)
-        torch.clamp(iz_tne, 0, ID - 1, out=iz_tne)
+        ix_tne = torch.clamp(ix_tne, 0, IW - 1)
+        iy_tne = torch.clamp(iy_tne, 0, IH - 1)
+        iz_tne = torch.clamp(iz_tne, 0, ID - 1)
 
-        torch.clamp(ix_tsw, 0, IW - 1, out=ix_tsw)
-        torch.clamp(iy_tsw, 0, IH - 1, out=iy_tsw)
-        torch.clamp(iz_tsw, 0, ID - 1, out=iz_tsw)
+        ix_tsw = torch.clamp(ix_tsw, 0, IW - 1)
+        iy_tsw = torch.clamp(iy_tsw, 0, IH - 1)
+        iz_tsw = torch.clamp(iz_tsw, 0, ID - 1)
 
-        torch.clamp(ix_tse, 0, IW - 1, out=ix_tse)
-        torch.clamp(iy_tse, 0, IH - 1, out=iy_tse)
-        torch.clamp(iz_tse, 0, ID - 1, out=iz_tse)
+        ix_tse = torch.clamp(ix_tse, 0, IW - 1)
+        iy_tse = torch.clamp(iy_tse, 0, IH - 1)
+        iz_tse = torch.clamp(iz_tse, 0, ID - 1)
 
-        torch.clamp(ix_bnw, 0, IW - 1, out=ix_bnw)
-        torch.clamp(iy_bnw, 0, IH - 1, out=iy_bnw)
-        torch.clamp(iz_bnw, 0, ID - 1, out=iz_bnw)
+        ix_bnw = torch.clamp(ix_bnw, 0, IW - 1)
+        iy_bnw = torch.clamp(iy_bnw, 0, IH - 1)
+        iz_bnw = torch.clamp(iz_bnw, 0, ID - 1)
 
-        torch.clamp(ix_bne, 0, IW - 1, out=ix_bne)
-        torch.clamp(iy_bne, 0, IH - 1, out=iy_bne)
-        torch.clamp(iz_bne, 0, ID - 1, out=iz_bne)
+        ix_bne = torch.clamp(ix_bne, 0, IW - 1)
+        iy_bne = torch.clamp(iy_bne, 0, IH - 1)
+        iz_bne = torch.clamp(iz_bne, 0, ID - 1)
 
-        torch.clamp(ix_bsw, 0, IW - 1, out=ix_bsw)
-        torch.clamp(iy_bsw, 0, IH - 1, out=iy_bsw)
-        torch.clamp(iz_bsw, 0, ID - 1, out=iz_bsw)
+        ix_bsw = torch.clamp(ix_bsw, 0, IW - 1)
+        iy_bsw = torch.clamp(iy_bsw, 0, IH - 1)
+        iz_bsw = torch.clamp(iz_bsw, 0, ID - 1)
 
-        torch.clamp(ix_bse, 0, IW - 1, out=ix_bse)
-        torch.clamp(iy_bse, 0, IH - 1, out=iy_bse)
-        torch.clamp(iz_bse, 0, ID - 1, out=iz_bse)
+        ix_bse = torch.clamp(ix_bse, 0, IW - 1)
+        iy_bse = torch.clamp(iy_bse, 0, IH - 1)
+        iz_bse = torch.clamp(iz_bse, 0, ID - 1)
 
     image = image.reshape(N, C, ID * IH * IW)
 
@@ -158,6 +159,7 @@ def grid_sample_3d(image: torch.Tensor, optical: torch.Tensor) -> torch.Tensor:
     return out_val
 
 
+@torch.jit.script
 def grid_sample_2d(image: torch.Tensor, optical: torch.Tensor) -> torch.Tensor:
     """Naive grid sample 2D implementation with padding_mode="border"."""
     N, C, IH, IW = image.shape
@@ -184,17 +186,17 @@ def grid_sample_2d(image: torch.Tensor, optical: torch.Tensor) -> torch.Tensor:
     se = (ix - ix_nw) * (iy - iy_nw)
 
     with torch.no_grad():
-        torch.clamp(ix_nw, 0, IW - 1, out=ix_nw)
-        torch.clamp(iy_nw, 0, IH - 1, out=iy_nw)
+        ix_nw = torch.clamp(ix_nw, 0, IW - 1)
+        iy_nw = torch.clamp(iy_nw, 0, IH - 1)
 
-        torch.clamp(ix_ne, 0, IW - 1, out=ix_ne)
-        torch.clamp(iy_ne, 0, IH - 1, out=iy_ne)
+        ix_ne = torch.clamp(ix_ne, 0, IW - 1)
+        iy_ne = torch.clamp(iy_ne, 0, IH - 1)
 
-        torch.clamp(ix_sw, 0, IW - 1, out=ix_sw)
-        torch.clamp(iy_sw, 0, IH - 1, out=iy_sw)
+        ix_sw = torch.clamp(ix_sw, 0, IW - 1)
+        iy_sw = torch.clamp(iy_sw, 0, IH - 1)
 
-        torch.clamp(ix_se, 0, IW - 1, out=ix_se)
-        torch.clamp(iy_se, 0, IH - 1, out=iy_se)
+        ix_se = torch.clamp(ix_se, 0, IW - 1)
+        iy_se = torch.clamp(iy_se, 0, IH - 1)
 
     image = image.reshape(N, C, IH * IW)
 

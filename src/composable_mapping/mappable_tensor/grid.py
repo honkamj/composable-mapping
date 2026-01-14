@@ -173,7 +173,7 @@ class GridDefinition(TensorLike):
                 embedding_diagonal, device=self.device
             )
         return GridDefinition(
-            spatial_shape=spatial_shape,
+            spatial_shape=target_spatial_shape,
             affine_transformation=self.affine_transformation @ embedding_transformation,
         )
 
